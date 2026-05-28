@@ -130,7 +130,6 @@ const initializeEdgeDB = () => {
       let end_time = null;
 
       if (i === 3) {
-        status = 'OCCUPIed' as unknown; // 가끔 예시용 사용중 타석
         status = 'OCCUPIED';
         current_user_name = '홍길동';
         minutes_left = 42;
@@ -247,7 +246,7 @@ class HybridAPIClient {
           headers: { 'x-store-cd': STORE_CODE }
         });
         if (res.ok) {
-          const members = await res.json() as unknown[];
+          const members = await res.json() as Member[];
           // 검색 결과가 있는 경우 첫 번째 일치하는 회원 상세 반환
           if (members && members.length > 0) {
             const detailRes = await fetch(`${BASE_URL}/members/${members[0].member_no}`, {
