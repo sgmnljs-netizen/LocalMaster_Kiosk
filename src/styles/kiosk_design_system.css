@@ -1,0 +1,315 @@
+/* ==========================================================================
+   ⛳ LocalMaster Premium Kiosk Design System (HSL Neon Dark Theme)
+   ========================================================================== */
+
+:root {
+  /* Colors */
+  --bg-primary: #0a0c10;
+  --bg-secondary: #12161f;
+  --bg-tertiary: #19202e;
+  
+  --glass-bg: rgba(18, 22, 31, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-glow: rgba(99, 102, 241, 0.15);
+
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+
+  /* Neon Status Colors */
+  --neon-indigo: #6366f1;
+  --neon-indigo-glow: rgba(99, 102, 241, 0.4);
+  
+  --neon-green: #10b981;
+  --neon-green-glow: rgba(16, 185, 129, 0.4);
+
+  --neon-amber: #f59e0b;
+  --neon-amber-glow: rgba(245, 158, 11, 0.4);
+
+  --neon-red: #ef4444;
+  --neon-red-glow: rgba(239, 68, 68, 0.4);
+
+  --neon-cyan: #06b6d4;
+  --neon-cyan-glow: rgba(6, 182, 212, 0.4);
+
+  /* Fonts */
+  --font-primary: 'Outfit', 'Noto Sans KR', sans-serif;
+
+  /* Spacing (Data Density Optimized) */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+}
+
+/* Base resets */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+  overflow: hidden;
+  width: 1080px;
+  height: 1920px;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#root {
+  width: 1080px;
+  height: 1920px;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+}
+
+/* Glassmorphism Containers */
+.glass-panel {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(16px);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-panel-glow {
+  box-shadow: 0 0 20px var(--glass-glow), inset 0 0 10px rgba(255, 255, 255, 0.02);
+}
+
+.glass-panel-interactive:active {
+  transform: scale(0.98);
+  border-color: var(--neon-indigo);
+  box-shadow: 0 0 25px var(--neon-indigo-glow);
+}
+
+/* Kiosk Structure Grid */
+.kiosk-container {
+  width: 1080px;
+  height: 1920px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* Upper FHD Ad Area (16:9 Aspect Ratio) */
+.kiosk-ad-area {
+  width: 1080px;
+  height: 607.5px; /* 1080 * 9 / 16 */
+  background-color: #000;
+  position: relative;
+  overflow: hidden;
+  border-bottom: 2px solid var(--neon-indigo);
+  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.2);
+  z-index: 10;
+}
+
+/* Lower Operational Terminal Area */
+.kiosk-terminal-area {
+  width: 1080px;
+  height: 1312.5px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-lg);
+  position: relative;
+  background: radial-gradient(circle at 50% 30%, #151b26 0%, var(--bg-primary) 70%);
+}
+
+/* Neon Typography & Glowing */
+.glow-text-indigo { text-shadow: 0 0 10px var(--neon-indigo-glow); }
+.glow-text-green { text-shadow: 0 0 10px var(--neon-green-glow); }
+.glow-text-amber { text-shadow: 0 0 10px var(--neon-amber-glow); }
+.glow-text-red { text-shadow: 0 0 10px var(--neon-red-glow); }
+
+.neon-border-indigo { border-color: var(--neon-indigo); box-shadow: 0 0 10px var(--neon-indigo-glow); }
+.neon-border-green { border-color: var(--neon-green); box-shadow: 0 0 10px var(--neon-green-glow); }
+.neon-border-amber { border-color: var(--neon-amber); box-shadow: 0 0 10px var(--neon-amber-glow); }
+.neon-border-red { border-color: var(--neon-red); box-shadow: 0 0 10px var(--neon-red-glow); }
+
+/* Premium Buttons */
+.kiosk-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 20px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.kiosk-btn:active {
+  transform: scale(0.96);
+}
+
+.kiosk-btn-primary {
+  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+}
+
+.kiosk-btn-primary:active {
+  box-shadow: 0 0 30px var(--neon-indigo-glow);
+}
+
+.kiosk-btn-success {
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  border-color: rgba(16, 185, 129, 0.5);
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
+}
+
+.kiosk-btn-danger {
+  background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.3);
+}
+
+/* Grid System for Data Density */
+.compact-grid {
+  display: grid;
+  gap: var(--space-md);
+}
+
+/* Keypad (Tented Virtual Numbers) */
+.virtual-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-md);
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.keypad-btn {
+  height: 90px;
+  border-radius: 16px;
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  transition: all 0.1s ease;
+}
+
+.keypad-btn:active {
+  background: var(--neon-indigo);
+  transform: scale(0.94);
+  box-shadow: 0 0 15px var(--neon-indigo-glow);
+}
+
+/* Animations */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.animate-blink {
+  animation: blink 2s infinite ease-in-out;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 15px rgba(99, 102, 241, 0.2); }
+  50% { box-shadow: 0 0 30px rgba(99, 102, 241, 0.6); }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2.5s infinite ease-in-out;
+}
+
+/* IC Card insertion animation wrapper */
+.card-terminal-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  border-radius: 20px;
+  background: #0f121a;
+  border: 2px solid var(--bg-tertiary);
+}
+
+@keyframes card-slide {
+  0% { transform: translateY(120px); opacity: 0.4; }
+  50% { transform: translateY(-10px); opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.animate-card-slide {
+  animation: card-slide 1.5s cubic-bezier(0.16, 1, 0.3, 1) infinite alternate;
+}
+
+/* Thermal printer receipt out motion */
+@keyframes receipt-out {
+  0% { height: 0; opacity: 0; }
+  100% { height: 600px; opacity: 1; }
+}
+
+.receipt-paper {
+  background: #fff;
+  color: #000;
+  font-family: 'Courier New', Courier, monospace;
+  padding: var(--space-lg);
+  width: 380px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+  border-radius: 4px;
+  overflow: hidden;
+  animation: receipt-out 2.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Toast Message */
+.kiosk-toast {
+  position: absolute;
+  bottom: var(--space-xl);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(16, 185, 129, 0.95);
+  color: #fff;
+  padding: var(--space-md) var(--space-xl);
+  border-radius: 30px;
+  font-weight: 700;
+  font-size: 20px;
+  box-shadow: 0 10px 25px rgba(16, 185, 129, 0.4);
+  z-index: 1000;
+  border: 1px solid rgba(255,255,255,0.2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  animation: fadeInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeInUp {
+  from { transform: translate(-50%, 50px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
