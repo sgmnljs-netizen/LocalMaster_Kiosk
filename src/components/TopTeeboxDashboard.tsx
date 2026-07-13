@@ -148,17 +148,17 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
     <div 
       style={{
         width: '100%',
-        minHeight: '340px', // 여백 확보에 맞게 최소 높이 상향
+        minHeight: '420px', // 340px -> 420px로 키워 세로 1920px 화면에서의 볼륨감 확보
         height: 'auto',
-        background: '#fcfcfd', // 극도로 우아한 웜 화이트 백그라운드
+        background: '#fcfcfd', 
         borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
         display: 'flex',
         flexDirection: 'column',
-        padding: '30px 40px 48px 40px', // 상하좌우, 특히 하단 여백(48px)을 대폭 넓혀 호흡 확보
+        padding: '30px 40px 100px 40px', // 하단 패딩을 100px로 대폭 늘려 다음 컴포넌트와의 호흡 여백 확장!
         boxSizing: 'border-box',
         justifyContent: 'space-between',
         position: 'relative',
-        boxShadow: '0 8px 30px rgba(0, 0, 0, 0.03)' // 자연스럽고 우아하게 상하 공간을 나누는 섀도우
+        boxShadow: '0 8px 30px rgba(0, 0, 0, 0.03)' 
       }}
     >
       {/* 백그라운드 오로라 백릿 효과 (차분하고 은은한 미색 파스텔 광원) */}

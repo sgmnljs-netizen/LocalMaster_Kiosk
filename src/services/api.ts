@@ -8,7 +8,21 @@
 
 // 실제 백엔드 주소 (LocalMaster_Backend)
 const BASE_URL = 'http://localhost:8000/api'; 
-const STORE_CODE = 'H01-SE-001';
+export const STORE_CODE = 'H01-SE-001';
+
+export interface MemberAsset {
+  member_item_id: string;
+  item_name: string;
+  rem_count: number;
+}
+
+export interface KioskCompanionItem {
+  member_no?: string;
+  guest_nm?: string;
+  hp_no: string;
+  is_member: boolean;
+  use_ticket_id?: string;
+}
 
 export interface Member {
   member_no: string;
@@ -22,15 +36,21 @@ export interface Member {
   remain_days?: number;
   locker_no?: number | null;
   locker_expiry_date?: string | null;
+  assets?: MemberAsset[];
   face_registered?: boolean;
   face_vector_id?: string | null;
   store_cd?: string;
 }
 
+export interface KioskZone {
+  zone_code: string;
+  zone_name: string;
+}
+
 export interface Par3Slot {
   slot_id: string;
   time: string; // HH:MM
-  course_nm: 'EAST' | 'WEST' | 'COMPLEX';
+  course_nm: string;
   status: 'AVAILABLE' | 'RESERVED' | 'BLOCKED';
   current_party_size?: number;
 }
@@ -67,6 +87,7 @@ export interface Product {
   logic_type: 'MEMBERSHIP' | 'LESSON' | 'RETAIL' | 'FACILITY';
   duration_min?: number;
   days?: number;
+  res_id?: string;
 }
 
 // --------------------------------------------------------------------------
@@ -294,21 +315,12 @@ class HybridAPIClient {
     
     if (isConnected) {
       try {
-        // 백엔드 API 호출 시도
-        const cleanQuery = query.replace(/[^0-9]/g, ''); // 하이픈 제거
-        const res = await fetch(`${BASE_URL}/members?query=${encodeURIComponent(query)}`, {
-          headers: { 'x-store-cd': STORE_CODE }
-        });
+        // 백엔드 키오스크 전용 익명 회원 조회 API 호출 (/v1/kiosk/member 경로 매핑)
+        const res = await fetch(`${BASE_URL}/v1/kiosk/member?store_cd=${STORE_CODE}&query=${encodeURIComponent(query)}`);
         if (res.ok) {
-          const members = await res.json() as Member[];
-          // 검색 결과가 있는 경우 첫 번째 일치하는 회원 상세 반환
-          if (members && members.length > 0) {
-            const detailRes = await fetch(`${BASE_URL}/members/${members[0].member_no}`, {
-              headers: { 'x-store-cd': STORE_CODE }
-            });
-            if (detailRes.ok) {
-              return await detailRes.json() as Member;
-            }
+          const member = await res.json();
+          if (member) {
+            return member as Member;
           }
         }
       } catch (err) {
@@ -606,6 +618,17 @@ class HybridAPIClient {
 
   // 7. 상품 목록 가져오기
   async getProducts(): Promise<Product[]> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/products?store_cd=${STORE_CODE}`);
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (err) {
+        console.error('Failed to fetch kiosk products catalog:', err);
+      }
+    }
     return JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]') as Product[];
   }
 
@@ -855,41 +878,134 @@ class HybridAPIClient {
     return { success: false, message: '회원을 찾을 수 없습니다.' };
   }
 
+  // 14.5. 지점의 파3 구역(Zone) 목록 조회 API
+  async getKioskZones(): Promise<KioskZone[]> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/zones?store_cd=${STORE_CODE}`);
+        if (res.ok) {
+          return await res.json() as KioskZone[];
+        }
+      } catch (err) {
+        console.error('Backend getKioskZones failed. Falling back to default:', err);
+      }
+    }
+    // 오프라인 폴백: 기본 EAST/WEST 구역 리턴
+    return [
+      { zone_code: 'EAST', zone_name: '동코스 Par3 (9홀)' },
+      { zone_code: 'WEST', zone_name: '서코스 Par3 (9홀)' },
+      { zone_code: 'COMPLEX', zone_name: '복합코스 Par3 (18홀)' }
+    ];
+  }
+
   // 15. 파3 티오프 시간 슬롯 조회 API
-  async getPar3Slots(): Promise<Par3Slot[]> {
-    return JSON.parse(localStorage.getItem('LM_PAR3_SLOTS') || '[]') as Par3Slot[];
+  async getPar3Slots(zoneCode: string, date: string): Promise<Par3Slot[]> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/facilities/slots?store_cd=${STORE_CODE}&zone_code=${zoneCode}&date=${date}`);
+        if (res.ok) {
+          return await res.json() as Par3Slot[];
+        }
+      } catch (err) {
+        console.error('Backend getPar3Slots failed. Falling back to EdgeDB:', err);
+      }
+    }
+
+    // Edge DB 모드
+    const allSlots = JSON.parse(localStorage.getItem('LM_PAR3_SLOTS') || '[]') as Par3Slot[];
+    return allSlots.filter(s => s.course_nm === zoneCode || (zoneCode === 'EAST' && s.course_nm === 'EAST') || (zoneCode === 'WEST' && s.course_nm === 'WEST') || (zoneCode === 'COMPLEX' && s.course_nm === 'COMPLEX'));
   }
 
   // 16. 파3 코스 예약 처리 API
   async bookPar3Course(
-    slotId: string,
-    courseNm: string,
+    zoneCode: string,
+    resDate: string,
     timeStr: string,
-    partySize: number,
-    leaderName: string,
-    leaderHp: string,
-    memberNo?: string
-  ): Promise<{ success: boolean; message: string; bookingId?: string; price?: number }> {
+    amount: number,
+    leader: KioskCompanionItem,
+    companions: KioskCompanionItem[]
+  ): Promise<{ success: boolean; message: string; res_id?: string; price?: number }> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const cleanTime = timeStr.replace(':', '');
+        const res = await fetch(`${BASE_URL}/v1/kiosk/facilities/preoccupy?store_cd=${STORE_CODE}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-store-cd': STORE_CODE
+          },
+          body: JSON.stringify({
+            zone_code: zoneCode,
+            res_date: resDate,
+            slot_time: cleanTime,
+            amount: amount,
+            leader: leader,
+            companions: companions
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return {
+            success: data.success,
+            message: data.message,
+            res_id: data.res_id,
+            price: data.price
+          };
+        } else {
+          const data = await res.json();
+          return { success: false, message: data.detail || '예약 선점에 실패했습니다.' };
+        }
+      } catch (err) {
+        console.error('Backend preoccupy failed. Falling back to EdgeDB:', err);
+      }
+    }
+
+    // Edge DB 모드
     const slots = JSON.parse(localStorage.getItem('LM_PAR3_SLOTS') || '[]') as Par3Slot[];
-    const idx = slots.findIndex(s => s.slot_id === slotId);
+    const idx = slots.findIndex(s => s.course_nm === zoneCode && s.time === timeStr);
+    const partySize = 1 + companions.length;
 
     if (idx !== -1 && slots[idx].status === 'AVAILABLE') {
       slots[idx].status = 'RESERVED';
       slots[idx].current_party_size = partySize;
       localStorage.setItem('LM_PAR3_SLOTS', JSON.stringify(slots));
 
-      // 9홀 인당 25,000원, 복합 18홀 인당 45,000원
-      const unitPrice = courseNm === 'COMPLEX' ? 45000 : 25000;
-      const totalPrice = unitPrice * partySize;
-      const bookingId = `P3B-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      const bookingId = `R-HOLD-P3-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
-      await this.writeKioskLog('PAR3_RESERVATION', `파3 코스 예약 완료 (${courseNm} 코스, ${timeStr}, ${partySize}명)`, memberNo || undefined);
+      const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+      // 1. 대표자 Hold 추가
+      holds.push({
+        res_id: bookingId,
+        bay_no: 999,
+        duration_min: 60,
+        member_no: leader.member_no || null,
+        guest_nm: leader.guest_nm || "GUEST",
+        hp_no: leader.hp_no
+      });
+      // 2. 동반자 Hold들 추가
+      companions.forEach((c, cIdx) => {
+        holds.push({
+          res_id: `${bookingId}_M${cIdx + 1}`,
+          parent_res_id: bookingId,
+          bay_no: 999,
+          duration_min: 60,
+          member_no: c.member_no || null,
+          guest_nm: c.guest_nm || `동반자${cIdx + 1}`,
+          hp_no: c.hp_no
+        });
+      });
+      localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(holds));
+
+      await this.writeKioskLog('PAR3_RESERVATION', `파3 코스 예약 완료 (${zoneCode} 코스, ${timeStr}, ${partySize}명)`, leader.member_no || undefined);
 
       return {
         success: true,
         message: '파3 예약 선점이 완료되었습니다. 결제 단계로 이동합니다.',
-        bookingId,
-        price: totalPrice
+        res_id: bookingId,
+        price: amount
       };
     }
 
@@ -1066,6 +1182,22 @@ class HybridAPIClient {
     }
     
     return { success: false, message: '보류 예약 정보를 찾을 수 없습니다. (Edge DB)' };
+  }
+
+  // 18. 키오스크 전용 전시 카테고리 로드 API
+  async getKioskDisplayCategories(): Promise<any[]> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/display-categories?store_cd=${STORE_CODE}`);
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (err) {
+        console.error('Failed to fetch kiosk display categories:', err);
+      }
+    }
+    return []; // EdgeDB Fallback 시 빈 리스트
   }
 }
 
