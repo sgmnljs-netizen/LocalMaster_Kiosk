@@ -1,19 +1,36 @@
-import React, { useState } from 'react';
-import { Camera, Delete, Phone, QrCode, Search, User, X } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Camera, Delete, Phone, QrCode, Search, User, X, Sparkles } from 'lucide-react';
 import { api, Member } from '../services/api';
 
 interface MemberAuthProps {
+  initialAuthMode?: 'PHONE' | 'QR' | 'FACE';
   onAuthSuccess: (member: Member) => void;
   onCancel: () => void;
   onSignUpClick?: () => void;
+  onAuthError?: (code: string, detail: string) => void;
 }
 
-export const MemberAuth: React.FC<MemberAuthProps> = ({ onAuthSuccess, onCancel, onSignUpClick }) => {
-  const [authMode, setAuthMode] = useState<'PHONE' | 'QR'>('PHONE');
+export const MemberAuth: React.FC<MemberAuthProps> = ({ 
+  initialAuthMode = 'PHONE', 
+  onAuthSuccess, 
+  onCancel, 
+  onSignUpClick,
+  onAuthError
+}) => {
+  const [authMode, setAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>(initialAuthMode);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [qrSimulationResult, setQrSimulationResult] = useState<string | null>(null);
+  
+  // 안면 인식 관련 추가 상태
+  const [faceScanning, setFaceScanning] = useState(false);
+  const [faceMatchResult, setFaceMatchResult] = useState<Member | null>(null);
+
+  // 🛡️ 비동기 타이머 메모리 누수 방지용 refs
+  const faceScanTimeoutRef = useRef<any>(null);
+  const qrScanTimeoutRef = useRef<any>(null);
+  const authTimeoutRef = useRef<any>(null);
 
   // 휴대폰 번호 키패드 클릭 핸들러
   const handleNumClick = (num: string) => {
@@ -42,7 +59,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({ onAuthSuccess, onCancel,
   };
 
   // 회원 번호 조회 실행
-  const handleSearch = async () => {
+  const handleSearch = useCallback(async () => {
     if (phoneNumber.length < 9) {
       setErrorMsg('휴대폰 번호를 올바르게 입력해주세요.');
       return;
@@ -59,21 +76,29 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({ onAuthSuccess, onCancel,
         onAuthSuccess(member);
       } else {
         setErrorMsg('등록되지 않은 회원 정보입니다. 번호를 확인해주세요.');
+        if (onAuthError) {
+          onAuthError('ERR_MEMBER_NOT_FOUND', `${formatted} 휴대폰 번호로 등록된 회원 정보가 존재하지 않습니다.`);
+        }
       }
     } catch {
       setErrorMsg('서버와 통신하는 도중 오류가 발생했습니다.');
+      if (onAuthError) {
+        onAuthError('ERR_NETWORK_DISCONNECTED', '서버와 통신 중 장애가 발생하여 회원 조회를 완료할 수 없습니다.');
+      }
     } finally {
       setIsSearching(false);
     }
-  };
+  }, [phoneNumber, onAuthSuccess, onAuthError]);
 
   // QR 스캔 모사 핸들러 (테스트 시뮬레이션용)
-  const simulateQrScan = async (sampleQr: string) => {
+  const simulateQrScan = useCallback(async (sampleQr: string) => {
     setIsSearching(true);
     setErrorMsg('');
     setQrSimulationResult(sampleQr);
 
-    setTimeout(async () => {
+    if (qrScanTimeoutRef.current) clearTimeout(qrScanTimeoutRef.current);
+
+    qrScanTimeoutRef.current = setTimeout(async () => {
       try {
         const member = await api.getMember(sampleQr);
         if (member) {
@@ -81,15 +106,73 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({ onAuthSuccess, onCancel,
         } else {
           setErrorMsg('유효하지 않거나 만료된 QR 코드입니다.');
           setQrSimulationResult(null);
+          if (onAuthError) {
+            onAuthError('ERR_QR_EXPIRED', `QR코드 [${sampleQr}] 가 존재하지 않거나 유효시간이 초과되었습니다.`);
+          }
         }
       } catch {
         setErrorMsg('QR 인증 처리 중 서버 에러가 발생했습니다.');
         setQrSimulationResult(null);
+        if (onAuthError) {
+          onAuthError('ERR_NETWORK_DISCONNECTED', '네트워크 통신 불안정으로 QR 인증에 실패했습니다.');
+        }
       } finally {
         setIsSearching(false);
       }
     }, 1200); // 1.2초간 가상 스캔 딜레이 바디
-  };
+  }, [onAuthSuccess, onAuthError]);
+
+  // 안면 인식 트리거
+  const triggerFaceScan = useCallback(async () => {
+    setFaceScanning(true);
+    setFaceMatchResult(null);
+    setErrorMsg('');
+
+    if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
+
+    try {
+      const member = await api.scanFace();
+      if (member) {
+        setFaceMatchResult(member);
+        // 1초 후 로그인 처리 완료 통과
+        authTimeoutRef.current = setTimeout(() => {
+          onAuthSuccess(member);
+        }, 1200);
+      } else {
+        setErrorMsg('등록된 안면 정보가 일치하는 회원을 찾을 수 없습니다.');
+        setFaceScanning(false);
+        if (onAuthError) {
+          onAuthError('ERR_FACE_NOT_FOUND', '카메라 프레임 내 등록된 회원 정보와 부합하는 페이스 ID가 없습니다.');
+        }
+      }
+    } catch {
+      setErrorMsg('안면인식 장치 응답 지연이 발생했습니다.');
+      setFaceScanning(false);
+      if (onAuthError) {
+        onAuthError('ERR_HARDWARE_TIMEOUT', '안면인식 스캔 모듈로부터 데이터를 수신하는 데 실패했습니다. 응답 타임아웃.');
+      }
+    }
+  }, [onAuthSuccess, onAuthError]);
+
+  // 🛡️ 컴포넌트 언마운트 시 또는 authMode 전환 시 타이머 전면 클린업
+  useEffect(() => {
+    if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
+    if (qrScanTimeoutRef.current) clearTimeout(qrScanTimeoutRef.current);
+    if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+
+    if (authMode === 'FACE') {
+      triggerFaceScan();
+    } else {
+      setFaceScanning(false);
+      setFaceMatchResult(null);
+    }
+
+    return () => {
+      if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
+      if (qrScanTimeoutRef.current) clearTimeout(qrScanTimeoutRef.current);
+      if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+    };
+  }, [authMode, triggerFaceScan]);
 
   return (
     <div 
@@ -129,53 +212,74 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({ onAuthSuccess, onCancel,
       </div>
 
       {/* 인증 모드 전환 탭 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px' }}>
         <button
-          onClick={() => { setAuthMode('PHONE'); setErrorMsg(''); }}
+          onClick={() => { setAuthMode('FACE'); setErrorMsg(''); }}
           style={{
-            padding: '24px',
-            fontSize: '24px',
-            fontWeight: 800,
-            borderRadius: '16px',
+            padding: '20px',
+            fontSize: '20px',
+            fontWeight: 900,
+            borderRadius: '12px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '12px',
-            border: '1px solid',
+            gap: '10px',
+            border: '0.5px solid',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            color: authMode === 'FACE' ? '#fff' : 'var(--text-secondary)',
+            background: authMode === 'FACE' ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : 'var(--bg-secondary)',
+            borderColor: authMode === 'FACE' ? 'var(--neon-indigo)' : 'var(--glass-border)'
+          }}
+        >
+          <Camera size={22} />
+          안면 인식 인증
+        </button>
+
+        <button
+          onClick={() => { setAuthMode('PHONE'); setErrorMsg(''); }}
+          style={{
+            padding: '20px',
+            fontSize: '20px',
+            fontWeight: 900,
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '10px',
+            border: '0.5px solid',
             cursor: 'pointer',
             transition: 'all 0.2s ease',
             color: authMode === 'PHONE' ? '#fff' : 'var(--text-secondary)',
-            background: authMode === 'PHONE' ? 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)' : 'var(--bg-secondary)',
-            borderColor: authMode === 'PHONE' ? 'var(--neon-indigo)' : 'var(--glass-border)',
-            boxShadow: authMode === 'PHONE' ? '0 0 20px var(--neon-indigo-glow)' : 'none'
+            background: authMode === 'PHONE' ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : 'var(--bg-secondary)',
+            borderColor: authMode === 'PHONE' ? 'var(--neon-indigo)' : 'var(--glass-border)'
           }}
         >
-          <Phone size={24} />
+          <Phone size={22} />
           휴대폰 번호 입력
         </button>
 
         <button
           onClick={() => { setAuthMode('QR'); setErrorMsg(''); }}
           style={{
-            padding: '24px',
-            fontSize: '24px',
-            fontWeight: 800,
-            borderRadius: '16px',
+            padding: '20px',
+            fontSize: '20px',
+            fontWeight: 900,
+            borderRadius: '12px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '12px',
-            border: '1px solid',
+            gap: '10px',
+            border: '0.5px solid',
             cursor: 'pointer',
             transition: 'all 0.2s ease',
             color: authMode === 'QR' ? '#fff' : 'var(--text-secondary)',
-            background: authMode === 'QR' ? 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)' : 'var(--bg-secondary)',
-            borderColor: authMode === 'QR' ? 'var(--neon-indigo)' : 'var(--glass-border)',
-            boxShadow: authMode === 'QR' ? '0 0 20px var(--neon-indigo-glow)' : 'none'
+            background: authMode === 'QR' ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : 'var(--bg-secondary)',
+            borderColor: authMode === 'QR' ? 'var(--neon-indigo)' : 'var(--glass-border)'
           }}
         >
-          <QrCode size={24} />
-          QR 코드 리더 스캔
+          <QrCode size={22} />
+          QR 코드 스캔
         </button>
       </div>
 
@@ -184,7 +288,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({ onAuthSuccess, onCancel,
         <div 
           className="neon-border-red"
           style={{ 
-            background: 'rgba(239, 68, 68, 0.15)', 
+            background: 'rgba(239, 68, 68, 0.08)', 
             padding: '16px', 
             borderRadius: '12px', 
             textAlign: 'center',
@@ -194,6 +298,175 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({ onAuthSuccess, onCancel,
           }}
         >
           {errorMsg}
+        </div>
+      )}
+
+      {/* 0. 안면 인식 가상 카메라 패널 */}
+      {authMode === 'FACE' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', alignItems: 'center' }}>
+          {/* 가상 카메라 뷰 */}
+          <div 
+            style={{
+              width: '480px',
+              height: '360px',
+              background: '#040507',
+              borderRadius: '16px',
+              border: `0.5px solid ${faceMatchResult ? 'var(--neon-green)' : 'var(--theme-silver)'}`,
+              position: 'relative',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 30px rgba(0, 0, 0, 0.4)',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            {/* 가상 안면 감지 바운딩 박스 */}
+            <div 
+              className={faceScanning && !faceMatchResult ? 'animate-pulse' : ''}
+              style={{
+                width: '200px',
+                height: '200px',
+                border: `1.5px solid ${faceMatchResult ? 'var(--neon-green)' : 'var(--neon-indigo)'}`,
+                borderRadius: '50%',
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: faceMatchResult 
+                  ? '0 0 12px var(--neon-green-glow)' 
+                  : '0 0 8px var(--neon-indigo-glow)',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <Camera size={40} style={{ color: faceMatchResult ? 'var(--neon-green)' : 'var(--neon-indigo)', transition: 'all 0.2s ease' }} />
+              
+              {/* 안면 감지 스캔 라인 */}
+              {faceScanning && !faceMatchResult && (
+                <div 
+                  style={{
+                    position: 'absolute',
+                    width: '100%',
+                    height: '2px',
+                    backgroundColor: 'var(--neon-indigo)',
+                    boxShadow: '0 0 6px var(--neon-indigo-glow)',
+                    top: '10%',
+                    animation: 'face-scanner 2.2s infinite ease-in-out'
+                  }}
+                />
+              )}
+            </div>
+            
+            <p style={{ marginTop: '20px', fontSize: '18px', color: faceMatchResult ? 'var(--neon-green)' : 'var(--text-secondary)', fontWeight: 700 }}>
+              {faceMatchResult 
+                ? `${faceMatchResult.member_name} 님 인증 완료 (99.2% 일치)` 
+                : (faceScanning ? '얼굴 감지 중... 정면을 응시해 주세요.' : '카메라 정면에 서주세요')}
+            </p>
+
+            {/* 매치 결과 레이어 */}
+            {faceMatchResult && (
+              <div 
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  background: 'rgba(10, 12, 16, 0.95)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}
+              >
+                <Sparkles size={48} style={{ color: 'var(--neon-green)', filter: 'drop-shadow(0 0 8px var(--neon-green-glow))' }} />
+                <span style={{ fontSize: '22px', fontWeight: 900, color: 'var(--neon-green)' }}>안면 매칭 성공!</span>
+                <span style={{ fontSize: '18px', color: '#fff', fontWeight: 700 }}>{faceMatchResult.member_name} 회원 ({faceMatchResult.member_no})</span>
+              </div>
+            )}
+          </div>
+
+          {/* 재시도 버튼 */}
+          {!faceScanning && !faceMatchResult && (
+            <button
+              onClick={triggerFaceScan}
+              className="kiosk-btn kiosk-btn-primary"
+              style={{
+                width: '480px',
+                height: '64px',
+                borderRadius: '16px',
+                fontSize: '20px',
+                fontWeight: 800,
+                display: 'flex',
+                gap: '8px'
+              }}
+            >
+              <Camera size={22} />
+              다시 안면인식 시도
+            </button>
+          )}
+
+          {/* 시뮬레이터 테스트용 가상 회원 매칭 패널 */}
+          <div className="glass-panel" style={{ width: '480px', padding: '20px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <h4 style={{ fontSize: '16px', fontWeight: 800, marginBottom: '12px', textAlign: 'center', color: '#818cf8' }}>
+              [가상 안면 매칭 시뮬레이터 동작 제어]
+            </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button 
+                onClick={async () => {
+                  setFaceScanning(true);
+                  setErrorMsg('');
+                  setFaceMatchResult(null);
+                  setTimeout(async () => {
+                    const member = await api.getMember('M260501');
+                    if (member) {
+                      setFaceMatchResult(member);
+                      setTimeout(() => onAuthSuccess(member), 1200);
+                    }
+                  }, 1500);
+                }}
+                className="kiosk-btn" 
+                style={{ width: '100%', fontSize: '15px', padding: '10px', background: 'rgba(255,255,255,0.02)' }}
+              >
+                카메라에 '김골프' 얼굴 인식 모사 (정상 회원)
+              </button>
+              <button 
+                onClick={async () => {
+                  setFaceScanning(true);
+                  setErrorMsg('');
+                  setFaceMatchResult(null);
+                  setTimeout(async () => {
+                    const member = await api.getMember('M260502');
+                    if (member) {
+                      setFaceMatchResult(member);
+                      setTimeout(() => onAuthSuccess(member), 1200);
+                    }
+                  }, 1500);
+                }}
+                className="kiosk-btn" 
+                style={{ width: '100%', fontSize: '15px', padding: '10px', background: 'rgba(255,255,255,0.02)' }}
+              >
+                카메라에 '이프로' 얼굴 인식 모사 (VIP 회원)
+              </button>
+              <button 
+                onClick={async () => {
+                  setFaceScanning(true);
+                  setErrorMsg('');
+                  setFaceMatchResult(null);
+                  setTimeout(() => {
+                    setFaceScanning(false);
+                    setErrorMsg('미등록 안면 정보입니다. 회원가입 또는 휴대폰 번호 입력을 사용해주세요.');
+                  }, 1500);
+                }}
+                className="kiosk-btn" 
+                style={{ width: '100%', fontSize: '15px', padding: '10px', background: 'rgba(255,255,255,0.02)' }}
+              >
+                카메라에 '미등록' 얼굴 인식 모사 (인식 실패)
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -376,7 +649,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({ onAuthSuccess, onCancel,
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span style={{ fontSize: '18px', fontWeight: 800, color: '#fff' }}>아직 LocalMaster 회원이 아니신가요?</span>
+            <span style={{ fontSize: '18px', fontWeight: 800, color: '#fff' }}>아직 회원이 아니신가요?</span>
             <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
               휴대폰 번호와 이름만으로 30초 만에 즉시 가입하고 이용하실 수 있습니다.
             </p>

@@ -8,6 +8,8 @@ interface TeeboxMapProps {
   isMoveMode?: boolean; // 타석 이동 모드 여부
   onBaySelected: (bayNo: number) => void;
   onCancel: () => void;
+  bays: Bay[];
+  onRefreshBays: () => void;
 }
 
 export const TeeboxMap: React.FC<TeeboxMapProps> = ({
@@ -15,30 +17,15 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   memberName,
   isMoveMode = false,
   onBaySelected,
-  onCancel
+  onCancel,
+  bays,
+  onRefreshBays
 }) => {
   const [activeFloor, setActiveFloor] = useState<number>(1);
-  const [bays, setBays] = useState<Bay[]>([]);
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(null);
   const [preoccupyLoading, setPreoccupyLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [countdown, setCountdown] = useState<number>(60); // 선점 락 카운트다운 (1분)
-
-  // 타석 데이터 로드 및 3초 간격 실시간 폴링 (무인 실시간 감시)
-  const loadBays = async () => {
-    try {
-      const data = await api.getBays();
-      setBays(data);
-    } catch {
-      console.error('Failed to load bays');
-    }
-  };
-
-  useEffect(() => {
-    loadBays();
-    const interval = setInterval(loadBays, 3000);
-    return () => clearInterval(interval);
-  }, []);
 
   // 선점 락 제한시간 1초 간격 갱신
   useEffect(() => {
@@ -88,7 +75,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       setErrorMsg('타석 선점 중 오류가 발생했습니다.');
     } finally {
       setPreoccupyLoading(false);
-      loadBays(); // 즉시 상태 갱신
+      onRefreshBays(); // 즉시 상태 갱신
     }
   };
 
@@ -97,7 +84,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     if (selectedBayNo !== null) {
       await api.releaseBay(selectedBayNo);
       setSelectedBayNo(null);
-      loadBays();
+      onRefreshBays();
     }
   };
 

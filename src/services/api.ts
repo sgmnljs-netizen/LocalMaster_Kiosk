@@ -22,12 +22,24 @@ export interface Member {
   remain_days?: number;
   locker_no?: number | null;
   locker_expiry_date?: string | null;
+  face_registered?: boolean;
+  face_vector_id?: string | null;
+  store_cd?: string;
+}
+
+export interface Par3Slot {
+  slot_id: string;
+  time: string; // HH:MM
+  course_nm: 'EAST' | 'WEST' | 'COMPLEX';
+  status: 'AVAILABLE' | 'RESERVED' | 'BLOCKED';
+  current_party_size?: number;
 }
 
 export interface Bay {
   bay_id: number;
   bay_no: number;
   floor_no: number;
+  floor?: string; // 백엔드 실제 데이터 필드 (e.g. '1F', '2F')
   type: 'RIGHT' | 'LEFT'; // 우타, 좌타
   status: 'AVAILABLE' | 'PRE_OCCUPIED' | 'OCCUPIED' | 'UNDER_MAINTENANCE';
   current_user_name?: string | null;
@@ -73,7 +85,10 @@ const SEED_MEMBERS: Member[] = [
     expiry_date: '2026-06-25',
     remain_days: 30,
     locker_no: 8,
-    locker_expiry_date: '2026-06-25'
+    locker_expiry_date: '2026-06-25',
+    face_registered: true,
+    face_vector_id: 'FACE_KIMGOLF',
+    store_cd: 'H01-SE-001'
   },
   {
     member_no: 'M260502',
@@ -85,7 +100,10 @@ const SEED_MEMBERS: Member[] = [
     recent_product_nm: '일일 타석권 90분',
     expiry_date: null,
     remain_days: 0,
-    locker_no: null
+    locker_no: null,
+    face_registered: true,
+    face_vector_id: 'FACE_LEETRAN',
+    store_cd: 'H01-SE-001'
   },
   {
     member_no: 'M260503',
@@ -97,7 +115,10 @@ const SEED_MEMBERS: Member[] = [
     recent_product_nm: '1개월 주간 회원권',
     expiry_date: '2026-05-15', // 만료됨
     remain_days: -10,
-    locker_no: null
+    locker_no: null,
+    face_registered: false,
+    face_vector_id: null,
+    store_cd: 'H01-SE-001'
   }
 ];
 
@@ -184,6 +205,22 @@ const initializeEdgeDB = () => {
     // 5. Sales log
     localStorage.setItem('LM_SALES', JSON.stringify([]));
 
+    // 6. Par3 Slots 초기화
+    const slots: Par3Slot[] = [];
+    const now = new Date();
+    for (let i = 0; i < 15; i++) {
+      const slotTime = new Date(now.getTime() + (i + 1) * 20 * 60 * 1000);
+      const timeStr = `${String(slotTime.getHours()).padStart(2, '0')}:${String(slotTime.getMinutes()).padStart(2, '0')}`;
+      slots.push({
+        slot_id: `P3S-${i}`,
+        time: timeStr,
+        course_nm: i % 3 === 0 ? 'EAST' : (i % 3 === 1 ? 'WEST' : 'COMPLEX'),
+        status: i === 2 ? 'RESERVED' : 'AVAILABLE',
+        current_party_size: i === 2 ? 3 : 0
+      });
+    }
+    localStorage.setItem('LM_PAR3_SLOTS', JSON.stringify(slots));
+
     localStorage.setItem('LM_KIOSK_EDGEDB_INIT', 'true');
     console.log('⛳ LocalMaster Kiosk: Edge DB Initialized Successfully.');
   }
@@ -230,6 +267,23 @@ class HybridAPIClient {
     } catch {
       this.isOnline = false;
       return false;
+    }
+  }
+
+  // 가맹점 상호명 조회 (SGM Golf Academy 기본 매핑)
+  async getStoreName(): Promise<string> {
+    try {
+      const res = await fetch(`${BASE_URL}/store`, { 
+        method: 'GET',
+        headers: { 'x-store-cd': STORE_CODE }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.store_nm || 'SGM Golf Academy';
+      }
+      return 'SGM Golf Academy';
+    } catch {
+      return 'SGM Golf Academy';
     }
   }
 
@@ -687,7 +741,13 @@ class HybridAPIClient {
   }
 
   // 12. 키오스크 신규 회원 가입 (30초 즉석 회원가입)
-  async registerMember(name: string, hp: string, email: string): Promise<{ success: boolean; member?: Member; message: string }> {
+  async registerMember(
+    name: string, 
+    hp: string, 
+    email: string,
+    faceRegistered: boolean = false,
+    faceVectorId: string | null = null
+  ): Promise<{ success: boolean; member?: Member; message: string }> {
     const isConnected = await this.checkConnection();
     const cleanHp = hp.replace(/[^0-9]/g, '');
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -703,7 +763,10 @@ class HybridAPIClient {
       recent_product_nm: null,
       expiry_date: null,
       remain_days: 0,
-      locker_no: null
+      locker_no: null,
+      face_registered: faceRegistered,
+      face_vector_id: faceVectorId,
+      store_cd: STORE_CODE
     };
 
     if (isConnected) {
@@ -719,11 +782,16 @@ class HybridAPIClient {
             hp: hp,
             email: email,
             store_cd: STORE_CODE,
-            status_cd: '10'
+            status_cd: '10',
+            face_registered: faceRegistered,
+            face_vector_id: faceVectorId
           })
         });
         if (res.ok) {
-          const created = await res.ok ? await res.json() : newMember;
+          const created = await res.json();
+          created.face_registered = faceRegistered;
+          created.face_vector_id = faceVectorId;
+          created.store_cd = STORE_CODE;
           await this.writeKioskLog('MEMBER_REGISTER', `신규 회원 등록 성공 (백엔드): ${name} (${hp})`, created.member_no);
           return { success: true, member: created, message: '회원가입이 성공적으로 완료되었습니다.' };
         }
@@ -751,6 +819,81 @@ class HybridAPIClient {
       member: newMember, 
       message: '회원가입이 성공적으로 완료되었습니다. (Edge DB 저장)' 
     };
+  }
+
+  // 13. 가상 안면인식 스캔 API (테넌트 격리 필터 적용)
+  async scanFace(): Promise<Member | null> {
+    // 1.5초 딜레이 모사 (카메라 프레임 처리 속도)
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // 로컬스토리지에서 회원 목록 읽기
+    const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
+    // 테넌트 격리: 현재 단말 가맹점 코드(STORE_CODE)에 속하고 안면 등록이 활성화된 회원만 조회
+    const registeredMembers = members.filter(m => m.face_registered && m.store_cd === STORE_CODE);
+
+    if (registeredMembers.length === 0) return null;
+
+    // 등록된 회원 중 랜덤 반환 (김골프, 이프로 등)
+    const randomIndex = Math.floor(Math.random() * registeredMembers.length);
+    return registeredMembers[randomIndex];
+  }
+
+  // 14. 안면 정보 등록 API
+  async registerFace(memberNo: string, faceVectorId: string): Promise<{ success: boolean; message: string }> {
+    const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
+    const idx = members.findIndex(m => m.member_no === memberNo);
+
+    if (idx !== -1) {
+      members[idx].face_registered = true;
+      members[idx].face_vector_id = faceVectorId;
+      localStorage.setItem('LM_MEMBERS', JSON.stringify(members));
+      
+      await this.writeKioskLog('FACE_REGISTER', `안면 정보 등록 완료 (벡터ID: ${faceVectorId})`, memberNo);
+      return { success: true, message: '안면 정보가 성공적으로 등록되었습니다.' };
+    }
+
+    return { success: false, message: '회원을 찾을 수 없습니다.' };
+  }
+
+  // 15. 파3 티오프 시간 슬롯 조회 API
+  async getPar3Slots(): Promise<Par3Slot[]> {
+    return JSON.parse(localStorage.getItem('LM_PAR3_SLOTS') || '[]') as Par3Slot[];
+  }
+
+  // 16. 파3 코스 예약 처리 API
+  async bookPar3Course(
+    slotId: string,
+    courseNm: string,
+    timeStr: string,
+    partySize: number,
+    leaderName: string,
+    leaderHp: string,
+    memberNo?: string
+  ): Promise<{ success: boolean; message: string; bookingId?: string; price?: number }> {
+    const slots = JSON.parse(localStorage.getItem('LM_PAR3_SLOTS') || '[]') as Par3Slot[];
+    const idx = slots.findIndex(s => s.slot_id === slotId);
+
+    if (idx !== -1 && slots[idx].status === 'AVAILABLE') {
+      slots[idx].status = 'RESERVED';
+      slots[idx].current_party_size = partySize;
+      localStorage.setItem('LM_PAR3_SLOTS', JSON.stringify(slots));
+
+      // 9홀 인당 25,000원, 복합 18홀 인당 45,000원
+      const unitPrice = courseNm === 'COMPLEX' ? 45000 : 25000;
+      const totalPrice = unitPrice * partySize;
+      const bookingId = `P3B-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+
+      await this.writeKioskLog('PAR3_RESERVATION', `파3 코스 예약 완료 (${courseNm} 코스, ${timeStr}, ${partySize}명)`, memberNo || undefined);
+
+      return {
+        success: true,
+        message: '파3 예약 선점이 완료되었습니다. 결제 단계로 이동합니다.',
+        bookingId,
+        price: totalPrice
+      };
+    }
+
+    return { success: false, message: '이미 예약되었거나 선택할 수 없는 시간대입니다.' };
   }
 }
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { 
   ArrowLeftRight, Calendar, Compass, CreditCard, 
-  KeyRound, RefreshCw, LogOut, ShieldAlert, Sparkles, UserCheck 
+  KeyRound, RefreshCw, LogOut, ShieldAlert, Sparkles, UserCheck, UserPlus
 } from 'lucide-react';
 import { IntroScreen } from './components/IntroScreen';
 import { MemberAuth } from './components/MemberAuth';
@@ -10,16 +10,20 @@ import { TeeboxMap } from './components/TeeboxMap';
 import { ProductShop } from './components/ProductShop';
 import { LockerExtend } from './components/LockerExtend';
 import { PaymentTerminal } from './components/PaymentTerminal';
-import { api, Member, Product } from './services/api';
+import { Par3Allocation } from './components/Par3Allocation';
+import { TopTeeboxDashboard } from './components/TopTeeboxDashboard';
+import { api, Member, Product, Bay } from './services/api';
 
 type KioskStep = 
   | 'INTRO' 
   | 'MAIN_DASHBOARD' 
   | 'MEMBER_AUTH' 
   | 'MEMBER_REGISTER'
+  | 'PRACTICE_SELECT'
   | 'TEEBOX_MAP' 
   | 'PRODUCT_SHOP' 
-  | 'LOCKER_EXTEND' 
+  | 'LOCKER_EXTEND'
+  | 'PAR3_ALLOCATION'
   | 'PAYMENT';
 
 type KioskPurpose = 
@@ -27,23 +31,27 @@ type KioskPurpose =
   | 'ALLOCATE_MEMBERSHIP'  // 회원권 타석 배정
   | 'PURCHASE_PRODUCT'     // 회원권/일일권 구매
   | 'EXTEND_LOCKER'        // 라카 대여 및 연장
-  | 'MOVE_BAY';            // 사용 중인 타석 변경
+  | 'MOVE_BAY'             // 사용 중인 타석 변경
+  | 'BOOK_PAR3';           // 파3 연습 라운딩 예약
 
 // 🌐 글로벌 다국어 번역 딕셔너리 (i18n)
 const TRANSLATIONS = {
   KO: {
     welcome: '원하시는 서비스를 선택해 주세요',
     subWelcome: '터치 한 번으로 빠르게 회원인증 및 타석을 배정받으실 수 있습니다.',
-    memberAuth: '회원권 타석배정',
-    memberAuthSub: '보유 중인 회원 이용권(기간제/횟수제)으로 즉시 타석을 배정합니다.',
-    dailyAuth: '일일 타석배정',
-    dailyAuthSub: '비회원 및 일일타석권(60분/90분) 신규 결제 후 즉시 배정합니다.',
+    recommend: '가장 빠른 예약',
+    practiceTeebox: '연습타석배정',
+    practiceTeeboxSub: '보유 중인 회원 이용권(기간제/횟수제) 또는 일일 타석권을 배정받아 연습을 시작합니다.',
+    par3Course: '파3 코스배정',
+    par3CourseSub: '천연 잔디 파3 연습 라운딩 코스를 간편하게 예약하고 배정받습니다.',
+    purchaseMembership: '회원권 구매',
+    purchaseMembershipSub: '1개월/3개월 종일 회원권 등 정기 회원권을 신규 결제 구매합니다.',
     moveBay: '타석이동',
     moveBaySub: '현재 이용 중인 타석의 위치를 다른 비어있는 빈 타석으로 변경합니다.',
-    purchaseMembership: '회원권 정기 구매',
-    purchaseMembershipSub: '1개월/3개월 종일 회원권 등 정기 회원권을 신규 결제 구매합니다.',
-    lockerExtend: '개인 사물함 라카 대여 및 연장',
+    lockerExtend: '라카연장',
     lockerExtendSub: '이용 중인 라카의 만료 일정을 즉시 카드 결제하여 연장하거나 신규 사물함을 대여합니다.',
+    signUp: '회원가입',
+    signUpSub: '아직 회원이 아니신가요? 간편하게 신규 즉석 회원가입 후 혜택을 받아보세요.',
     exit: '종료',
     prev: '이전으로',
     confirm: '선택 완료',
@@ -54,16 +62,19 @@ const TRANSLATIONS = {
   EN: {
     welcome: 'Please select a service',
     subWelcome: 'Quickly authenticate and assign your teebox with a single touch.',
-    memberAuth: 'Member Teebox',
-    memberAuthSub: 'Assign your teebox instantly using your active membership Pass.',
-    dailyAuth: 'Daily Pass Teebox',
-    dailyAuthSub: 'Purchase a daily pass (60/90min) and get assigned a teebox immediately.',
-    moveBay: 'Change Teebox',
-    moveBaySub: 'Move your current teebox location to another vacant teebox space.',
-    purchaseMembership: 'Buy Membership',
+    recommend: 'FASTEST BOOKING',
+    practiceTeebox: 'Practice Teebox',
+    practiceTeeboxSub: 'Assign your teebox instantly using active membership Pass or Daily ticket.',
+    par3Course: 'Par-3 Course Booking',
+    par3CourseSub: 'Quickly reserve and get assigned for natural grass Par-3 practice roundings.',
+    purchaseMembership: 'Purchase Pass',
     purchaseMembershipSub: 'Purchase 1-month or 3-month full-day club memberships.',
-    lockerExtend: 'Locker Rental & Extension',
+    moveBay: 'Change Teebox',
+    moveBaySub: 'Move your current active teebox to another vacant teebox space.',
+    lockerExtend: 'Locker Extend',
     lockerExtendSub: 'Extend your locker expiration date or rent a new storage locker.',
+    signUp: 'Sign Up',
+    signUpSub: 'Not a member yet? Register easily on site to enjoy exclusive club benefits.',
     exit: 'Exit',
     prev: 'Back',
     confirm: 'Confirm',
@@ -77,6 +88,7 @@ export default function KioskApp() {
   const [step, setStep] = useState<KioskStep>('INTRO');
   const [purpose, setPurpose] = useState<KioskPurpose | null>(null);
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
+  const [initialAuthMode, setInitialAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>('PHONE');
 
   // 세션 정보
   const [authMember, setAuthMember] = useState<Member | null>(null);
@@ -87,6 +99,31 @@ export default function KioskApp() {
   // UI 상태
   const [toast, setToast] = useState<{ message: string; success: boolean } | null>(null);
   const [errorMasterCard, setErrorMasterCard] = useState<{ code: string; detail: string; traceId: string } | null>(null);
+  const [storeName, setStoreName] = useState<string>('SGM Golf Academy');
+
+  // 실시간 타석 데이터 상태
+  const [bays, setBays] = useState<Bay[]>([]);
+
+  const loadBays = async () => {
+    try {
+      const data = await api.getBays();
+      setBays(data);
+    } catch {
+      console.error('Failed to load bays');
+    }
+  };
+
+  // 0. 가맹점 상호명 동적 바인딩 및 실시간 타석 상태 로드
+  useEffect(() => {
+    const fetchStore = async () => {
+      const nm = await api.getStoreName();
+      setStoreName(nm);
+    };
+    fetchStore();
+    loadBays();
+    const interval = setInterval(loadBays, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   // 1. 토스트 알림 타이머 자동 제거
   useEffect(() => {
@@ -127,6 +164,10 @@ export default function KioskApp() {
     if (authMember) {
       api.writeKioskLog('SESSION_CLOSE', `${authMember.member_name} 회원 세션 정상 종료`, authMember.member_no);
     }
+    // 선점된 타석이 있다면 해제 (메모리 누수 방지)
+    if (selectedBayNo !== null) {
+      api.releaseBay(selectedBayNo).catch(console.error);
+    }
     setAuthMember(null);
     setSelectedBayNo(null);
     setSelectedLockerNo(null);
@@ -134,6 +175,36 @@ export default function KioskApp() {
     setPurpose(null);
     setErrorMasterCard(null);
     setStep('INTRO');
+  };
+
+  // 실시간 미니 모니터 타석 클릭 단축키
+  const handleMiniBayClick = async (bayNo: number) => {
+    showToast(lang === 'KO' ? `${bayNo}번 타석 선점 시도 중...` : `Securing teebox ${bayNo}...`);
+    try {
+      const success = await api.preoccupyBay(bayNo);
+      if (success) {
+        setSelectedBayNo(bayNo);
+        // 타석이 선점된 상태로 연습타석 분기 선택으로 직행
+        setStep('PRACTICE_SELECT');
+      } else {
+        showToast(lang === 'KO' ? '이미 다른 고객님께서 선택 중이거나 예약 불가능한 타석입니다.' : 'Failed to secure teebox.', false);
+      }
+    } catch {
+      showToast(lang === 'KO' ? '타석 선점 처리 중 오류가 발생했습니다.' : 'Failed to preoccupy teebox.', false);
+    }
+  };
+
+  // 메인 대시보드로 복귀 (세부 프로세스 중단 및 가상 락 정리)
+  const handleGoHome = () => {
+    if (selectedBayNo !== null) {
+      api.releaseBay(selectedBayNo).catch(console.error);
+    }
+    setSelectedBayNo(null);
+    setSelectedLockerNo(null);
+    setSelectedProduct(null);
+    setPurpose(null);
+    setErrorMasterCard(null);
+    setStep('MAIN_DASHBOARD');
   };
 
   const handleStartKiosk = () => {
@@ -305,74 +376,86 @@ export default function KioskApp() {
 
       {/* A. 인트로 광고 화면 단계 */}
       {step === 'INTRO' && (
-        <IntroScreen onStart={handleStartKiosk} />
+        <IntroScreen onStart={handleStartKiosk} storeName={storeName} />
       )}
 
       {/* B. 본격 조작 화면 템플릿 */}
       {step !== 'INTRO' && (
         <>
-          {/* FHD 광고 상단 롤링 (메인 기능 실행 중에도 FHD 광고는 24시간 돌아가서 고객 시선을 사로잡음) */}
-          <div className="kiosk-ad-area" style={{ height: '360px', borderBottom: '1px solid var(--glass-border)' }}>
-            <div
-              style={{
-                width: '100%',
-                height: '100%',
-                background: 'linear-gradient(to top, #0a0c10 0%, rgba(10,12,16,0.3) 100%), url(https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=1080&q=80) center/cover no-repeat',
-                display: 'flex',
-                alignItems: 'flex-end',
-                padding: '24px'
-              }}
-            >
-              <div>
-                <span style={{ color: 'var(--neon-indigo)', fontSize: '13px', fontWeight: 800, letterSpacing: '1px' }}>PREMIUM ACADEMY</span>
-                <h3 style={{ fontSize: '24px', fontWeight: 800, color: '#fff', marginTop: '4px' }}>LocalMaster 무인 골프 스튜디오</h3>
-              </div>
-            </div>
-          </div>
+          {/* step === 'MAIN_DASHBOARD' 일 때만 대형 실시간 타석 종합 전광판 노출 (기존 광고 영역 대체) */}
+          {step === 'MAIN_DASHBOARD' && (
+            <TopTeeboxDashboard bays={bays} onBayClick={handleMiniBayClick} lang={lang} />
+          )}
 
-          {/* 메인 기능 터미널 구역 */}
-          <div className="kiosk-terminal-area" style={{ height: '1560px', padding: '30px' }}>
+          {/* 메인 기능 터미널 구역 (대시보드일 때는 1560px, 나머지 단계일 때는 1920px 전체화면으로 가변 확장) */}
+          <div 
+            className="kiosk-terminal-area-luxury" 
+            style={{ 
+              height: step === 'MAIN_DASHBOARD' ? '1560px' : '1920px', 
+              padding: '30px',
+              transition: 'height 0.3s cubic-bezier(0.25, 1, 0.5, 1)'
+            }}
+          >
             
             {/* 최상단 지점 및 세션 네비게이션 헤더 */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <div 
-                style={{ cursor: 'pointer' }}
-                onClick={() => {
-                  if (confirm('메인 광고 화면으로 나가시겠습니까?')) {
-                    handleLogout();
-                  }
-                }}
-              >
-                <h1 style={{ fontSize: '32px', fontWeight: 900, color: '#fff' }}>
-                  Local<span style={{ color: 'var(--neon-indigo)', textShadow: '0 0 10px var(--neon-indigo-glow)' }}>Master</span>
-                </h1>
-              </div>
+              {step === 'MAIN_DASHBOARD' ? (
+                <div 
+                  style={{ cursor: 'pointer', width: '120px', height: '40px' }}
+                  onClick={() => {
+                    if (confirm('메인 광고 화면으로 나가시겠습니까?')) {
+                      handleLogout();
+                    }
+                  }}
+                />
+              ) : (
+                <div 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '10px', 
+                    cursor: 'pointer',
+                    padding: '8px 18px',
+                    borderRadius: '20px',
+                    background: 'rgba(0, 113, 227, 0.05)',
+                    border: '1px solid rgba(0, 113, 227, 0.15)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onClick={handleGoHome}
+                >
+                  <span style={{ fontSize: '18px', fontWeight: 900, color: '#0071e3' }}>◀</span>
+                  <span style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>
+                    {lang === 'KO' ? '처음으로' : 'Home'}
+                  </span>
+                </div>
+              )}
 
               {/* 현재 로그인 회원 카드 요약 */}
               {authMember ? (
                 <div 
                   className="glass-panel" 
                   style={{ 
-                    padding: '8px 20px', 
-                    borderRadius: '12px', 
+                    padding: '12px 24px', 
+                    borderRadius: '24px', 
                     display: 'flex', 
                     alignItems: 'center', 
                     gap: '12px',
-                    border: '1px solid var(--neon-indigo)'
+                    border: '1px solid rgba(52, 199, 89, 0.25)',
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.02)'
                   }}
                 >
-                  <UserCheck size={18} style={{ color: 'var(--neon-green)' }} />
+                  <UserCheck size={18} style={{ color: '#0071e3' }} />
                   <span style={{ fontSize: '16px', fontWeight: 700 }}>
-                    <strong style={{ color: 'var(--neon-green)' }}>{authMember.member_name}</strong> 회원님
+                    <strong style={{ color: '#0071e3' }}>{authMember.member_name}</strong> 회원님
                   </span>
                   <button 
                     onClick={handleLogout}
                     style={{
-                      background: 'rgba(239, 68, 68, 0.1)',
-                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      background: 'rgba(255, 59, 48, 0.08)',
+                      border: '0.5px solid rgba(255, 59, 48, 0.25)',
                       color: 'var(--neon-red)',
-                      padding: '4px 10px',
-                      borderRadius: '6px',
+                      padding: '6px 14px',
+                      borderRadius: '16px',
                       fontSize: '13px',
                       fontWeight: 700,
                       cursor: 'pointer',
@@ -388,19 +471,18 @@ export default function KioskApp() {
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                   {/* KO/EN 다국어 선택 탭 */}
-                  <div className="glass-panel" style={{ display: 'flex', padding: '4px', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--glass-border)' }}>
+                  <div className="glass-panel" style={{ display: 'flex', padding: '4px', borderRadius: '24px', background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
                     <button 
                       onClick={() => setLang('KO')}
                       style={{
-                        padding: '6px 14px',
+                        padding: '6px 16px',
                         fontSize: '14px',
                         fontWeight: 800,
                         border: 'none',
-                        borderRadius: '6px',
+                        borderRadius: '16px',
                         cursor: 'pointer',
-                        background: lang === 'KO' ? 'var(--neon-indigo)' : 'transparent',
+                        background: lang === 'KO' ? '#0071e3' : 'transparent',
                         color: lang === 'KO' ? '#fff' : 'var(--text-secondary)',
-                        boxShadow: lang === 'KO' ? '0 0 10px var(--neon-indigo-glow)' : 'none',
                         transition: 'all 0.15s ease'
                       }}
                     >
@@ -409,15 +491,14 @@ export default function KioskApp() {
                     <button 
                       onClick={() => setLang('EN')}
                       style={{
-                        padding: '6px 14px',
+                        padding: '6px 16px',
                         fontSize: '14px',
                         fontWeight: 800,
                         border: 'none',
-                        borderRadius: '6px',
+                        borderRadius: '16px',
                         cursor: 'pointer',
-                        background: lang === 'EN' ? 'var(--neon-indigo)' : 'transparent',
+                        background: lang === 'EN' ? '#0071e3' : 'transparent',
                         color: lang === 'EN' ? '#fff' : 'var(--text-secondary)',
-                        boxShadow: lang === 'EN' ? '0 0 10px var(--neon-indigo-glow)' : 'none',
                         transition: 'all 0.15s ease'
                       }}
                     >
@@ -482,7 +563,7 @@ export default function KioskApp() {
             )}
 
             {/* ----------------------------------------------------------------
-                📥 STEP 1: 메인 메뉴 대시보드 (Data Density 최적화 다단 컬럼)
+                📥 STEP 1: 메인 메뉴 대시보드 (Premium Bento Box - Apple Light Theme)
                 ---------------------------------------------------------------- */}
             {step === 'MAIN_DASHBOARD' && (
               <div 
@@ -497,7 +578,7 @@ export default function KioskApp() {
               >
                 {/* 웰컴 배너 */}
                 <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                  <h2 style={{ fontSize: '38px', fontWeight: 900, color: '#fff', marginBottom: '8px' }}>
+                  <h2 style={{ fontSize: '38px', fontWeight: 900, color: '#1d1d1f', marginBottom: '8px' }}>
                     {TRANSLATIONS[lang].welcome}
                   </h2>
                   <p style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>
@@ -505,185 +586,214 @@ export default function KioskApp() {
                   </p>
                 </div>
 
-                {/* 메뉴 다단 컬럼 (2단 Grid 배치 - Data Density 확보) */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '30px' }}>
+                {/* 🎨 Premium Bento Box 레이아웃 (Apple-style Light Theme) */}
+                <div 
+                  style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    gap: '24px',
+                    padding: '0 20px'
+                  }}
+                >
                   
-                  {/* 메뉴 1. 회원권 타석 배정 */}
+                  {/* Row 1: 연습타석배정 (최상단 메인 히어로 카드 - 와이드) */}
                   <div
                     onClick={() => {
-                      setPurpose('ALLOCATE_MEMBERSHIP');
-                      if (authMember) {
-                        setStep('TEEBOX_MAP');
-                      } else {
-                        setStep('MEMBER_AUTH');
-                      }
+                      setStep('PRACTICE_SELECT');
                     }}
-                    className="glass-panel glass-panel-glow glass-panel-interactive"
+                    className="premium-glass-card"
                     style={{
-                      height: '240px',
-                      padding: '30px',
-                      borderRadius: '24px',
+                      width: '100%',
+                      height: '280px',
+                      padding: '40px',
+                      borderRadius: '32px',
                       cursor: 'pointer',
-                      border: '1.5px solid rgba(99, 102, 241, 0.25)',
-                      background: 'rgba(99, 102, 241, 0.03)',
+                      backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.45)), linear-gradient(135deg, rgba(52, 199, 89, 0.15) 0%, rgba(0, 0, 0, 0.02) 100%)',
                       display: 'flex',
                       flexDirection: 'column',
-                      justifyContent: 'space-between'
+                      justifyContent: 'space-between',
+                      border: '1px solid rgba(52, 199, 89, 0.25)'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <Compass size={40} style={{ color: 'var(--neon-indigo)' }} />
-                      <span style={{ fontSize: '13px', fontWeight: 900, background: 'var(--neon-indigo)', color: '#fff', padding: '3px 10px', borderRadius: '10px', letterSpacing: '1px' }}>
-                        {TRANSLATIONS[lang].popular}
+                      <Sparkles size={48} style={{ color: '#34c759' }} />
+                      <span style={{ fontSize: '14px', fontWeight: 900, background: 'rgba(52,199,89,0.08)', color: '#34c759', padding: '6px 14px', borderRadius: '20px', letterSpacing: '1px', border: '1px solid rgba(52,199,89,0.2)' }}>
+                        {TRANSLATIONS[lang].recommend}
                       </span>
                     </div>
                     <div>
-                      <h3 style={{ fontSize: '26px', fontWeight: 900, color: '#fff', marginBottom: '8px' }}>
-                        {TRANSLATIONS[lang].memberAuth}
+                      <h3 style={{ fontSize: '42px', fontWeight: 900, color: '#1d1d1f', marginBottom: '12px', letterSpacing: '-0.5px' }}>
+                        {TRANSLATIONS[lang].practiceTeebox}
                       </h3>
-                      <p style={{ fontSize: '16px', color: 'var(--text-secondary)' }}>
-                        {TRANSLATIONS[lang].memberAuthSub}
+                      <p style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 500, lineHeight: 1.5 }}>
+                        {TRANSLATIONS[lang].practiceTeeboxSub}
                       </p>
                     </div>
                   </div>
 
-                  {/* 메뉴 2. 일일타석권 타석 배정 */}
-                  <div
-                    onClick={() => {
-                      setPurpose('ALLOCATE_DAILY');
-                      setStep('TEEBOX_MAP'); // 일일권은 타석을 먼저 선점한 뒤 구매 진행
-                    }}
-                    className="glass-panel glass-panel-glow glass-panel-interactive"
-                    style={{
-                      height: '240px',
-                      padding: '30px',
-                      borderRadius: '24px',
-                      cursor: 'pointer',
-                      border: '1.5px solid rgba(16, 185, 129, 0.25)',
-                      background: 'rgba(16, 185, 129, 0.03)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <CreditCard size={40} style={{ color: 'var(--neon-green)' }} />
-                      <span style={{ fontSize: '13px', fontWeight: 900, background: 'var(--neon-green)', color: '#fff', padding: '3px 10px', borderRadius: '10px', letterSpacing: '1px' }}>
-                        {TRANSLATIONS[lang].guestAllowed}
-                      </span>
+                  {/* Row 2: 파3배정 & 회원권 구매 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                    {/* 파3배정 */}
+                    <div
+                      onClick={() => {
+                        setPurpose('BOOK_PAR3');
+                        setStep('PAR3_ALLOCATION');
+                      }}
+                      className="premium-glass-card"
+                      style={{
+                        height: '240px',
+                        padding: '36px',
+                        borderRadius: '32px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <Calendar size={42} style={{ color: '#0071e3' }} />
+                      <div>
+                        <h3 style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', marginBottom: '10px', letterSpacing: '-0.5px' }}>
+                          {TRANSLATIONS[lang].par3Course}
+                        </h3>
+                        <p style={{ fontSize: '16px', color: 'var(--text-secondary)', fontWeight: 500, lineHeight: 1.4 }}>
+                          {TRANSLATIONS[lang].par3CourseSub}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 style={{ fontSize: '26px', fontWeight: 900, color: '#fff', marginBottom: '8px' }}>
-                        {TRANSLATIONS[lang].dailyAuth}
-                      </h3>
-                      <p style={{ fontSize: '16px', color: 'var(--text-secondary)' }}>
-                        {TRANSLATIONS[lang].dailyAuthSub}
-                      </p>
+
+                    {/* 회원권 구매 */}
+                    <div
+                      onClick={() => {
+                        setPurpose('PURCHASE_PRODUCT');
+                        setInitialAuthMode('PHONE');
+                        if (authMember) {
+                          setStep('PRODUCT_SHOP');
+                        } else {
+                          setStep('MEMBER_AUTH');
+                        }
+                      }}
+                      className="premium-glass-card"
+                      style={{
+                        height: '240px',
+                        padding: '36px',
+                        borderRadius: '32px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <Compass size={42} style={{ color: '#0071e3' }} />
+                      <div>
+                        <h3 style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', marginBottom: '10px', letterSpacing: '-0.5px' }}>
+                          {TRANSLATIONS[lang].purchaseMembership}
+                        </h3>
+                        <p style={{ fontSize: '16px', color: 'var(--text-secondary)', fontWeight: 500, lineHeight: 1.4 }}>
+                          {TRANSLATIONS[lang].purchaseMembershipSub}
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-                  {/* 메뉴 3. 타석 이동 */}
-                  <div
-                    onClick={() => {
-                      setPurpose('MOVE_BAY');
-                      if (authMember) {
-                        setStep('TEEBOX_MAP');
-                      } else {
-                        setStep('MEMBER_AUTH');
-                      }
-                    }}
-                    className="glass-panel glass-panel-glow glass-panel-interactive"
-                    style={{
-                      height: '220px',
-                      padding: '30px',
-                      borderRadius: '24px',
-                      cursor: 'pointer',
-                      border: '1px solid rgba(6, 182, 212, 0.25)',
-                      background: 'rgba(6, 182, 212, 0.03)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between'
-                    }}
-                  >
-                    <ArrowLeftRight size={36} style={{ color: 'var(--neon-cyan)' }} />
-                    <div>
-                      <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#fff', marginBottom: '6px' }}>
-                        {TRANSLATIONS[lang].moveBay}
-                      </h3>
-                      <p style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
-                        {TRANSLATIONS[lang].moveBaySub}
-                      </p>
+                  {/* Row 3: 타석이동 & 라카 연장 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                    {/* 타석이동 */}
+                    <div
+                      onClick={() => {
+                        setPurpose('MOVE_BAY');
+                        setInitialAuthMode('PHONE');
+                        if (authMember) {
+                          setStep('TEEBOX_MAP');
+                        } else {
+                          setStep('MEMBER_AUTH');
+                        }
+                      }}
+                      className="premium-glass-card"
+                      style={{
+                        height: '200px',
+                        padding: '32px',
+                        borderRadius: '32px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <ArrowLeftRight size={38} style={{ color: '#0071e3' }} />
+                      </div>
+                      <div>
+                        <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', marginBottom: '8px' }}>
+                          {TRANSLATIONS[lang].moveBay}
+                        </h3>
+                        <p style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
+                          {TRANSLATIONS[lang].moveBaySub}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 라카 연장 */}
+                    <div
+                      onClick={() => {
+                        setPurpose('EXTEND_LOCKER');
+                        setInitialAuthMode('PHONE');
+                        if (authMember) {
+                          setStep('LOCKER_EXTEND');
+                        } else {
+                          setStep('MEMBER_AUTH');
+                        }
+                      }}
+                      className="premium-glass-card"
+                      style={{
+                        height: '200px',
+                        padding: '32px',
+                        borderRadius: '32px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <KeyRound size={38} style={{ color: '#0071e3' }} />
+                      </div>
+                      <div>
+                        <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', marginBottom: '8px' }}>
+                          {TRANSLATIONS[lang].lockerExtend}
+                        </h3>
+                        <p style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
+                          {TRANSLATIONS[lang].lockerExtendSub}
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-                  {/* 메뉴 4. 회원권 및 상품 구매 */}
+                  {/* Row 4: 회원가입 (와이드 배너) */}
                   <div
                     onClick={() => {
-                      setPurpose('PURCHASE_PRODUCT');
-                      if (authMember) {
-                        setStep('PRODUCT_SHOP');
-                      } else {
-                        setStep('MEMBER_AUTH');
-                      }
+                      setStep('MEMBER_REGISTER');
                     }}
-                    className="glass-panel glass-panel-glow glass-panel-interactive"
+                    className="premium-glass-card"
                     style={{
-                      height: '220px',
-                      padding: '30px',
-                      borderRadius: '24px',
-                      cursor: 'pointer',
-                      border: '1px solid rgba(245, 158, 11, 0.25)',
-                      background: 'rgba(245, 158, 11, 0.03)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between'
-                    }}
-                  >
-                    <Calendar size={36} style={{ color: 'var(--neon-amber)' }} />
-                    <div>
-                      <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#fff', marginBottom: '6px' }}>
-                        {TRANSLATIONS[lang].purchaseMembership}
-                      </h3>
-                      <p style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
-                        {TRANSLATIONS[lang].purchaseMembershipSub}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* 메뉴 5. 라카 대여 및 연장 (하단 전체 너비 다단 통합형) */}
-                  <div
-                    onClick={() => {
-                      setPurpose('EXTEND_LOCKER');
-                      if (authMember) {
-                        setStep('LOCKER_EXTEND');
-                      } else {
-                        setStep('MEMBER_AUTH');
-                      }
-                    }}
-                    className="glass-panel glass-panel-glow glass-panel-interactive"
-                    style={{
-                      gridColumn: 'span 2',
+                      width: '100%',
                       height: '140px',
-                      padding: '24px 30px',
-                      borderRadius: '20px',
+                      padding: '32px 40px',
+                      borderRadius: '32px',
                       cursor: 'pointer',
-                      border: '1px solid var(--glass-border)',
-                      background: 'rgba(255, 255, 255, 0.01)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between'
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                      <KeyRound size={36} style={{ color: '#818cf8' }} />
-                      <div>
-                        <h3 style={{ fontSize: '22px', fontWeight: 800, color: '#fff' }}>개인 사물함 라카 대여 및 연장</h3>
-                        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                          이용 중인 라카의 만료 일정을 즉시 카드 결제하여 연장하거나 신규 사물함을 대여합니다.
-                        </p>
-                      </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f' }}>
+                        {TRANSLATIONS[lang].signUp}
+                      </h3>
+                      <p style={{ fontSize: '16px', color: 'var(--text-secondary)' }}>
+                        {TRANSLATIONS[lang].signUpSub}
+                      </p>
                     </div>
-                    <span style={{ fontSize: '16px', fontWeight: 700, color: '#818cf8' }}>바로가기 &gt;</span>
+                    <UserPlus size={42} style={{ color: '#34c759', padding: '8px', background: 'rgba(52, 199, 89, 0.08)', borderRadius: '16px' }} />
                   </div>
 
                 </div>
@@ -691,13 +801,24 @@ export default function KioskApp() {
             )}
 
             {/* ----------------------------------------------------------------
-                📥 STEP 2: 회원인증 (폰번호 / QR 스캔)
+                📥 STEP 2: 회원인증 (안면 / 폰번호 / QR 스캔)
                 ---------------------------------------------------------------- */}
             {step === 'MEMBER_AUTH' && (
               <MemberAuth
+                initialAuthMode={initialAuthMode}
                 onAuthSuccess={handleAuthSuccess}
                 onCancel={handleLogout}
                 onSignUpClick={() => setStep('MEMBER_REGISTER')}
+                onAuthError={(code, detail) => {
+                  const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
+                  setErrorMasterCard({
+                    code,
+                    detail,
+                    traceId: trace
+                  });
+                  api.writeKioskLog('AUTH_ERROR', `${detail} (Trace ID: ${trace})`);
+                  setStep('MAIN_DASHBOARD');
+                }}
               />
             )}
 
@@ -721,6 +842,8 @@ export default function KioskApp() {
                 isMoveMode={purpose === 'MOVE_BAY'}
                 onBaySelected={handleBaySelected}
                 onCancel={handleLogout}
+                bays={bays}
+                onRefreshBays={loadBays}
               />
             )}
 
@@ -744,6 +867,21 @@ export default function KioskApp() {
                 memberNo={authMember.member_no}
                 memberName={authMember.member_name}
                 onLockerPaymentTriggered={handleLockerPaymentTriggered}
+                onCancel={handleLogout}
+              />
+            )}
+
+            {/* ----------------------------------------------------------------
+                📥 STEP 5.5: 파3 골프 라운딩 배정 및 예약
+                ---------------------------------------------------------------- */}
+            {step === 'PAR3_ALLOCATION' && (
+              <Par3Allocation
+                memberNo={authMember?.member_no}
+                memberName={authMember?.member_name}
+                onBookingSelected={(prod) => {
+                  setSelectedProduct(prod);
+                  setStep('PAYMENT');
+                }}
                 onCancel={handleLogout}
               />
             )}

@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { Play, ShieldAlert, Sparkles, Tv } from 'lucide-react';
+import { ChevronRight, Hand, Play, ShieldAlert, Sparkles, Tv } from 'lucide-react';
 import { api } from '../services/api';
 
 interface IntroScreenProps {
   onStart: () => void;
+  storeName: string;
 }
 
 const ADS = [
   {
     type: 'image',
     url: 'https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=1080&q=80',
-    title: 'LocalMaster Premium Golf Club',
+    title: 'PREMIUM GOLF CLUB',
     subtitle: '국내 최고 수준의 프리미엄 프라이빗 GDR 골프 연습장'
   },
   {
@@ -27,7 +28,7 @@ const ADS = [
   }
 ];
 
-export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart }) => {
+export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName }) => {
   const [currentAdIdx, setCurrentAdIdx] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
 
@@ -71,134 +72,154 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart }) => {
               background: `linear-gradient(to top, rgba(10, 12, 16, 0.95) 10%, rgba(10,12,16,0.3) 50%, rgba(0,0,0,0) 100%), url(${ad.url}) center/cover no-repeat`
             }}
           >
-            <div style={{ padding: '40px', paddingBottom: '60px' }}>
+            <div style={{ padding: '30px 40px', paddingBottom: '50px', width: '100%' }}>
               <div 
                 style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '10px', 
-                  background: 'rgba(99, 102, 241, 0.25)', 
-                  border: '1px solid rgba(99, 102, 241, 0.4)',
-                  padding: '6px 16px',
-                  borderRadius: '20px',
+                  background: 'rgba(10, 12, 16, 0.7)',
+                  backdropFilter: 'blur(24px)',
+                  WebkitBackdropFilter: 'blur(24px)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '24px',
+                  padding: '24px 30px',
                   width: 'fit-content',
-                  marginBottom: '16px',
-                  backdropFilter: 'blur(8px)'
+                  maxWidth: '85%',
+                  boxShadow: '0 12px 40px rgba(0,0,0,0.6)'
                 }}
               >
-                <Tv size={16} className="glow-text-indigo" />
-                <span style={{ fontSize: '14px', fontWeight: 800, letterSpacing: '2px', color: '#818cf8' }}>PROMOTION</span>
+                <div 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '10px', 
+                    background: 'rgba(16, 185, 129, 0.08)', 
+                    border: '0.5px solid var(--neon-indigo)',
+                    padding: '6px 16px',
+                    borderRadius: '20px',
+                    width: 'fit-content',
+                    marginBottom: '16px',
+                    backdropFilter: 'blur(8px)'
+                  }}
+                >
+                  <Tv size={16} style={{ color: 'var(--neon-indigo)' }} />
+                  <span style={{ fontSize: '14px', fontWeight: 900, letterSpacing: '2px', color: 'var(--text-secondary)' }}>PROMOTION</span>
+                </div>
+                <h2 style={{ fontSize: '36px', fontWeight: 800, color: '#fff', marginBottom: '10px', textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
+                  {ad.title}
+                </h2>
+                <p style={{ fontSize: '18px', color: 'var(--text-secondary)', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
+                  {ad.subtitle}
+                </p>
               </div>
-              <h2 style={{ fontSize: '36px', fontWeight: 800, color: '#fff', marginBottom: '10px', textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
-                {ad.title}
-              </h2>
-              <p style={{ fontSize: '18px', color: 'var(--text-secondary)', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
-                {ad.subtitle}
-              </p>
             </div>
           </div>
         ))}
       </div>
 
       {/* 2. 하단 본격 키오스크 터치 유도 영역 */}
+      {/* 2. 하단 터치 유도 영역 (Apple-inspired Vibrant Luxury Web) */}
       <div 
-        className="kiosk-terminal-area" 
+        className="kiosk-terminal-area-luxury animate-fluid-gradient" 
         style={{ 
           display: 'flex', 
           flexDirection: 'column', 
-          justifyContent: 'space-between',
+          justifyContent: 'center',
           alignItems: 'center',
-          padding: '80px 40px'
+          padding: '120px 60px 80px 60px',
+          background: 'linear-gradient(135deg, rgba(0,0,0,1) 0%, rgba(10,12,16,1) 100%)'
         }}
       >
-        {/* 매장 로고 및 상단 웰컴 메시지 */}
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '24px' }}>
-            <span style={{ fontSize: '48px' }}>⛳</span>
-            <h1 style={{ fontSize: '46px', fontWeight: 900, letterSpacing: '-1px', color: '#fff' }}>
-              Local<span style={{ color: 'var(--neon-indigo)', textShadow: '0 0 15px var(--neon-indigo-glow)' }}>Master</span>
-            </h1>
-          </div>
-          <p style={{ fontSize: '24px', color: 'var(--text-secondary)', fontWeight: 500 }}>
-            무인 운영 골프 스튜디오에 오신 것을 환영합니다.
+        
+        {/* 거대한 상호명 타이포그래피 (High Contrast) */}
+        <div style={{ textAlign: 'center', width: '100%', marginBottom: '60px' }}>
+          <h1 style={{ fontSize: '72px', letterSpacing: '-3px', color: '#fff', display: 'flex', justifyContent: 'center', gap: '12px' }}>
+            <span style={{ fontWeight: 900 }}>{storeName.split(' ')[0] || 'SGM'}</span>
+            <span style={{ fontWeight: 200, color: 'rgba(255, 255, 255, 0.75)' }}>
+              {storeName.split(' ').slice(1).join(' ') || 'Golf Academy'}
+            </span>
+          </h1>
+          <p style={{ fontSize: '24px', color: '#86868b', fontWeight: 600, letterSpacing: '-0.5px', marginTop: '16px' }}>
+            The Next Generation of Golf Club.
           </p>
         </div>
 
-        {/* 터치 스크린 시작 버튼 (화려한 펄스 네온 글로우) */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '30px' }}>
-          <div 
-            className="glass-panel glass-panel-glow animate-pulse-glow"
-            style={{
-              width: '420px',
-              height: '420px',
-              borderRadius: '50%',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: 'center',
-              cursor: 'pointer',
-              border: '2px solid rgba(99, 102, 241, 0.4)',
-              background: 'radial-gradient(circle, rgba(99, 102, 241, 0.2) 0%, rgba(10, 12, 16, 0.8) 100%)',
-              gap: '16px'
+        {/* 메인 액션 탭 (거대한 텍스트와 애니메이션 손가락 그래픽) */}
+        <div 
+          onClick={onStart}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            cursor: 'pointer',
+            padding: '50px 40px',
+            borderRadius: '40px',
+            background: 'rgba(255, 255, 255, 0.03)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.05)',
+            transition: 'all 0.4s cubic-bezier(0.25, 1, 0.5, 1)',
+            position: 'relative',
+            width: '100%',
+            maxWidth: '780px',
+            marginBottom: '40px',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.3)'
+          }}
+          onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.95)')}
+          onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+        >
+          <div style={{ position: 'relative', marginBottom: '20px' }}>
+            {/* 3D 느낌 맥박 손가락 그래픽 */}
+            <Hand 
+              size={120} 
+              color="#10b981" 
+              strokeWidth={1.5} 
+              className="animate-hand-tap"
+              style={{
+                filter: 'drop-shadow(0 10px 20px rgba(16, 185, 129, 0.4))'
+              }}
+            />
+          </div>
+          
+          <h2 
+            className="animate-glow-text"
+            style={{ 
+              fontSize: '48px', 
+              fontWeight: 900, 
+              letterSpacing: '-1.5px', 
+              margin: 0,
+              whiteSpace: 'nowrap'
             }}
           >
-            <div 
-              style={{
-                width: '120px',
-                height: '120px',
-                borderRadius: '50%',
-                background: 'var(--neon-indigo)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 0 30px var(--neon-indigo-glow)'
-              }}
-            >
-              <Play size={48} fill="#fff" style={{ marginLeft: '6px' }} />
-            </div>
-            <span style={{ fontSize: '32px', fontWeight: 900, color: '#fff', letterSpacing: '-0.5px' }}>
-              화면 터치 시작
-            </span>
-            <span className="animate-blink" style={{ fontSize: '18px', color: 'var(--neon-indigo)', fontWeight: 700 }}>
-              TOUCH TO START
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', gap: '20px', marginTop: '20px' }}>
-            <div className="glass-panel" style={{ padding: '16px 24px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Sparkles size={20} style={{ color: 'var(--neon-amber)' }} />
-              <span style={{ fontSize: '16px', fontWeight: 600 }}>타석 자동 배정</span>
-            </div>
-            <div className="glass-panel" style={{ padding: '16px 24px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Sparkles size={20} style={{ color: 'var(--neon-green)' }} />
-              <span style={{ fontSize: '16px', fontWeight: 600 }}>회원권/라카 신속 결제</span>
-            </div>
-          </div>
+            화면을 터치하여 시작하세요
+          </h2>
+          <p style={{ color: 'var(--neon-indigo)', fontSize: '20px', fontWeight: 700, marginTop: '12px', letterSpacing: '-0.5px', opacity: 0.85 }}>
+            Touch the screen to start
+          </p>
         </div>
 
-        {/* 하단 시스템 스태터스 바 */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', borderTop: '1px solid var(--bg-tertiary)', paddingTop: '20px' }}>
+        {/* 하단 시스템 스태터스 바 (애플의 차분한 풋터 마감) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', borderTop: '0.5px solid rgba(255, 255, 255, 0.08)', paddingTop: '24px', zIndex: 2 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div 
               style={{ 
-                width: '12px', 
-                height: '12px', 
+                width: '8px', 
+                height: '8px', 
                 borderRadius: '50%', 
-                backgroundColor: isOnline ? 'var(--neon-green)' : 'var(--neon-amber)',
-                boxShadow: isOnline ? '0 0 10px var(--neon-green-glow)' : '0 0 10px var(--neon-amber-glow)'
+                backgroundColor: isOnline ? '#34c759' : '#ff3b30',
+                transition: 'all 0.2s ease',
+                boxShadow: `0 0 8px ${isOnline ? 'rgba(52, 199, 89, 0.5)' : 'rgba(255, 59, 48, 0.5)'}`
               }} 
             />
-            <span style={{ fontSize: '16px', color: 'var(--text-secondary)', fontWeight: 600 }}>
-              {isOnline ? 'Cloud Sync Online' : 'Hybrid Edge DB Mode (장애 대비 무중단 가동)'}
+            <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 600 }}>
+              {isOnline ? 'Cloud Sync Online' : 'Hybrid Edge DB Mode (무중단 가동)'}
             </span>
           </div>
           {!isOnline && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--neon-amber)' }}>
-              <ShieldAlert size={16} />
-              <span style={{ fontSize: '14px', fontWeight: 700 }}>오프라인 대응 활성화</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ff3b30' }}>
+              <ShieldAlert size={15} />
+              <span style={{ fontSize: '13px', fontWeight: 700 }}>오프라인 모드 작동 중</span>
             </div>
           )}
-          <span style={{ fontSize: '16px', color: 'var(--text-muted)' }}>ID: {api.getTerminalId()}</span>
+          <span style={{ fontSize: '15px', color: '#86868b' }}>ID: {api.getTerminalId()}</span>
         </div>
       </div>
     </div>

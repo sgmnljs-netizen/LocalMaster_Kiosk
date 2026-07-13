@@ -171,7 +171,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           {/* 지지직 인쇄되는 영수증 종이 */}
           <div className="receipt-paper">
             <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: '14px', marginBottom: '14px' }}>
-              <h3 style={{ fontSize: '22px', fontWeight: 900, letterSpacing: '-0.5px' }}>⛳ LocalMaster</h3>
+              <h3 style={{ fontSize: '22px', fontWeight: 900, letterSpacing: '-0.5px' }}>⛳ 무인 골프 스튜디오</h3>
               <p style={{ fontSize: '13px', marginTop: '4px' }}>프리미엄 골프 아카데미 무인점</p>
               <p style={{ fontSize: '12px', color: '#555' }}>지점코드: {STORE_CODE}</p>
             </div>
