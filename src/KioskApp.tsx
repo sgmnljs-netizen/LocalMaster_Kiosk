@@ -137,7 +137,7 @@ export default function KioskApp() {
     }
   }, [toast]);
 
-  // 2. 무인기기 비활성 세션 아웃 (3분간 조작이 없으면 자동으로 광고 인트로로 복귀)
+  // 2. 무인기기 비활성 세션 아웃 (40초간 조작이 없으면 자동으로 광고 인트로로 복귀)
   useEffect(() => {
     if (step === 'INTRO') return;
 
@@ -146,7 +146,7 @@ export default function KioskApp() {
       sessionTimeout = setTimeout(() => {
         handleLogout();
         showToast(lang === 'KO' ? '일정 시간 조작이 없어 광고 화면으로 복귀합니다.' : 'Session timeout. Returning to ad screen.', false);
-      }, 180000); // 180초 (3분)
+      }, 40000); // 40초
     };
 
     let sessionTimeout = setTimeout(() => {}, 0);
@@ -185,6 +185,27 @@ export default function KioskApp() {
     setStep('INTRO');
   };
 
+  // 행위 완료 후 메인화면(MAIN_DASHBOARD)으로 세션 초기화 복귀
+  const handleLogoutToHome = () => {
+    if (authMember) {
+      api.writeKioskLog('SESSION_CLOSE', `${authMember.member_name} 회원 세션 정상 종료`, authMember.member_no);
+    }
+    if (currentHoldResId) {
+      api.cancelHoldReservation(currentHoldResId).catch(console.error);
+      setCurrentHoldResId(null);
+    }
+    if (selectedBayNo !== null) {
+      api.releaseBay(selectedBayNo).catch(console.error);
+    }
+    setAuthMember(null);
+    setSelectedBayNo(null);
+    setSelectedLockerNo(null);
+    setSelectedProduct(null);
+    setPurpose(null);
+    setErrorMasterCard(null);
+    setStep('MAIN_DASHBOARD');
+  };
+
   // 실시간 미니 모니터 타석 클릭 단축키
   const handleMiniBayClick = async (bayNo: number) => {
     showToast(lang === 'KO' ? `${bayNo}번 타석 선점 시도 중...` : `Securing teebox ${bayNo}...`);
@@ -204,6 +225,9 @@ export default function KioskApp() {
 
   // 메인 대시보드로 복귀 (세부 프로세스 중단 및 가상 락 정리)
   const handleGoHome = () => {
+    if (authMember) {
+      api.writeKioskLog('SESSION_CLOSE', `${authMember.member_name} 회원 세션 정상 종료`, authMember.member_no);
+    }
     if (currentHoldResId) {
       api.cancelHoldReservation(currentHoldResId).catch(console.error);
       setCurrentHoldResId(null);
@@ -211,6 +235,7 @@ export default function KioskApp() {
     if (selectedBayNo !== null) {
       api.releaseBay(selectedBayNo).catch(console.error);
     }
+    setAuthMember(null); // 메인화면 복귀 시 로그인 세션 즉시 파기 (공용 키오스크 보안 강화)
     setSelectedBayNo(null);
     setSelectedLockerNo(null);
     setSelectedProduct(null);
@@ -427,7 +452,7 @@ export default function KioskApp() {
     }
 
     setCurrentHoldResId(null);
-    handleLogout();
+    handleLogoutToHome();
   };
 
   return (
@@ -873,7 +898,7 @@ export default function KioskApp() {
               <MemberAuth
                 initialAuthMode={initialAuthMode}
                 onAuthSuccess={handleAuthSuccess}
-                onCancel={handleLogout}
+                onCancel={handleGoHome}
                 onSignUpClick={() => setStep('MEMBER_REGISTER')}
                 onAuthError={(code, detail) => {
                   const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -894,7 +919,7 @@ export default function KioskApp() {
             {step === 'MEMBER_REGISTER' && (
               <MemberRegister
                 onRegisterSuccess={handleRegisterSuccess}
-                onCancel={handleLogout}
+                onCancel={handleGoHome}
               />
             )}
 
@@ -921,7 +946,7 @@ export default function KioskApp() {
                 memberName={authMember?.member_name}
                 isMoveMode={purpose === 'MOVE_BAY'}
                 onBaySelected={handleBaySelected}
-                onCancel={handleLogout}
+                onCancel={handleGoHome}
                 bays={bays}
                 onRefreshBays={loadBays}
               />
@@ -935,7 +960,7 @@ export default function KioskApp() {
                 memberNo={authMember?.member_no}
                 memberName={authMember?.member_name}
                 onProductSelected={handleProductSelected}
-                onCancel={handleLogout}
+                onCancel={handleGoHome}
               />
             )}
 
@@ -947,7 +972,7 @@ export default function KioskApp() {
                 memberNo={authMember.member_no}
                 memberName={authMember.member_name}
                 onLockerPaymentTriggered={handleLockerPaymentTriggered}
-                onCancel={handleLogout}
+                onCancel={handleGoHome}
               />
             )}
 
@@ -962,7 +987,7 @@ export default function KioskApp() {
                   setSelectedProduct(prod);
                   setStep('PAYMENT');
                 }}
-                onCancel={handleLogout}
+                onCancel={handleGoHome}
               />
             )}
 
@@ -982,7 +1007,7 @@ export default function KioskApp() {
                 memberName={authMember?.member_name}
                 memberNo={authMember?.member_no}
                 onPaymentSuccess={handlePaymentCompleted}
-                onCancel={handleLogout}
+                onCancel={handleGoHome}
               />
             )}
 

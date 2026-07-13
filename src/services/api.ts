@@ -86,7 +86,7 @@ export interface Product {
   prod_cd: string;
   prod_nm: string;
   standard_price: number;
-  logic_type: 'MEMBERSHIP' | 'LESSON' | 'RETAIL' | 'FACILITY';
+  logic_type: 'MEMBERSHIP' | 'LESSON' | 'RETAIL' | 'FACILITY' | 'RENTAL';
   duration_min?: number;
   days?: number;
   res_id?: string;
@@ -683,10 +683,39 @@ class HybridAPIClient {
     return { success: false, message: '회원 정보를 찾을 수 없습니다.' };
   }
 
-  // 9. 라카 목록 가져오기
+  // 9. 라카 목록 가져오기 (특정 회원의 라카만 가져오는 것도 필요하지만, 기존 호환을 위해 유지)
   async getLockers(): Promise<Locker[]> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/lockers?store_cd=${STORE_CODE}`);
+        if (res.ok) {
+          return await res.json() as Locker[];
+        }
+      } catch (err) {
+        console.error('Failed to fetch lockers from backend:', err);
+      }
+    }
     return JSON.parse(localStorage.getItem('LM_LOCKERS') || '[]') as Locker[];
   }
+  
+  // 9-1. 특정 회원의 라카 가져오기
+  async getMemberLockers(memberNo: string): Promise<Locker[]> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/members/${memberNo}/lockers?store_cd=${STORE_CODE}`);
+        if (res.ok) {
+          return await res.json() as Locker[];
+        }
+      } catch (err) {
+        console.error('Failed to fetch member lockers from backend:', err);
+      }
+    }
+    const all = await this.getLockers();
+    return all.filter(l => l.member_no === memberNo && (l.status === 'OCCUPIED' || l.status === 'EXPIRED'));
+  }
+
 
   // 10. 라카 연장 처리
   async extendLocker(
@@ -798,7 +827,7 @@ class HybridAPIClient {
 
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/members/`, {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/member?store_cd=${STORE_CODE}`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -808,10 +837,7 @@ class HybridAPIClient {
             member_name: name,
             hp: hp,
             email: email,
-            store_cd: STORE_CODE,
-            status_cd: '10',
-            face_registered: faceRegistered,
-            face_vector_id: faceVectorId
+            store_cd: STORE_CODE
           })
         });
         if (res.ok) {
@@ -821,6 +847,9 @@ class HybridAPIClient {
           created.store_cd = STORE_CODE;
           await this.writeKioskLog('MEMBER_REGISTER', `신규 회원 등록 성공 (백엔드): ${name} (${hp})`, created.member_no);
           return { success: true, member: created, message: '회원가입이 성공적으로 완료되었습니다.' };
+        } else {
+          const errData = await res.json().catch(() => ({ detail: '회원 등록 중 에러가 발생했습니다.' }));
+          return { success: false, message: errData.detail || '회원 등록 실패' };
         }
       } catch (err) {
         console.error('Backend registration failed. Falling back to EdgeDB:', err);

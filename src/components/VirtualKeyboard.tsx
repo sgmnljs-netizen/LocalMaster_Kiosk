@@ -234,19 +234,21 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
     <div 
       className="glass-panel" 
       style={{
-        position: 'fixed', // 브라우저 최하단 레이어에 고정하여 상위 부모의 overflow: hidden 장벽 원천 돌파!
-        bottom: 0,
-        left: 0,
-        width: '1080px', // 키오스크 좌측 정렬 메인 프레임 영역과 가로폭 100% 동기화!
+        position: 'absolute', // 키오스크 프레임 내에 절대 위치 지정
+        bottom: '10px', // 하단 여백 추가로 조작성 개선
+        left: '50%',
+        transform: 'translateX(-50%)', // 가로 중앙 정렬!
+        width: '900px', // 회원가입 카드(900px)와 가로폭 일치시켜 잘림 방지!
         boxSizing: 'border-box',
         background: '#0c0f16',
-        borderTop: '2.5px solid var(--neon-indigo)',
-        padding: '24px 28px',
-        boxShadow: '0 -15px 50px rgba(0,0,0,0.85)',
-        zIndex: 99999, // 모든 다이얼로그와 패널 최상단으로 노출 보장
+        border: '1.5px solid var(--neon-indigo)',
+        borderRadius: '20px',
+        padding: '16px 20px',
+        boxShadow: '0 10px 40px rgba(0,0,0,0.9)',
+        zIndex: 99999, // 최상단 노출
         display: 'flex',
         flexDirection: 'column',
-        gap: '14px'
+        gap: '8px'
       }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -266,14 +268,14 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
       </div>
 
       {/* 키보드 자판 영역 */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {keys.map((row, rowIdx) => (
           <div 
             key={rowIdx} 
             style={{ 
               display: 'flex', 
               justifyContent: 'center', 
-              gap: '10px' 
+              gap: '8px' 
             }}
           >
             {row.map((char) => {
@@ -296,15 +298,15 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
                   key={char}
                   onClick={() => handleKeyClick(char)}
                   style={{
-                    width: '92px',
-                    height: '62px', // 터치하기 편하게 62px로 안정적 복원
-                    borderRadius: '10px',
-                    fontSize: '22px',
-                    fontWeight: 700,
-                    color: isShift && displayChar !== char ? 'var(--neon-amber)' : '#fff',
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--glass-border)',
-                    boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+                    width: '76px', // 900px 가로폭에 맞추기 위해 축소
+                    height: '54px',
+                    borderRadius: '8px',
+                    fontSize: '22px', // 시인성을 위해 글자 크기 상향
+                    fontWeight: 800, // 더 굵게 지정
+                    color: isShift && displayChar !== char ? 'var(--neon-amber)' : '#ffffff', // 선명한 흰색 글자
+                    background: '#1d2433', // 라이트 테마 영향을 받지 않는 선명한 다크 그레이 버튼 배경
+                    border: '1px solid rgba(255, 255, 255, 0.15)', // 테두리 선명화
+                    boxShadow: '0 3px 6px rgba(0,0,0,0.4)',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -321,13 +323,13 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
         ))}
 
         {/* 제어 키 라인 */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
           <button
             onClick={() => setLang(lang === 'KO' ? 'EN' : 'KO')}
             style={{
-              width: '130px',
-              height: '62px',
-              borderRadius: '10px',
+              width: '110px',
+              height: '54px',
+              borderRadius: '8px',
               background: '#1d2433',
               border: '1px solid var(--glass-border)',
               color: 'var(--neon-indigo)',
@@ -335,7 +337,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
               alignItems: 'center',
               justifyContent: 'center',
               gap: '6px',
-              fontSize: '17px',
+              fontSize: '16px',
               fontWeight: 800,
               cursor: 'pointer'
             }}
@@ -348,16 +350,16 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
           <button
             onClick={() => setIsShift(!isShift)}
             style={{
-              width: '130px',
-              height: '62px',
-              borderRadius: '10px',
-              background: isShift ? 'rgba(245, 158, 11, 0.2)' : 'var(--bg-tertiary)',
-              border: `1.5px solid ${isShift ? 'var(--neon-amber)' : 'var(--glass-border)'}`,
-              color: isShift ? 'var(--neon-amber)' : 'var(--text-secondary)',
+              width: '110px',
+              height: '54px',
+              borderRadius: '8px',
+              background: isShift ? 'rgba(245, 158, 11, 0.25)' : '#1d2433', // 활성 시 앰버 오버레이, 비활성 시 다크 그레이
+              border: `1.5px solid ${isShift ? 'var(--neon-amber)' : 'rgba(255, 255, 255, 0.15)'}`,
+              color: isShift ? 'var(--neon-amber)' : '#ffffff', // 글자색 흰색으로 변경하여 시인성 확보
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '17px',
+              fontSize: '16px',
               fontWeight: 800,
               cursor: 'pointer'
             }}
@@ -369,14 +371,14 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
           <button
             onClick={() => handleKeyClick(' ')}
             style={{
-              width: '320px',
-              height: '62px',
-              borderRadius: '10px',
-              background: 'var(--bg-tertiary)',
-              border: '1px solid var(--glass-border)',
-              color: '#fff',
-              fontSize: '18px',
-              fontWeight: 700,
+              width: '270px',
+              height: '54px',
+              borderRadius: '8px',
+              background: '#1d2433', // 선명한 다크 그레이 배경
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              color: '#ffffff', // 선명한 흰색 글자
+              fontSize: '17px',
+              fontWeight: 800,
               cursor: 'pointer'
             }}
             className="keypad-btn"
@@ -387,9 +389,9 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
           <button
             onClick={handleDelete}
             style={{
-              width: '150px',
-              height: '62px',
-              borderRadius: '10px',
+              width: '130px',
+              height: '54px',
+              borderRadius: '8px',
               background: '#3a1f26',
               border: '1px solid rgba(239, 68, 68, 0.3)',
               color: 'var(--neon-red)',
@@ -397,7 +399,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
               alignItems: 'center',
               justifyContent: 'center',
               gap: '6px',
-              fontSize: '18px',
+              fontSize: '16px',
               fontWeight: 700,
               cursor: 'pointer'
             }}

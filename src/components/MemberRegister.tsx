@@ -19,11 +19,11 @@ const formatPhoneNumber = (num: string) => {
 export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSuccess, onCancel }) => {
   const [name, setName] = useState('');
   const [hp, setHp] = useState('');
-  const [email, setEmail] = useState('');
+
   const [agree, setAgree] = useState(false);
 
   // 입력 활성화 포커스 제어
-  const [activeField, setActiveField] = useState<'NAME' | 'HP' | 'EMAIL' | null>(null);
+  const [activeField, setActiveField] = useState<'NAME' | 'HP' | null>(null);
   
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -69,10 +69,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
       setErrorMsg('올바른 휴대폰 번호를 입력해 주세요.');
       return;
     }
-    if (!email.includes('@') || email.length < 5) {
-      setErrorMsg('유효한 이메일 주소를 입력해 주세요.');
-      return;
-    }
+
     if (!agree) {
       setErrorMsg('개인정보 수집 및 키오스크 이용약관에 동의해 주세요.');
       return;
@@ -104,7 +101,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
       const formattedHp = formatPhoneNumber(hp);
       const faceVectorId = faceReg ? `FACE_${hp.replace(/[^0-9]/g, '')}` : null;
       
-      const res = await api.registerMember(name, formattedHp, email, faceReg, faceVectorId);
+      const res = await api.registerMember(name, formattedHp, '', faceReg, faceVectorId);
       if (res.success && res.member) {
         onRegisterSuccess(res.member);
       } else {
@@ -117,7 +114,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
     } finally {
       setLoading(false);
     }
-  }, [name, hp, email, onRegisterSuccess]);
+  }, [name, hp, onRegisterSuccess]);
 
   return (
     <div 
@@ -340,30 +337,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
               />
             </div>
 
-            {/* 이메일 입력 필드 */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-secondary)' }}>이메일 주소</label>
-              <input
-                type="email"
-                readOnly
-                onClick={() => setActiveField('EMAIL')}
-                value={email}
-                placeholder="여기를 터치하여 이메일을 입력하세요"
-                style={{
-                  width: '100%',
-                  height: '64px',
-                  borderRadius: '12px',
-                  border: `2px solid ${activeField === 'EMAIL' ? 'var(--neon-indigo)' : 'var(--bg-tertiary)'}`,
-                  background: '#0a0d14',
-                  color: '#fff',
-                  fontSize: '20px',
-                  fontWeight: 700,
-                  padding: '0 20px',
-                  boxShadow: activeField === 'EMAIL' ? '0 0 10px var(--neon-indigo-glow)' : 'none',
-                  cursor: 'pointer'
-                }}
-              />
-            </div>
+
 
             {/* 개인정보 이용 동의 */}
             <div 
@@ -505,14 +479,11 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
         </form>
       )}
 
-      {/* 하단 가상 키보드 영역 바인딩 (이름이나 이메일 입력 활성화 시 스르륵 올라옴) */}
-      {!isFaceEnrollStep && (activeField === 'NAME' || activeField === 'EMAIL') && (
+      {/* 하단 가상 키보드 영역 바인딩 (이름 입력 활성화 시 스르륵 올라옴) */}
+      {!isFaceEnrollStep && activeField === 'NAME' && (
         <VirtualKeyboard
-          value={activeField === 'NAME' ? name : email}
-          onChange={(val) => {
-            if (activeField === 'NAME') setName(val);
-            else setEmail(val);
-          }}
+          value={name}
+          onChange={(val) => setName(val)}
           onClose={() => setActiveField(null)}
         />
       )}
