@@ -9,6 +9,7 @@ interface PaymentTerminalProps {
   amount: number;
   assignedBayNo?: number | null;
   assignedLockerNo?: number | null;
+  resId?: string | null;
   onPaymentSuccess: () => void;
   onCancel: () => void;
 }
@@ -18,16 +19,19 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   amount,
   assignedBayNo,
   assignedLockerNo,
+  resId,
   onPaymentSuccess,
   onCancel
 }) => {
   const [payStep, setPayStep] = useState<'INSERT_CARD' | 'PROCESSING' | 'PRINT_RECEIPT'>('INSERT_CARD');
   const [appNo, setAppNo] = useState('');
   const [receiptDate, setReceiptDate] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
   // 1. 임의의 카드 삽입/감지 시뮬레이션
-  const triggerSimulation = () => {
+  const triggerSimulation = async () => {
     setPayStep('PROCESSING');
+    setErrorMsg('');
     
     // 승인번호 및 영수증 날짜 선제 생성
     setAppNo(Math.floor(10000000 + Math.random() * 90000000).toString());
@@ -37,10 +41,22 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
     );
 
-    // 2초 뒤 승인 완료 -> 영수증 인쇄 모드
-    setTimeout(() => {
+    try {
+      // 2-Phase Commit: 백엔드 결제 완료 웹훅 API 호출
+      if (resId) {
+        const res = await api.processPaymentWebhook(resId, amount);
+        if (!res.success) {
+          throw new Error(res.message);
+        }
+      } else {
+        // Fallback: 엣지/가상 모드일 때 가상 딜레이
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
       setPayStep('PRINT_RECEIPT');
-    }, 2000);
+    } catch (err: any) {
+      setPayStep('INSERT_CARD');
+      setErrorMsg(err.message || '결제 처리 중 서버 승인 오류가 발생했습니다.');
+    }
   };
 
   // 2. 카드 자동 투입 시뮬레이터 (사용자 대기용)
@@ -66,6 +82,23 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       {/* 1단계: 카드 삽입 대기 */}
       {payStep === 'INSERT_CARD' && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '30px', width: '100%' }}>
+          {errorMsg && (
+            <div 
+              className="neon-border-red"
+              style={{ 
+                background: 'rgba(239, 68, 68, 0.08)', 
+                padding: '16px', 
+                borderRadius: '12px', 
+                textAlign: 'center',
+                color: '#fca5a5',
+                fontSize: '18px',
+                fontWeight: 700,
+                width: '480px'
+              }}
+            >
+              {errorMsg}
+            </div>
+          )}
           <div style={{ textAlign: 'center' }}>
             <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginBottom: '10px' }}>신용카드 결제 진행</h2>
             <p style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>IC 카드를 아래의 단말기 투입구에 깊숙이 꽂아 주세요.</p>

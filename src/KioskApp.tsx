@@ -95,6 +95,7 @@ export default function KioskApp() {
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(null);
   const [selectedLockerNo, setSelectedLockerNo] = useState<number | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [currentHoldResId, setCurrentHoldResId] = useState<string | null>(null);
 
   // UI 상태
   const [toast, setToast] = useState<{ message: string; success: boolean } | null>(null);
@@ -164,6 +165,10 @@ export default function KioskApp() {
     if (authMember) {
       api.writeKioskLog('SESSION_CLOSE', `${authMember.member_name} 회원 세션 정상 종료`, authMember.member_no);
     }
+    if (currentHoldResId) {
+      api.cancelHoldReservation(currentHoldResId).catch(console.error);
+      setCurrentHoldResId(null);
+    }
     // 선점된 타석이 있다면 해제 (메모리 누수 방지)
     if (selectedBayNo !== null) {
       api.releaseBay(selectedBayNo).catch(console.error);
@@ -196,6 +201,10 @@ export default function KioskApp() {
 
   // 메인 대시보드로 복귀 (세부 프로세스 중단 및 가상 락 정리)
   const handleGoHome = () => {
+    if (currentHoldResId) {
+      api.cancelHoldReservation(currentHoldResId).catch(console.error);
+      setCurrentHoldResId(null);
+    }
     if (selectedBayNo !== null) {
       api.releaseBay(selectedBayNo).catch(console.error);
     }
@@ -323,15 +332,32 @@ export default function KioskApp() {
   };
 
   // 3. 상품 매대에서 구매 상품 선택 완료
-  const handleProductSelected = (prod: Product) => {
-    setSelectedProduct(prod);
-
-    if (purpose === 'ALLOCATE_DAILY') {
-      // 일일 타석권 요금 결제 진입
-      setStep('PAYMENT');
-    } else if (purpose === 'PURCHASE_PRODUCT') {
-      // 일반 회원권 구매 요금 결제 진입
-      setStep('PAYMENT');
+  const handleProductSelected = async (prod: Product) => {
+    if (purpose === 'ALLOCATE_DAILY' && selectedBayNo) {
+      showToast(lang === 'KO' ? '결제 대기 예약을 생성 중입니다...' : 'Creating hold reservation...');
+      try {
+        const res = await api.createHoldReservation(
+          selectedBayNo,
+          prod.duration_min || 60,
+          authMember?.member_no,
+          authMember?.member_name || '비회원',
+          authMember?.hp || '010-0000-0000'
+        );
+        if (res.success && res.res_id) {
+          setCurrentHoldResId(res.res_id);
+          setSelectedProduct(prod);
+          setStep('PAYMENT');
+        } else {
+          showToast(res.message, false);
+        }
+      } catch (err) {
+        showToast(lang === 'KO' ? '결제 대기 예약 생성 중 오류가 발생했습니다.' : 'Failed to create hold reservation.', false);
+      }
+    } else {
+      setSelectedProduct(prod);
+      if (purpose === 'PURCHASE_PRODUCT' || purpose === 'ALLOCATE_DAILY') {
+        setStep('PAYMENT');
+      }
     }
   };
 
@@ -348,7 +374,15 @@ export default function KioskApp() {
     
     // 타석 일일권 배정인 경우 결제 완료 시점에 실제 배정 트랜잭션 수행
     if (purpose === 'ALLOCATE_DAILY' && selectedBayNo && selectedProduct) {
-      await api.allocateBay(selectedBayNo, selectedProduct.duration_min || 60, undefined, '비회원', '010-0000-0000');
+      if (currentHoldResId) {
+        try {
+          await api.processPaymentWebhook(currentHoldResId, selectedProduct.standard_price);
+        } catch (err) {
+          console.error('Failed to process payment webhook:', err);
+        }
+      } else {
+        await api.allocateBay(selectedBayNo, selectedProduct.duration_min || 60, undefined, '비회원', '010-0000-0000');
+      }
     }
 
     // 일반 회원권 구매 성공인 경우
@@ -361,6 +395,7 @@ export default function KioskApp() {
       await api.extendLocker(selectedLockerNo, selectedProduct.days || 30, selectedProduct.standard_price);
     }
 
+    setCurrentHoldResId(null);
     handleLogout();
   };
 
@@ -895,6 +930,7 @@ export default function KioskApp() {
                 amount={selectedProduct ? selectedProduct.standard_price : 0}
                 assignedBayNo={selectedBayNo}
                 assignedLockerNo={selectedLockerNo}
+                resId={currentHoldResId}
                 onPaymentSuccess={handlePaymentCompleted}
                 onCancel={handleLogout}
               />
