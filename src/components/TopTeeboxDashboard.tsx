@@ -63,12 +63,12 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
       glow = '0 2px 8px rgba(46, 117, 89, 0.04)';
       label = '';
     } else if (isPreOccupied) {
-      // 차분한 브론즈/코퍼 톤
-      bgCol = 'rgba(184, 115, 51, 0.06)';
-      borderCol = 'rgba(184, 115, 51, 0.25)';
-      textColor = '#b87333';
-      subTextColor = '#b87333';
-      label = lang === 'KO' ? '선점' : 'Hold';
+      // 강렬하고 선명한 애플 오렌지 채우기 및 흰색 글자 고대비 구성
+      bgCol = '#ff9500';
+      borderCol = '#ff9500';
+      textColor = '#ffffff';
+      subTextColor = '#ffffff';
+      label = '';
     } else if (isOccupied) {
       // 차분하고 명확한 웜 그레이
       bgCol = '#f5f5f7';
@@ -105,7 +105,8 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
           cursor: cursorStyle,
           boxShadow: glow,
           transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-          position: 'relative'
+          position: 'relative',
+          animation: isPreOccupied ? 'dashboardPulse 1.5s infinite ease-in-out' : 'none'
         }}
         title={`${bay.bay_no}번 타석: ${isAvailable ? '이용가능' : isOccupied ? '이용중' : isPreOccupied ? '선점중' : '점검중'}`}
       >
@@ -276,6 +277,21 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
           );
         })}
       </div>
+      
+      {/* 선점 타석 실시간 주황색 펄스 파동 애니메이션 */}
+      <style>{`
+        @keyframes dashboardPulse {
+          0% {
+            box-shadow: 0 0 0 0px rgba(255, 149, 0, 0.7);
+          }
+          70% {
+            box-shadow: 0 0 0 6px rgba(255, 149, 0, 0);
+          }
+          100% {
+            box-shadow: 0 0 0 0px rgba(255, 149, 0, 0);
+          }
+        }
+      `}</style>
     </div>
   );
 };

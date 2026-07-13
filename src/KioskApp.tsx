@@ -12,6 +12,7 @@ import { LockerExtend } from './components/LockerExtend';
 import { PaymentTerminal } from './components/PaymentTerminal';
 import { Par3Allocation } from './components/Par3Allocation';
 import { TopTeeboxDashboard } from './components/TopTeeboxDashboard';
+import { PracticeSelect } from './components/PracticeSelect';
 import { api, Member, Product, Bay } from './services/api';
 
 type KioskStep = 
@@ -24,7 +25,8 @@ type KioskStep =
   | 'PRODUCT_SHOP' 
   | 'LOCKER_EXTEND'
   | 'PAR3_ALLOCATION'
-  | 'PAYMENT';
+  | 'PAYMENT'
+  | 'ASSET_SELECT';
 
 type KioskPurpose = 
   | 'ALLOCATE_DAILY'       // 일일 타석 배정
@@ -95,6 +97,7 @@ export default function KioskApp() {
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(null);
   const [selectedLockerNo, setSelectedLockerNo] = useState<number | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedAssetId, setSelectedAssetId] = useState<number | null>(null);
   const [currentHoldResId, setCurrentHoldResId] = useState<string | null>(null);
 
   // UI 상태
@@ -250,7 +253,9 @@ export default function KioskApp() {
         });
         setStep('MAIN_DASHBOARD');
       } else {
-        setStep('TEEBOX_MAP');
+        // 바로 자동 배정을 수행하지 않고 이용권 선택 화면으로 유도
+        setSelectedAssetId(null);
+        setStep('ASSET_SELECT');
       }
     } else if (purpose === 'PURCHASE_PRODUCT') {
       setStep('PRODUCT_SHOP');
@@ -286,29 +291,16 @@ export default function KioskApp() {
     }
   };
 
+
+
   // 2. 타석 맵에서 타석 선택 완료
   const handleBaySelected = async (bayNo: number) => {
     setSelectedBayNo(bayNo);
 
     if (purpose === 'ALLOCATE_MEMBERSHIP' && authMember) {
-      // 회원권 타석 배정은 결제 필요 없이 즉시 배정 완료
-      try {
-        const res = await api.allocateBay(bayNo, 60, authMember.member_no); // 기본 60분 배정
-        if (res.success) {
-          // 감사 로그 적재
-          await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${bayNo}번 타석)`, authMember.member_no);
-
-          const updated = await api.getMember(authMember.member_no);
-          if (updated) setAuthMember(updated);
-          
-          setSelectedBayNo(bayNo);
-          setStep('PAYMENT'); // 영수증 인출을 위해 가상 결제창의 프린트 모드로 강제 이동
-        } else {
-          showToast(res.message, false);
-        }
-      } catch {
-        showToast(lang === 'KO' ? '타석 배정 중 통신 장애가 발생했습니다.' : 'Connection failure during teebox allocation.', false);
-      }
+      // 회원권 타석 배정은 이용권 선택 화면으로 유도
+      setSelectedAssetId(null);
+      setStep('ASSET_SELECT');
     } else if (purpose === 'ALLOCATE_DAILY') {
       // 일일권은 먼저 타석을 선택한 뒤, 60분/90분 결제 단계로 진입
       setStep('PRODUCT_SHOP');
@@ -328,6 +320,45 @@ export default function KioskApp() {
       } catch {
         showToast(lang === 'KO' ? '타석 이동 처리 중 오류가 발생했습니다.' : 'Failed to move teebox.', false);
       }
+    }
+  };
+
+  // 2.5 선택한 이용권으로 타석 배정 최종 승인 처리
+  const handleAssetSelected = async (memberItemId: number) => {
+    if (selectedBayNo !== null && authMember) {
+      try {
+        const res = await api.allocateBay(selectedBayNo, 60, authMember.member_no, undefined, undefined, memberItemId);
+        if (res.success) {
+          // 감사 로그 적재
+          await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId})`, authMember.member_no);
+
+          const updated = await api.getMember(authMember.member_no);
+          if (updated) setAuthMember(updated);
+          
+          setStep('PAYMENT'); // 영수증 인출을 위해 가상 결제창의 프린트 모드로 강제 이동
+        } else {
+          showToast(res.message, false);
+        }
+      } catch (err) {
+        showToast(lang === 'KO' ? '타석 배정 처리 중 오류가 발생했습니다.' : 'Failed to allocate teebox.', false);
+      }
+    }
+  };
+
+  // 2.5. 연습타석배정 화면에서 타석 및 배정 목적(회원권/일일권) 선택 완료 핸들러
+  const handlePracticeSelectConfirm = async (bayNo: number, purposeType: 'ALLOCATE_MEMBERSHIP' | 'ALLOCATE_DAILY') => {
+    setSelectedBayNo(bayNo);
+    setPurpose(purposeType);
+
+    if (purposeType === 'ALLOCATE_MEMBERSHIP') {
+      setInitialAuthMode('PHONE');
+      if (authMember) {
+        await handleBaySelected(bayNo);
+      } else {
+        setStep('MEMBER_AUTH');
+      }
+    } else if (purposeType === 'ALLOCATE_DAILY') {
+      setStep('PRODUCT_SHOP');
     }
   };
 
@@ -868,6 +899,20 @@ export default function KioskApp() {
             )}
 
             {/* ----------------------------------------------------------------
+                📥 STEP 2.7: 연습타석배정 (실시간 현황판 + 층별 상세 그리드 및 분기)
+                ---------------------------------------------------------------- */}
+            {step === 'PRACTICE_SELECT' && (
+              <PracticeSelect
+                bays={bays}
+                lang={lang}
+                initialSelectedBayNo={selectedBayNo}
+                onBaySelected={handlePracticeSelectConfirm}
+                onCancel={handleGoHome}
+                onRefreshBays={loadBays}
+              />
+            )}
+
+            {/* ----------------------------------------------------------------
                 📥 STEP 3: 타석 배치 맵 (선점 락 연동)
                 ---------------------------------------------------------------- */}
             {step === 'TEEBOX_MAP' && (
@@ -924,6 +969,9 @@ export default function KioskApp() {
             {/* ----------------------------------------------------------------
                 📥 STEP 6: 가상 결제 단말기 & 영수증 인출
                 ---------------------------------------------------------------- */}
+            {/* ----------------------------------------------------------------
+                📥 STEP 6: 가상 결제 단말기 & 영수증 인출
+                ---------------------------------------------------------------- */}
             {step === 'PAYMENT' && (
               <PaymentTerminal
                 productName={selectedProduct ? selectedProduct.prod_nm : (purpose === 'ALLOCATE_MEMBERSHIP' ? '회원권 타석 배정' : '라카 연장 대여')}
@@ -931,9 +979,192 @@ export default function KioskApp() {
                 assignedBayNo={selectedBayNo}
                 assignedLockerNo={selectedLockerNo}
                 resId={currentHoldResId}
+                memberName={authMember?.member_name}
+                memberNo={authMember?.member_no}
                 onPaymentSuccess={handlePaymentCompleted}
                 onCancel={handleLogout}
               />
+            )}
+
+            {/* ----------------------------------------------------------------
+                📥 STEP 7: 보유 회원권 및 이용권 선택 (Asset Select)
+                ---------------------------------------------------------------- */}
+            {step === 'ASSET_SELECT' && authMember && (
+              <div 
+                style={{
+                  padding: '40px',
+                  borderRadius: '32px',
+                  border: '1px solid #e5e5ea',
+                  background: '#ffffff',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '30px',
+                  color: '#1d1d1f',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  boxShadow: '0 20px 40px rgba(0, 0, 0, 0.12)'
+                }}
+              >
+                {/* Header */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
+                    {lang === 'KO' ? '보유 이용권 선택' : 'Select Active Pass'}
+                  </h2>
+                  <p style={{ fontSize: '18px', color: '#86868b', fontWeight: 600 }}>
+                    {lang === 'KO' 
+                      ? `${authMember.member_name} 님, 배정에 사용할 유효 이용권을 터치해 주세요.`
+                      : `${authMember.member_name}, please select the pass to allocate.`}
+                  </p>
+                </div>
+
+                {/* Asset List Grid */}
+                <div 
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr',
+                    gap: '16px',
+                    maxHeight: '520px',
+                    overflowY: 'auto',
+                    paddingRight: '6px'
+                  }}
+                >
+                  {(() => {
+                    // 1. 현재 선택된 타석의 구역 옵션 추출 (기본값 BAY)
+                    const targetZoneCode = bays.find(b => b.bay_no === selectedBayNo)?.zone_code?.toUpperCase() || 'BAY';
+                    
+                    // 2. 보유 자산 중 해당 구역을 허용하는 것만 필터링 (레슨권 등 빈 배열은 무조건 제외)
+                    const validAssets = (authMember.assets || []).filter(asset => {
+                      if (!asset.allowed_categories || asset.allowed_categories.length === 0) return false;
+                      return asset.allowed_categories.map(c => c.toUpperCase()).includes(targetZoneCode);
+                    });
+
+                    if (validAssets.length === 0) {
+                      return (
+                        <div 
+                          style={{
+                            padding: '40px',
+                            textAlign: 'center',
+                            color: '#86868b',
+                            fontSize: '18px',
+                            fontWeight: 700,
+                            border: '1px dashed #dadce0',
+                            borderRadius: '16px'
+                          }}
+                        >
+                          {lang === 'KO' ? '해당 타석에서 사용할 수 있는 이용권이 없습니다.' : 'No active pass items found for this zone.'}
+                        </div>
+                      );
+                    }
+
+                    return validAssets.map((asset) => {
+                      const isAssetSelected = selectedAssetId === parseInt(asset.member_item_id);
+                      return (
+                        <div
+                          key={asset.member_item_id}
+                          onClick={() => setSelectedAssetId(parseInt(asset.member_item_id))}
+                          className="premium-glass-card"
+                          style={{
+                            padding: '24px',
+                            borderRadius: '16px',
+                            cursor: 'pointer',
+                            border: isAssetSelected 
+                              ? '2.5px solid #34c759' 
+                              : '1.5px solid #dadce0',
+                            background: isAssetSelected 
+                              ? '#ffffff' 
+                              : '#f5f5f7',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            transition: 'all 0.2s ease',
+                            boxShadow: isAssetSelected 
+                              ? '0 10px 25px rgba(52, 199, 89, 0.15)' 
+                              : 'none',
+                            transform: isAssetSelected ? 'scale(1.01)' : 'none'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                            <div 
+                              style={{
+                                background: isAssetSelected ? 'rgba(52, 199, 89, 0.1)' : 'rgba(0, 0, 0, 0.03)',
+                                padding: '14px',
+                                borderRadius: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}
+                            >
+                              {/* Ticket SVG */}
+                              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isAssetSelected ? '#34c759' : '#86868b'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M2 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/>
+                                <path d="M13 5v2"/>
+                                <path d="M13 17v2"/>
+                                <path d="M13 11v2"/>
+                              </svg>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <span style={{ 
+                                fontSize: '20px', 
+                                fontWeight: 800, 
+                                color: isAssetSelected ? '#121419' : '#1d1d1f' 
+                              }}>
+                                {asset.item_name}
+                              </span>
+                              <span style={{ 
+                                fontSize: '14px', 
+                                color: isAssetSelected ? '#1d4e33' : '#86868b',
+                                fontWeight: 600
+                              }}>
+                                {asset.rem_count !== undefined && asset.rem_count > 0 
+                                  ? `${lang === 'KO' ? '남은 횟수' : 'Remaining'}: ${asset.rem_count}회` 
+                                  : (lang === 'KO' ? '기간제 무제한 이용권' : 'Unlimited Period Pass')}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Check Circle SVG when selected */}
+                          {isAssetSelected && (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#34c759" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12"/>
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px' }}>
+                  <button 
+                    className="kiosk-btn" 
+                    style={{ width: '160px', height: '64px', borderRadius: '12px', fontSize: '18px', fontWeight: 800 }}
+                    onClick={() => {
+                      setSelectedAssetId(null);
+                      setStep('MEMBER_AUTH');
+                    }}
+                  >
+                    {lang === 'KO' ? '이전으로' : 'Back'}
+                  </button>
+
+                  <button 
+                    className="kiosk-btn kiosk-btn-primary" 
+                    style={{ 
+                      width: '260px', 
+                      height: '64px', 
+                      borderRadius: '12px', 
+                      fontSize: '20px', 
+                      fontWeight: 800 
+                    }}
+                    disabled={selectedAssetId === null}
+                    onClick={() => selectedAssetId !== null && handleAssetSelected(selectedAssetId)}
+                  >
+                    {lang === 'KO' ? '선택한 이용권으로 배정' : 'Allocate with Selected Pass'}
+                  </button>
+                </div>
+              </div>
             )}
 
           </div>

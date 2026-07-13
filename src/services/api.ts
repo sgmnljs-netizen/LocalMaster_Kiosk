@@ -14,6 +14,7 @@ export interface MemberAsset {
   member_item_id: string;
   item_name: string;
   rem_count: number;
+  allowed_categories?: string[];
 }
 
 export interface KioskCompanionItem {
@@ -60,6 +61,7 @@ export interface Bay {
   bay_no: number;
   floor_no: number;
   floor?: string; // 백엔드 실제 데이터 필드 (e.g. '1F', '2F')
+  zone_code?: string; // 타석 소속 구역 (e.g. 'BAY', 'PAR3')
   type: 'RIGHT' | 'LEFT'; // 우타, 좌타
   status: 'AVAILABLE' | 'PRE_OCCUPIED' | 'OCCUPIED' | 'UNDER_MAINTENANCE';
   current_user_name?: string | null;
@@ -481,7 +483,8 @@ class HybridAPIClient {
     durationMin: number, 
     memberNo?: string, 
     guestName?: string, 
-    hpNo?: string
+    hpNo?: string,
+    memberItemId?: number
   ): Promise<{ success: boolean; res_id?: string; message: string }> {
     const isConnected = await this.checkConnection();
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -505,7 +508,8 @@ class HybridAPIClient {
             res_date: todayStr,
             start_time: nowHourMin,
             duration_min: durationMin,
-            res_type: 'SLOT'
+            res_type: 'SLOT',
+            member_item_id: memberItemId || null
           })
         });
         

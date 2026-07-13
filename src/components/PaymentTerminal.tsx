@@ -10,6 +10,8 @@ interface PaymentTerminalProps {
   assignedBayNo?: number | null;
   assignedLockerNo?: number | null;
   resId?: string | null;
+  memberName?: string;
+  memberNo?: string;
   onPaymentSuccess: () => void;
   onCancel: () => void;
 }
@@ -20,6 +22,8 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   assignedBayNo,
   assignedLockerNo,
   resId,
+  memberName,
+  memberNo,
   onPaymentSuccess,
   onCancel
 }) => {
@@ -61,6 +65,17 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
 
   // 2. 카드 자동 투입 시뮬레이터 (사용자 대기용)
   useEffect(() => {
+    if (amount === 0) {
+      // 회원권/이용권 차감 배정인 경우 결제 단계를 즉시 통과하여 영수증 출력으로 이동
+      setPayStep('PRINT_RECEIPT');
+      const now = new Date();
+      setReceiptDate(
+        `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
+        `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+      );
+      setAppNo(Math.floor(10000000 + Math.random() * 90000000).toString());
+      return;
+    }
     const timer = setTimeout(triggerSimulation, 4500); // 4.5초 뒤 알아서 시뮬레이션 작동
     return () => clearTimeout(timer);
   }, []);
@@ -179,95 +194,147 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       {/* 3단계: 영수증 출력 완료 */}
       {payStep === 'PRINT_RECEIPT' && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '30px', width: '100%' }}>
-          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-            <div 
-              style={{
-                width: '64px',
-                height: '64px',
-                borderRadius: '50%',
-                background: 'rgba(16, 185, 129, 0.1)',
-                border: '2px solid var(--neon-green)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--neon-green)'
-              }}
-            >
-              <Printer size={32} />
-            </div>
-            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff' }}>결제 완료 & 영수증 발행</h2>
+          <div style={{ textAlign: 'center' }}>
+            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff' }}>
+              {amount > 0 ? '결제 완료 & 영수증 발행' : '타석 배정 완료 & 배정표 발행'}
+            </h2>
             <p style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>
-              아래 출구에서 영수증을 반드시 챙겨서 이용해 주시기 바랍니다.
+              {amount > 0 
+                ? '아래 출구에서 영수증을 반드시 챙겨서 이용해 주시기 바랍니다.'
+                : '아래 출구에서 타석 배정표를 반드시 챙겨서 입장해 주시기 바랍니다.'}
             </p>
           </div>
 
-          {/* 지지직 인쇄되는 영수증 종이 */}
+          {/* 지지직 인쇄되는 영수증 또는 배정표 종이 */}
           <div className="receipt-paper">
-            <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: '14px', marginBottom: '14px' }}>
-              <h3 style={{ fontSize: '22px', fontWeight: 900, letterSpacing: '-0.5px' }}>⛳ 무인 골프 스튜디오</h3>
-              <p style={{ fontSize: '13px', marginTop: '4px' }}>프리미엄 골프 아카데미 무인점</p>
-              <p style={{ fontSize: '12px', color: '#555' }}>지점코드: {STORE_CODE}</p>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>단말기번호:</span>
-                <strong>{api.getTerminalId()}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>거래일시:</span>
-                <strong>{receiptDate}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>구매상품:</span>
-                <strong>{productName}</strong>
-              </div>
-              
-              {assignedBayNo !== undefined && assignedBayNo !== null && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', border: '1px solid #000', padding: '6px', margin: '6px 0', background: '#f8fafc' }}>
-                  <span>배정 타석:</span>
-                  <strong style={{ fontSize: '16px' }}>{assignedBayNo}번 타석 (즉시입실)</strong>
+            {amount > 0 ? (
+              // 일일이용권 결제 영수증
+              <>
+                <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: '14px', marginBottom: '14px' }}>
+                  <h3 style={{ fontSize: '22px', fontWeight: 900, letterSpacing: '-0.5px' }}>⛳ 무인 골프 스튜디오</h3>
+                  <p style={{ fontSize: '13px', marginTop: '4px' }}>프리미엄 골프 아카데미 무인점</p>
+                  <p style={{ fontSize: '12px', color: '#555' }}>지점코드: {STORE_CODE}</p>
                 </div>
-              )}
 
-              {assignedLockerNo !== undefined && assignedLockerNo !== null && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', border: '1px solid #000', padding: '6px', margin: '6px 0', background: '#f8fafc' }}>
-                  <span>대여 라카:</span>
-                  <strong style={{ fontSize: '16px' }}>{assignedLockerNo}번 개인 사물함</strong>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>단말기번호:</span>
+                    <strong>{api.getTerminalId()}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>거래일시:</span>
+                    <strong>{receiptDate}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>구매상품:</span>
+                    <strong>{productName}</strong>
+                  </div>
+
+                  {assignedBayNo !== undefined && assignedBayNo !== null && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', border: '1px solid #000', padding: '6px', margin: '6px 0', background: '#f8fafc' }}>
+                      <span>배정 타석:</span>
+                      <strong style={{ fontSize: '16px' }}>{assignedBayNo}번 타석 (즉시입실)</strong>
+                    </div>
+                  )}
+
+                  {assignedLockerNo !== undefined && assignedLockerNo !== null && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', border: '1px solid #000', padding: '6px', margin: '6px 0', background: '#f8fafc' }}>
+                      <span>대여 라카:</span>
+                      <strong style={{ fontSize: '16px' }}>{assignedLockerNo}번 개인 사물함</strong>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #000', paddingTop: '10px', marginTop: '4px' }}>
+                    <span>판매금액:</span>
+                    <span>{(amount - Math.floor(amount * 0.1)).toLocaleString()} 원</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>부 가 세:</span>
+                    <span>{Math.floor(amount * 0.1).toLocaleString()} 원</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: 800, borderTop: '1px solid #000', borderBottom: '1px solid #000', padding: '6px 0' }}>
+                    <span>합계금액:</span>
+                    <span>{amount.toLocaleString()} 원</span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
+                    <span>결제수단:</span>
+                    <span>신용카드 (IC)</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>카드번호:</span>
+                    <span>9410-12**-****-****</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>승인번호:</span>
+                    <strong style={{ fontSize: '14px' }}>{appNo}</strong>
+                  </div>
                 </div>
-              )}
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #000', paddingTop: '10px', marginTop: '4px' }}>
-                <span>판매금액:</span>
-                <span>{(amount - Math.floor(amount * 0.1)).toLocaleString()} 원</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>부 가 세:</span>
-                <span>{Math.floor(amount * 0.1).toLocaleString()} 원</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: 800, borderTop: '1px solid #000', borderBottom: '1px solid #000', padding: '6px 0' }}>
-                <span>합계금액:</span>
-                <span>{amount.toLocaleString()} 원</span>
-              </div>
+                <div style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: '14px', marginTop: '14px', fontSize: '12px', color: '#444' }}>
+                  <p>이용권 유효기간 내에만 타석 사용이 보장됩니다.</p>
+                  <p style={{ marginTop: '4px', fontWeight: 700 }}>이용해 주셔서 대단히 감사합니다.</p>
+                </div>
+              </>
+            ) : (
+              // 회원권/이용권 타석 배정표 (Ticket)
+              <>
+                <div style={{ textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: '14px', marginBottom: '14px' }}>
+                  <h3 style={{ fontSize: '24px', fontWeight: 900, letterSpacing: '1px', color: '#111' }}>🎫 타석 배정표</h3>
+                  <p style={{ fontSize: '13px', marginTop: '4px', color: '#666' }}>프리미엄 골프 아카데미 무인점</p>
+                </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
-                <span>결제수단:</span>
-                <span>신용카드 (IC)</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>카드번호:</span>
-                <span>9410-12**-****-****</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>승인번호:</span>
-                <strong style={{ fontSize: '14px' }}>{appNo}</strong>
-              </div>
-            </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '14px' }}>
+                  {/* 타석 번호 강조 */}
+                  <div 
+                    style={{ 
+                      border: '2px solid #000', 
+                      borderRadius: '8px',
+                      padding: '16px', 
+                      margin: '6px 0', 
+                      background: '#f8fafc',
+                      textAlign: 'center',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}
+                  >
+                    <span style={{ fontSize: '14px', color: '#555', fontWeight: 600 }}>배정 타석</span>
+                    <strong style={{ fontSize: '32px', color: '#000', fontWeight: 900 }}>
+                      {assignedBayNo}번 타석
+                    </strong>
+                    <span style={{ fontSize: '13px', color: 'var(--neon-green)', fontWeight: 800, background: '#e6f4ea', padding: '2px 8px', borderRadius: '12px', alignSelf: 'center', marginTop: '4px' }}>
+                      즉시 입실 (60분 이용)
+                    </span>
+                  </div>
 
-            <div style={{ textAlign: 'center', borderTop: '1px dashed #000', paddingTop: '14px', marginTop: '14px', fontSize: '12px', color: '#444' }}>
-              <p>이용권 유효기간 내에만 타석 사용이 보장됩니다.</p>
-              <p style={{ marginTop: '4px', fontWeight: 700 }}>이용해 주셔서 대단히 감사합니다.</p>
-            </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #ccc', paddingBottom: '8px', marginTop: '8px' }}>
+                    <span style={{ color: '#555' }}>이용회원:</span>
+                    <strong style={{ fontSize: '15px' }}>{memberName || '회원'} 님 {memberNo ? `(${memberNo})` : ''}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #ccc', paddingBottom: '8px' }}>
+                    <span style={{ color: '#555' }}>배정일시:</span>
+                    <strong>{receiptDate}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #ccc', paddingBottom: '8px' }}>
+                    <span style={{ color: '#555' }}>차감 이용권:</span>
+                    <strong>{productName}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px' }}>
+                    <span style={{ color: '#555' }}>처리결과:</span>
+                    <strong style={{ color: '#10b981', fontWeight: 800 }}>이용권 1회 차감 완료 (자동승인)</strong>
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'center', borderTop: '2px solid #000', paddingTop: '14px', marginTop: '14px', fontSize: '12px', color: '#444' }}>
+                  <p>배정된 타석의 시간이 종료되면 자동으로 정지됩니다.</p>
+                  <p style={{ marginTop: '4px', fontWeight: 700 }}>이용해 주셔서 대단히 감사합니다.</p>
+                </div>
+              </>
+            )}
 
             {/* 게이트 출입용 실시간 가상 바코드 */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', borderTop: '1px dashed #000', paddingTop: '14px', marginTop: '14px' }}>
