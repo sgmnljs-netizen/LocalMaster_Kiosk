@@ -14,6 +14,7 @@ import { Par3Allocation } from './components/Par3Allocation';
 import { TopTeeboxDashboard } from './components/TopTeeboxDashboard';
 import { PracticeSelect } from './components/PracticeSelect';
 import { api, Member, Product, Bay } from './services/api';
+import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
 
 type KioskStep = 
   | 'INTRO' 
@@ -654,241 +655,45 @@ export default function KioskApp() {
             )}
 
             {/* ----------------------------------------------------------------
-                📥 STEP 1: 메인 메뉴 대시보드 (Premium Bento Box - Apple Light Theme)
+                📥 STEP 1: 메인 메뉴 대시보드 (2026 Premium Bento Box)
                 ---------------------------------------------------------------- */}
             {step === 'MAIN_DASHBOARD' && (
-              <div 
-                style={{ 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  gap: '40px',
-                  justifyContent: 'center',
-                  height: '100%',
-                  maxHeight: '1080px'
+              <KioskMainDashboard 
+                lang={lang}
+                onPracticeTeebox={() => setStep('PRACTICE_SELECT')}
+                onPar3Allocation={() => {
+                  setPurpose('BOOK_PAR3');
+                  setStep('PAR3_ALLOCATION');
                 }}
-              >
-                {/* 웰컴 배너 */}
-                <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                  <h2 style={{ fontSize: '38px', fontWeight: 900, color: '#1d1d1f', marginBottom: '8px' }}>
-                    {TRANSLATIONS[lang].welcome}
-                  </h2>
-                  <p style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>
-                    {TRANSLATIONS[lang].subWelcome}
-                  </p>
-                </div>
-
-                {/* 🎨 Premium Bento Box 레이아웃 (Apple-style Light Theme) */}
-                <div 
-                  style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: '24px',
-                    padding: '0 20px'
-                  }}
-                >
-                  
-                  {/* Row 1: 연습타석배정 (최상단 메인 히어로 카드 - 와이드) */}
-                  <div
-                    onClick={() => {
-                      setStep('PRACTICE_SELECT');
-                    }}
-                    className="premium-glass-card"
-                    style={{
-                      width: '100%',
-                      height: '280px',
-                      padding: '40px',
-                      borderRadius: '32px',
-                      cursor: 'pointer',
-                      backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.45)), linear-gradient(135deg, rgba(52, 199, 89, 0.15) 0%, rgba(0, 0, 0, 0.02) 100%)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      border: '1px solid rgba(52, 199, 89, 0.25)'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <Sparkles size={48} style={{ color: '#34c759' }} />
-                      <span style={{ fontSize: '14px', fontWeight: 900, background: 'rgba(52,199,89,0.08)', color: '#34c759', padding: '6px 14px', borderRadius: '20px', letterSpacing: '1px', border: '1px solid rgba(52,199,89,0.2)' }}>
-                        {TRANSLATIONS[lang].recommend}
-                      </span>
-                    </div>
-                    <div>
-                      <h3 style={{ fontSize: '42px', fontWeight: 900, color: '#1d1d1f', marginBottom: '12px', letterSpacing: '-0.5px' }}>
-                        {TRANSLATIONS[lang].practiceTeebox}
-                      </h3>
-                      <p style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 500, lineHeight: 1.5 }}>
-                        {TRANSLATIONS[lang].practiceTeeboxSub}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Row 2: 파3배정 & 회원권 구매 */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                    {/* 파3배정 */}
-                    <div
-                      onClick={() => {
-                        setPurpose('BOOK_PAR3');
-                        setStep('PAR3_ALLOCATION');
-                      }}
-                      className="premium-glass-card"
-                      style={{
-                        height: '240px',
-                        padding: '36px',
-                        borderRadius: '32px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <Calendar size={42} style={{ color: '#0071e3' }} />
-                      <div>
-                        <h3 style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', marginBottom: '10px', letterSpacing: '-0.5px' }}>
-                          {TRANSLATIONS[lang].par3Course}
-                        </h3>
-                        <p style={{ fontSize: '16px', color: 'var(--text-secondary)', fontWeight: 500, lineHeight: 1.4 }}>
-                          {TRANSLATIONS[lang].par3CourseSub}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* 회원권 구매 */}
-                    <div
-                      onClick={() => {
-                        setPurpose('PURCHASE_PRODUCT');
-                        setInitialAuthMode('PHONE');
-                        if (authMember) {
-                          setStep('PRODUCT_SHOP');
-                        } else {
-                          setStep('MEMBER_AUTH');
-                        }
-                      }}
-                      className="premium-glass-card"
-                      style={{
-                        height: '240px',
-                        padding: '36px',
-                        borderRadius: '32px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <Compass size={42} style={{ color: '#0071e3' }} />
-                      <div>
-                        <h3 style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', marginBottom: '10px', letterSpacing: '-0.5px' }}>
-                          {TRANSLATIONS[lang].purchaseMembership}
-                        </h3>
-                        <p style={{ fontSize: '16px', color: 'var(--text-secondary)', fontWeight: 500, lineHeight: 1.4 }}>
-                          {TRANSLATIONS[lang].purchaseMembershipSub}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Row 3: 타석이동 & 라카 연장 */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                    {/* 타석이동 */}
-                    <div
-                      onClick={() => {
-                        setPurpose('MOVE_BAY');
-                        setInitialAuthMode('PHONE');
-                        if (authMember) {
-                          setStep('TEEBOX_MAP');
-                        } else {
-                          setStep('MEMBER_AUTH');
-                        }
-                      }}
-                      className="premium-glass-card"
-                      style={{
-                        height: '200px',
-                        padding: '32px',
-                        borderRadius: '32px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <ArrowLeftRight size={38} style={{ color: '#0071e3' }} />
-                      </div>
-                      <div>
-                        <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', marginBottom: '8px' }}>
-                          {TRANSLATIONS[lang].moveBay}
-                        </h3>
-                        <p style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
-                          {TRANSLATIONS[lang].moveBaySub}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* 라카 연장 */}
-                    <div
-                      onClick={() => {
-                        setPurpose('EXTEND_LOCKER');
-                        setInitialAuthMode('PHONE');
-                        if (authMember) {
-                          setStep('LOCKER_EXTEND');
-                        } else {
-                          setStep('MEMBER_AUTH');
-                        }
-                      }}
-                      className="premium-glass-card"
-                      style={{
-                        height: '200px',
-                        padding: '32px',
-                        borderRadius: '32px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <KeyRound size={38} style={{ color: '#0071e3' }} />
-                      </div>
-                      <div>
-                        <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', marginBottom: '8px' }}>
-                          {TRANSLATIONS[lang].lockerExtend}
-                        </h3>
-                        <p style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
-                          {TRANSLATIONS[lang].lockerExtendSub}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Row 4: 회원가입 (와이드 배너) */}
-                  <div
-                    onClick={() => {
-                      setStep('MEMBER_REGISTER');
-                    }}
-                    className="premium-glass-card"
-                    style={{
-                      width: '100%',
-                      height: '140px',
-                      padding: '32px 40px',
-                      borderRadius: '32px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f' }}>
-                        {TRANSLATIONS[lang].signUp}
-                      </h3>
-                      <p style={{ fontSize: '16px', color: 'var(--text-secondary)' }}>
-                        {TRANSLATIONS[lang].signUpSub}
-                      </p>
-                    </div>
-                    <UserPlus size={42} style={{ color: '#34c759', padding: '8px', background: 'rgba(52, 199, 89, 0.08)', borderRadius: '16px' }} />
-                  </div>
-
-                </div>
-              </div>
+                onPurchaseMembership={() => {
+                  setPurpose('PURCHASE_PRODUCT');
+                  setInitialAuthMode('PHONE');
+                  if (authMember) {
+                    setStep('PRODUCT_SHOP');
+                  } else {
+                    setStep('MEMBER_AUTH');
+                  }
+                }}
+                onMoveBay={() => {
+                  setPurpose('MOVE_BAY');
+                  setInitialAuthMode('PHONE');
+                  if (authMember) {
+                    setStep('TEEBOX_MAP');
+                  } else {
+                    setStep('MEMBER_AUTH');
+                  }
+                }}
+                onLockerExtend={() => {
+                  setPurpose('EXTEND_LOCKER');
+                  setInitialAuthMode('PHONE');
+                  if (authMember) {
+                    setStep('LOCKER_EXTEND');
+                  } else {
+                    setStep('MEMBER_AUTH');
+                  }
+                }}
+                onSignUp={() => setStep('MEMBER_REGISTER')}
+              />
             )}
 
             {/* ----------------------------------------------------------------
