@@ -945,6 +945,18 @@ class HybridAPIClient {
     const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
     if (targetIdx !== -1) {
       const resId = `R-HOLD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      
+      const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+      holds.push({
+        res_id: resId,
+        bay_no: bayNo,
+        duration_min: durationMin,
+        member_no: memberNo || null,
+        guest_nm: guestName || null,
+        hp_no: hpNo || null
+      });
+      localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(holds));
+
       return {
         success: true,
         res_id: resId,
@@ -973,6 +985,9 @@ class HybridAPIClient {
     }
 
     // Edge DB 모드
+    const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+    const filtered = holds.filter((h: any) => h.res_id !== resId);
+    localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
     return { success: true, message: '보류 예약 취소 완료 (Edge DB)' };
   }
 
@@ -1007,8 +1022,50 @@ class HybridAPIClient {
       }
     }
 
-    // Edge DB 모드: 결제 성공 시 실제 배정(allocateBay)으로 위임 처리
-    return { success: true, message: '결제 승인 통보 완료 (Edge DB)' };
+    // Edge DB 모드: 결제 성공 시 실제 배정(allocateBay)으로 위임 처리 및 타석 가동
+    const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+    const holdData = holds.find((h: any) => h.res_id === resId);
+    
+    if (holdData) {
+      const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as any[];
+      const targetIdx = bays.findIndex(b => b.bay_no === holdData.bay_no);
+      if (targetIdx !== -1) {
+        const endDt = new Date();
+        endDt.setMinutes(endDt.getMinutes() + holdData.duration_min);
+        const endTimeStr = `${String(endDt.getHours()).padStart(2, '0')}${String(endDt.getMinutes()).padStart(2, '0')}`;
+        
+        bays[targetIdx].status = 'OCCUPIED';
+        bays[targetIdx].current_user_name = holdData.guest_nm || (holdData.member_no ? '회원' : 'Guest');
+        bays[targetIdx].current_user_hp = holdData.hp_no || null;
+        bays[targetIdx].end_time = endTimeStr;
+        bays[targetIdx].minutes_left = holdData.duration_min;
+        bays[targetIdx].lock_terminal_id = null;
+        bays[targetIdx].lock_expired_at = null;
+        localStorage.setItem('LM_BAYS', JSON.stringify(bays));
+      }
+      
+      // 매출 기록(LM_SALES) 추가
+      const sales = JSON.parse(localStorage.getItem('LM_SALES') || '[]') as any[];
+      const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      sales.push({
+        sale_id: `S-${Date.now()}`,
+        sale_dt: todayStr,
+        total_amt: amount,
+        pay_amt: amount,
+        pay_method: paymentMethod,
+        items: `일일 타석권 ${holdData.duration_min}분 배정`,
+        status: 'COMPLETED'
+      });
+      localStorage.setItem('LM_SALES', JSON.stringify(sales));
+      
+      // 로컬 보류 목록에서 클린업
+      const filtered = holds.filter((h: any) => h.res_id !== resId);
+      localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
+      
+      return { success: true, message: '결제 승인 및 오프라인 타석 배정 완료' };
+    }
+    
+    return { success: false, message: '보류 예약 정보를 찾을 수 없습니다. (Edge DB)' };
   }
 }
 
