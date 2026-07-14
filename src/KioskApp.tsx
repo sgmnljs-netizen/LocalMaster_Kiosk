@@ -140,8 +140,6 @@ export default function KioskApp() {
 
   // 2. 무인기기 비활성 세션 아웃 (40초간 조작이 없으면 자동으로 광고 인트로로 복귀)
   useEffect(() => {
-    // [TODO: 임시 주석 처리 (테스트 중 40초 튕김 방지)]
-    /*
     if (step === 'INTRO') return;
 
     const resetTimer = () => {
@@ -160,7 +158,6 @@ export default function KioskApp() {
       window.removeEventListener('click', resetTimer);
       clearTimeout(sessionTimeout);
     };
-    */
   }, [step, lang]);
 
   const showToast = (message: string, success = true) => {
