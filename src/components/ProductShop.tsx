@@ -5,6 +5,7 @@ import { api, Product } from '../services/api';
 interface ProductShopProps {
   memberNo?: string;
   memberName?: string;
+  purposeType?: 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT';
   onProductSelected: (product: Product) => void;
   onCancel: () => void;
 }
@@ -19,6 +20,7 @@ interface DisplayCategoryItem {
 export const ProductShop: React.FC<ProductShopProps> = ({
   memberNo,
   memberName,
+  purposeType,
   onProductSelected,
   onCancel
 }) => {
@@ -41,7 +43,9 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         setAllProducts(products);
 
         // 기본 활성 탭 설정
-        if (categories.length > 0) {
+        if (purposeType === 'ALLOCATE_DAILY') {
+          setActiveTab('DAILY_PASS');
+        } else if (categories.length > 0) {
           if (memberNo) {
             // 회원 로그인 상태 ➔ 첫 번째 동적 카테고리 탭 (예: 회원권) 기본 선택
             setActiveTab(categories[0].category_id);
@@ -59,13 +63,27 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       }
     };
     loadKioskShopData();
-  }, [memberNo]);
+  }, [memberNo, purposeType]);
+
+  // 일일 타석 배정권 여부 판별 헬퍼
+  const checkIfDaily = (prod: Product) => {
+    return prod.logic_type === 'DAILY' && (prod.prod_cd.startsWith('D') || prod.prod_nm.includes('일일타석'));
+  };
+
+  // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB의 duration_min이 None/null인 케이스 대응)
+  const getDurationMin = (prod: Product) => {
+    if (prod.duration_min != null && prod.duration_min > 0) return prod.duration_min;
+    if (prod.prod_cd === 'D001') return 60;
+    if (prod.prod_cd === 'D002') return 90;
+    const match = prod.prod_nm.match(/(\d+)분/);
+    return match ? parseInt(match[1]) : 60;
+  };
 
   // 현재 탭에 맞는 노출 상품 목록 필터링
   const getFilteredProducts = (): Product[] => {
     if (activeTab === 'DAILY_PASS') {
-      // 일일 타석 배정권 (duration_min이 존재하는 상품만 필터링)
-      return allProducts.filter(p => p.duration_min !== undefined && p.logic_type !== 'FACILITY');
+      // 일일 타석 배정권 전용 필터링 (checkIfDaily 사용)
+      return allProducts.filter(checkIfDaily);
     } else {
       // 동적 전시 카테고리 상품 매핑
       const matchedCat = displayCategories.find(c => c.category_id === activeTab);
@@ -106,14 +124,18 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <ShoppingBag size={34} style={{ color: 'var(--neon-indigo)' }} />
           <div>
-            <h2 style={{ fontSize: '30px', fontWeight: 900 }}>회원권 및 일일타석권 구매</h2>
+            <h2 style={{ fontSize: '30px', fontWeight: 900 }}>
+              {purposeType === 'ALLOCATE_DAILY' ? '일일 타석권 선택 및 결제' : '회원권 및 일일타석권 구매'}
+            </h2>
             {memberName ? (
               <p style={{ fontSize: '15px', color: 'var(--text-secondary)', marginTop: '2px' }}>
                 회원번호: <strong style={{ color: '#fff' }}>{memberNo} ({memberName})</strong> 님 전용 구매
               </p>
             ) : (
               <p style={{ fontSize: '15px', color: 'var(--neon-amber)', fontWeight: 700, marginTop: '2px' }}>
-                ※ 비회원 신규 구매 시 타석 자동 연동 배정
+                {purposeType === 'ALLOCATE_DAILY' 
+                  ? '※ 원하시는 이용 시간(N분)을 선택하여 결제를 진행해 주세요.'
+                  : '※ 비회원 신규 구매 시 타석 자동 연동 배정'}
               </p>
             )}
           </div>
@@ -136,77 +158,80 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           }}
         >
           <X size={18} />
-          이전으로
+          돌아가기
         </button>
       </div>
 
-      {/* 동적 카테고리 & 고정 일일권 탭 목록 */}
-      <div 
-        style={{ 
-          display: 'grid', 
-          gridTemplateColumns: `repeat(${displayCategories.length + 1}, 1fr)`, 
-          gap: '12px' 
-        }}
-      >
-        {/* 1. 스샷1 어드민에서 설정한 동적 카테고리 탭 렌더링 */}
-        {displayCategories.map(cat => {
-          const isActive = activeTab === cat.category_id;
-          const isLocked = !memberNo && (cat.name.includes('회원') || cat.name.includes('라카'));
-          
-          return (
-            <button
-              key={cat.category_id}
-              onClick={() => handleTabClick(cat.category_id, cat.name)}
-              style={{
-                padding: '20px 10px',
-                fontSize: '18px',
-                fontWeight: 800,
-                borderRadius: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                border: '1px solid',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                opacity: isLocked ? 0.35 : 1,
-                color: isActive ? '#fff' : 'var(--text-secondary)',
-                background: isActive ? 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)' : 'var(--bg-secondary)',
-                borderColor: isActive ? 'var(--neon-indigo)' : 'var(--glass-border)',
-                boxShadow: isActive ? '0 0 15px var(--neon-indigo-glow)' : 'none'
-              }}
-            >
-              <Layers size={18} />
-              {cat.name}
-            </button>
-          );
-        })}
-
-        {/* 2. 가장 마지막에 고정 노출되는 일일 타석 배정권 탭 */}
-        <button
-          onClick={() => setActiveTab('DAILY_PASS')}
-          style={{
-            padding: '20px 10px',
-            fontSize: '18px',
-            fontWeight: 800,
-            borderRadius: '14px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            border: '1px solid',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            color: activeTab === 'DAILY_PASS' ? '#fff' : 'var(--text-secondary)',
-            background: activeTab === 'DAILY_PASS' ? 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)' : 'var(--bg-secondary)',
-            borderColor: activeTab === 'DAILY_PASS' ? 'var(--neon-indigo)' : 'var(--glass-border)',
-            boxShadow: activeTab === 'DAILY_PASS' ? '0 0 15px var(--neon-indigo-glow)' : 'none'
+      {/* 동적 카테고리 & 고정 일일권 탭 목록 (일일권 배정 모드일 때는 숨김 처리) */}
+      {purposeType !== 'ALLOCATE_DAILY' && (
+        <div 
+          style={{ 
+            display: 'grid', 
+            gridTemplateColumns: `repeat(${displayCategories.length + 1}, 1fr)`, 
+            gap: '12px' 
           }}
         >
-          <CreditCard size={18} />
-          일일 타석 배정권 (즉시 입장)
-        </button>
-      </div>
+          {/* 1. 스샷1 어드민에서 설정한 동적 카테고리 탭 렌더링 */}
+          {displayCategories.map(cat => {
+            const isActive = activeTab === cat.category_id;
+            const isLocked = !memberNo && (cat.name.includes('회원') || cat.name.includes('라카'));
+            
+            return (
+              <button
+                key={cat.category_id}
+                onClick={() => handleTabClick(cat.category_id, cat.name)}
+                style={{
+                  padding: '20px 10px',
+                  fontSize: '18px',
+                  fontWeight: 800,
+                  borderRadius: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  border: '1px solid',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  opacity: isLocked ? 0.35 : 1,
+                  color: isActive ? '#fff' : 'var(--text-secondary)',
+                  background: isActive ? 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)' : 'var(--bg-secondary)',
+                  borderColor: isActive ? 'var(--neon-indigo)' : 'var(--glass-border)',
+                  boxShadow: isActive ? '0 0 15px var(--neon-indigo-glow)' : 'none'
+                }}
+              >
+                <Layers size={18} />
+                {cat.name}
+              </button>
+            );
+          })}
+
+          {/* 2. 가장 마지막에 고정 노출되는 일일 타석 배정권 탭 */}
+          <button
+            onClick={() => setActiveTab('DAILY_PASS')}
+            style={{
+              padding: '20px 10px',
+              fontSize: '18px',
+              fontWeight: 800,
+              borderRadius: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              border: '1px solid',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              color: activeTab === 'DAILY_PASS' ? '#fff' : 'var(--text-secondary)',
+              background: activeTab === 'DAILY_PASS' ? 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)' : 'var(--bg-secondary)',
+              borderColor: activeTab === 'DAILY_PASS' ? 'var(--neon-indigo)' : 'var(--glass-border)',
+              boxShadow: activeTab === 'DAILY_PASS' ? '0 0 15px var(--neon-indigo-glow)' : 'none'
+            }}
+          >
+            <CreditCard size={18} />
+            일일 타석 배정권 (즉시 입장)
+          </button>
+        </div>
+      )}
+
 
       {/* 상품 목록 리스트 */}
       <div 
@@ -223,7 +248,8 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           </div>
         ) : filteredProducts.length > 0 ? (
           filteredProducts.map((prod) => {
-            const isDaily = prod.duration_min !== undefined && prod.duration_min !== null;
+            const isDaily = checkIfDaily(prod);
+            const durationMin = getDurationMin(prod);
             const priceFormatted = prod.standard_price.toLocaleString();
 
             return (
@@ -282,7 +308,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary, #4b5563)', fontSize: '14px' }}>
                     <CheckCircle2 size={16} style={{ color: 'var(--neon-indigo)' }} />
                     <span>
-                      {isDaily ? `타석 지정 즉시 입장 (${prod.duration_min}분)` : `정기 기간 적용 (${prod.days}일 이용 가능)`}
+                      {isDaily ? `타석 지정 즉시 입장 (${durationMin}분)` : `정기 기간 적용 (${prod.days}일 이용 가능)`}
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary, #4b5563)', fontSize: '14px' }}>

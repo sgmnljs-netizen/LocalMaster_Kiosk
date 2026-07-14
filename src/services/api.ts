@@ -195,6 +195,23 @@ const initializeEdgeDB = () => {
         end_time
       });
     }
+
+    // 파3 미니 라운딩 타석 5개 추가 (zone_code: 'PAR3')
+    for (let i = 21; i <= 25; i++) {
+      bays.push({
+        bay_id: i,
+        bay_no: i,
+        floor_no: 1,
+        type: 'RIGHT',
+        status: 'AVAILABLE',
+        current_user_name: null,
+        minutes_left: undefined,
+        end_time: null,
+        zone_code: 'PAR3',
+        bay_name: `PAR3-${i - 20}`
+      });
+    }
+
     localStorage.setItem('LM_BAYS', JSON.stringify(bays));
 
     // 4. Lockers (라카 30개 생성)

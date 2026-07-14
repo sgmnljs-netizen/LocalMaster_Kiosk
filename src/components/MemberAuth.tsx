@@ -11,7 +11,7 @@ interface MemberAuthProps {
 }
 
 export const MemberAuth: React.FC<MemberAuthProps> = ({ 
-  initialAuthMode = 'PHONE', 
+  initialAuthMode = 'FACE', 
   onAuthSuccess, 
   onCancel, 
   onSignUpClick,
@@ -141,9 +141,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       } else {
         setErrorMsg('등록된 안면 정보가 일치하는 회원을 찾을 수 없습니다.');
         setFaceScanning(false);
-        if (onAuthError) {
-          onAuthError('ERR_FACE_NOT_FOUND', '카메라 프레임 내 등록된 회원 정보와 부합하는 페이스 ID가 없습니다.');
-        }
+        // [TODO: 임시 주석 처리 (안면인식 UI 렌더링 테스트 목적)]
+        // if (onAuthError) {
+        //   onAuthError('ERR_FACE_NOT_FOUND', '카메라 프레임 내 등록된 회원 정보와 부합하는 페이스 ID가 없습니다.');
+        // }
       }
     } catch {
       setErrorMsg('안면인식 장치 응답 지연이 발생했습니다.');
@@ -176,109 +177,125 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
 
   return (
     <div 
-      className="glass-panel glass-panel-glow" 
+      className="premium-glass-card" 
       style={{
-        width: '900px',
-        margin: '40px auto',
-        padding: '50px',
+        width: '940px',
+        margin: '20px auto',
+        padding: '60px',
         display: 'flex',
         flexDirection: 'column',
         gap: '40px',
-        border: '1px solid rgba(255,255,255,0.12)'
       }}
     >
       {/* 타이틀 바 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <User size={36} style={{ color: 'var(--neon-indigo)' }} />
-          <h2 style={{ fontSize: '32px', fontWeight: 900 }}>회원인증 (QR / 휴대폰번호)</h2>
+          <User size={40} style={{ color: 'var(--neon-green)' }} />
+          <h2 style={{ fontSize: '36px', fontWeight: 900, color: 'var(--text-primary)' }}>회원 인증 (안면/휴대폰/QR)</h2>
         </div>
         <button 
           onClick={onCancel}
           style={{
-            background: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            color: 'var(--neon-red)',
-            padding: '12px',
-            borderRadius: '50%',
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid var(--glass-border)',
+            color: 'var(--text-secondary)',
+            padding: '10px 20px',
+            borderRadius: '10px',
             cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: 700,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center'
+            gap: '6px',
+            transition: 'transform 0.1s ease'
           }}
+          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
+          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
         >
-          <X size={24} />
+          <X size={18} />
+          돌아가기
         </button>
       </div>
 
       {/* 인증 모드 전환 탭 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px' }}>
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(3, 1fr)', 
+        gap: '8px',
+        background: 'rgba(0, 0, 0, 0.04)',
+        padding: '8px',
+        borderRadius: '20px'
+      }}>
         <button
           onClick={() => { setAuthMode('FACE'); setErrorMsg(''); }}
           style={{
-            padding: '20px',
-            fontSize: '20px',
-            fontWeight: 900,
-            borderRadius: '12px',
+            padding: '24px',
+            fontSize: '22px',
+            fontWeight: 800,
+            borderRadius: '14px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '10px',
+            gap: '12px',
             border: '0.5px solid',
             cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            color: authMode === 'FACE' ? '#fff' : 'var(--text-secondary)',
-            background: authMode === 'FACE' ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : 'var(--bg-secondary)',
-            borderColor: authMode === 'FACE' ? 'var(--neon-indigo)' : 'var(--glass-border)'
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            color: authMode === 'FACE' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            background: authMode === 'FACE' ? '#ffffff' : 'transparent',
+            borderColor: authMode === 'FACE' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+            boxShadow: authMode === 'FACE' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
           }}
         >
-          <Camera size={22} />
+          <Camera size={26} style={{ color: authMode === 'FACE' ? 'var(--neon-green)' : 'inherit' }} />
           안면 인식 인증
         </button>
 
         <button
           onClick={() => { setAuthMode('PHONE'); setErrorMsg(''); }}
           style={{
-            padding: '20px',
-            fontSize: '20px',
-            fontWeight: 900,
-            borderRadius: '12px',
+            padding: '24px',
+            fontSize: '22px',
+            fontWeight: 800,
+            borderRadius: '14px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '10px',
+            gap: '12px',
             border: '0.5px solid',
             cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            color: authMode === 'PHONE' ? '#fff' : 'var(--text-secondary)',
-            background: authMode === 'PHONE' ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : 'var(--bg-secondary)',
-            borderColor: authMode === 'PHONE' ? 'var(--neon-indigo)' : 'var(--glass-border)'
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            color: authMode === 'PHONE' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            background: authMode === 'PHONE' ? '#ffffff' : 'transparent',
+            borderColor: authMode === 'PHONE' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+            boxShadow: authMode === 'PHONE' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
           }}
         >
-          <Phone size={22} />
+          <Phone size={26} style={{ color: authMode === 'PHONE' ? 'var(--neon-green)' : 'inherit' }} />
           휴대폰 번호 입력
         </button>
 
         <button
           onClick={() => { setAuthMode('QR'); setErrorMsg(''); }}
           style={{
-            padding: '20px',
-            fontSize: '20px',
-            fontWeight: 900,
-            borderRadius: '12px',
+            padding: '24px',
+            fontSize: '22px',
+            fontWeight: 800,
+            borderRadius: '14px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '10px',
+            gap: '12px',
             border: '0.5px solid',
             cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            color: authMode === 'QR' ? '#fff' : 'var(--text-secondary)',
-            background: authMode === 'QR' ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : 'var(--bg-secondary)',
-            borderColor: authMode === 'QR' ? 'var(--neon-indigo)' : 'var(--glass-border)'
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            color: authMode === 'QR' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            background: authMode === 'QR' ? '#ffffff' : 'transparent',
+            borderColor: authMode === 'QR' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+            boxShadow: authMode === 'QR' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
           }}
         >
-          <QrCode size={22} />
+          <QrCode size={26} style={{ color: authMode === 'QR' ? 'var(--neon-green)' : 'inherit' }} />
           QR 코드 스캔
         </button>
       </div>
@@ -301,70 +318,109 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         </div>
       )}
 
-      {/* 0. 안면 인식 가상 카메라 패널 */}
+      {/* 0. 안면 인식 가상 카메라 패널 (프리미엄 리뉴얼) */}
       {authMode === 'FACE' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', alignItems: 'center' }}>
-          {/* 가상 카메라 뷰 */}
+          
+          {/* 거대 스캐너 메인 뷰 (640x640 정방형, Apple Face ID + Sci-Fi 무드) */}
           <div 
+            className="premium-glass-card"
             style={{
-              width: '480px',
-              height: '360px',
-              background: '#040507',
-              borderRadius: '16px',
-              border: `0.5px solid ${faceMatchResult ? 'var(--neon-green)' : 'var(--theme-silver)'}`,
+              width: '640px',
+              height: '640px',
+              background: 'radial-gradient(circle, rgba(20, 20, 24, 0.95) 0%, rgba(4, 5, 7, 0.98) 100%)',
+              borderRadius: '40px',
+              border: `2px solid ${faceMatchResult ? 'var(--neon-green)' : 'rgba(255, 255, 255, 0.05)'}`,
               position: 'relative',
               overflow: 'hidden',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 4px 30px rgba(0, 0, 0, 0.4)',
-              transition: 'all 0.2s ease'
+              boxShadow: faceMatchResult 
+                ? '0 0 40px rgba(52, 199, 89, 0.2), inset 0 0 80px rgba(52, 199, 89, 0.1)' 
+                : '0 24px 60px rgba(0, 0, 0, 0.6), inset 0 0 40px rgba(0, 113, 227, 0.05)',
+              transition: 'all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)'
             }}
           >
-            {/* 가상 안면 감지 바운딩 박스 */}
+            {/* 4개의 사이버틱 코너 마커 */}
+            {[
+              { top: '30px', left: '30px', borderTop: '4px solid', borderLeft: '4px solid' },
+              { top: '30px', right: '30px', borderTop: '4px solid', borderRight: '4px solid' },
+              { bottom: '30px', left: '30px', borderBottom: '4px solid', borderLeft: '4px solid' },
+              { bottom: '30px', right: '30px', borderBottom: '4px solid', borderRight: '4px solid' }
+            ].map((pos, idx) => (
+              <div 
+                key={idx}
+                style={{
+                  position: 'absolute',
+                  width: '60px',
+                  height: '60px',
+                  borderColor: faceMatchResult ? 'var(--neon-green)' : 'var(--neon-indigo)',
+                  boxShadow: faceMatchResult ? '0 0 16px var(--neon-green-glow)' : 'none',
+                  borderRadius: '12px',
+                  opacity: faceScanning && !faceMatchResult ? 0.8 : 0.4,
+                  transition: 'all 0.3s ease',
+                  ...pos
+                }}
+              />
+            ))}
+
+            {/* 정중앙 스캔 가이드 & 카메라 아이콘 */}
             <div 
-              className={faceScanning && !faceMatchResult ? 'animate-pulse' : ''}
               style={{
-                width: '200px',
-                height: '200px',
-                border: `1.5px solid ${faceMatchResult ? 'var(--neon-green)' : 'var(--neon-indigo)'}`,
+                width: '320px',
+                height: '320px',
+                border: `2px dashed ${faceMatchResult ? 'transparent' : 'rgba(255,255,255,0.1)'}`,
                 borderRadius: '50%',
                 position: 'relative',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: faceMatchResult 
-                  ? '0 0 12px var(--neon-green-glow)' 
-                  : '0 0 8px var(--neon-indigo-glow)',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.3s ease',
+                zIndex: 2,
               }}
             >
-              <Camera size={40} style={{ color: faceMatchResult ? 'var(--neon-green)' : 'var(--neon-indigo)', transition: 'all 0.2s ease' }} />
+              <Camera 
+                size={72} 
+                style={{ 
+                  color: faceMatchResult ? 'var(--neon-green)' : (faceScanning ? 'var(--neon-indigo)' : 'var(--text-secondary)'),
+                  filter: faceMatchResult ? 'drop-shadow(0 0 12px var(--neon-green))' : 'none',
+                  transition: 'all 0.3s ease',
+                  opacity: faceMatchResult ? 0 : 1 // 매칭 성공시 카메라 사라짐
+                }} 
+              />
               
-              {/* 안면 감지 스캔 라인 */}
+              {/* 스캔 빔 애니메이션 (빛 번짐 레이저) */}
               {faceScanning && !faceMatchResult && (
                 <div 
                   style={{
                     position: 'absolute',
-                    width: '100%',
-                    height: '2px',
-                    backgroundColor: 'var(--neon-indigo)',
-                    boxShadow: '0 0 6px var(--neon-indigo-glow)',
-                    top: '10%',
-                    animation: 'face-scanner 2.2s infinite ease-in-out'
+                    width: '180%',
+                    height: '4px',
+                    background: 'linear-gradient(90deg, transparent, var(--neon-indigo), transparent)',
+                    boxShadow: '0 0 20px 4px var(--neon-indigo-glow)',
+                    top: '0%',
+                    left: '-40%',
+                    animation: 'face-scanner 2s infinite cubic-bezier(0.4, 0, 0.2, 1)',
+                    opacity: 0.8
                   }}
                 />
               )}
             </div>
             
-            <p style={{ marginTop: '20px', fontSize: '18px', color: faceMatchResult ? 'var(--neon-green)' : 'var(--text-secondary)', fontWeight: 700 }}>
-              {faceMatchResult 
-                ? `${faceMatchResult.member_name} 님 인증 완료 (99.2% 일치)` 
-                : (faceScanning ? '얼굴 감지 중... 정면을 응시해 주세요.' : '카메라 정면에 서주세요')}
+            <p style={{ 
+              marginTop: '40px', 
+              fontSize: '24px', 
+              color: faceMatchResult ? 'var(--neon-green)' : 'var(--text-secondary)', 
+              fontWeight: 800,
+              letterSpacing: '1px',
+              zIndex: 2
+            }}>
+              {faceScanning && !faceMatchResult ? '얼굴 스캔 진행 중...' : '정면을 응시해 주세요'}
             </p>
 
-            {/* 매치 결과 레이어 */}
+            {/* 매칭 결과 축하(Pop-up) 햅틱 레이어 */}
             {faceMatchResult && (
               <div 
                 style={{
@@ -373,17 +429,35 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   left: 0,
                   width: '100%',
                   height: '100%',
-                  background: 'rgba(10, 12, 16, 0.95)',
+                  background: 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(4, 5, 7, 0.95) 80%)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexDirection: 'column',
-                  gap: '12px'
+                  gap: '20px',
+                  zIndex: 10,
+                  animation: 'scaleIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
                 }}
               >
-                <Sparkles size={48} style={{ color: 'var(--neon-green)', filter: 'drop-shadow(0 0 8px var(--neon-green-glow))' }} />
-                <span style={{ fontSize: '22px', fontWeight: 900, color: 'var(--neon-green)' }}>안면 매칭 성공!</span>
-                <span style={{ fontSize: '18px', color: '#fff', fontWeight: 700 }}>{faceMatchResult.member_name} 회원 ({faceMatchResult.member_no})</span>
+                <div style={{
+                  width: '140px',
+                  height: '140px',
+                  background: 'var(--neon-green)',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 0 40px var(--neon-green-glow)'
+                }}>
+                  <Sparkles size={72} color="#ffffff" />
+                </div>
+                <h3 style={{ fontSize: '32px', fontWeight: 900, color: '#ffffff', marginTop: '10px' }}>
+                  안면 매칭 성공!
+                </h3>
+                <p style={{ fontSize: '24px', color: 'var(--neon-green)', fontWeight: 700 }}>
+                  {faceMatchResult.member_name} 회원 ({faceMatchResult.member_no})
+                </p>
+                <p style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>잠시 후 자동으로 로그인됩니다...</p>
               </div>
             )}
           </div>
@@ -394,26 +468,42 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               onClick={triggerFaceScan}
               className="kiosk-btn kiosk-btn-primary"
               style={{
-                width: '480px',
-                height: '64px',
-                borderRadius: '16px',
-                fontSize: '20px',
+                width: '640px',
+                height: '80px',
+                borderRadius: '20px',
+                fontSize: '24px',
                 fontWeight: 800,
                 display: 'flex',
-                gap: '8px'
+                gap: '12px',
+                background: 'rgba(0, 113, 227, 0.1)',
+                color: 'var(--neon-indigo)',
+                border: '1px solid rgba(0, 113, 227, 0.3)',
+                boxShadow: 'none'
               }}
             >
-              <Camera size={22} />
+              <Camera size={28} />
               다시 안면인식 시도
             </button>
           )}
 
-          {/* 시뮬레이터 테스트용 가상 회원 매칭 패널 */}
-          <div className="glass-panel" style={{ width: '480px', padding: '20px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.06)' }}>
-            <h4 style={{ fontSize: '16px', fontWeight: 800, marginBottom: '12px', textAlign: 'center', color: '#818cf8' }}>
-              [가상 안면 매칭 시뮬레이터 동작 제어]
-            </h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {/* 시뮬레이터 테스트용 가상 회원 매칭 패널 (개발자 모드용 정돈된 UI) */}
+          <div style={{ 
+            width: '640px', 
+            padding: '24px', 
+            borderRadius: '24px', 
+            background: 'rgba(0, 0, 0, 0.02)',
+            border: '1px dashed rgba(0, 0, 0, 0.1)',
+            marginTop: '10px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#818cf8', display: 'inline-block' }} />
+              <h4 style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1px' }}>
+                DEVELOPER SIMULATION CONTROLS
+              </h4>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#818cf8', display: 'inline-block' }} />
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <button 
                 onClick={async () => {
                   setFaceScanning(true);
@@ -423,14 +513,14 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                     const member = await api.getMember('M260501');
                     if (member) {
                       setFaceMatchResult(member);
-                      setTimeout(() => onAuthSuccess(member), 1200);
+                      setTimeout(() => onAuthSuccess(member), 1500);
                     }
-                  }, 1500);
+                  }, 2000);
                 }}
                 className="kiosk-btn" 
-                style={{ width: '100%', fontSize: '15px', padding: '10px', background: 'rgba(255,255,255,0.02)' }}
+                style={{ width: '100%', fontSize: '18px', padding: '16px', background: '#ffffff', border: '1px solid rgba(0,0,0,0.05)', borderRadius: '16px', color: 'var(--text-primary)', fontWeight: 700 }}
               >
-                카메라에 '김골프' 얼굴 인식 모사 (정상 회원)
+                [모사] '김골프' 얼굴 인식 (정상 회원)
               </button>
               <button 
                 onClick={async () => {
@@ -441,14 +531,14 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                     const member = await api.getMember('M260502');
                     if (member) {
                       setFaceMatchResult(member);
-                      setTimeout(() => onAuthSuccess(member), 1200);
+                      setTimeout(() => onAuthSuccess(member), 1500);
                     }
-                  }, 1500);
+                  }, 2000);
                 }}
                 className="kiosk-btn" 
-                style={{ width: '100%', fontSize: '15px', padding: '10px', background: 'rgba(255,255,255,0.02)' }}
+                style={{ width: '100%', fontSize: '18px', padding: '16px', background: '#ffffff', border: '1px solid rgba(0,0,0,0.05)', borderRadius: '16px', color: 'var(--text-primary)', fontWeight: 700 }}
               >
-                카메라에 '이프로' 얼굴 인식 모사 (VIP 회원)
+                [모사] '이프로' 얼굴 인식 (VIP 회원)
               </button>
               <button 
                 onClick={async () => {
@@ -472,37 +562,60 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
 
       {/* 1. 휴대폰 번호 키패드 패널 */}
       {authMode === 'PHONE' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', alignItems: 'center', padding: '10px 0' }}>
           {/* 번호 표시창 */}
           <div 
             style={{
-              width: '480px',
-              height: '84px',
-              background: '#0a0d14',
-              border: '2px solid var(--bg-tertiary)',
-              borderRadius: '16px',
+              width: '640px',
+              height: '100px',
+              background: 'rgba(255, 255, 255, 0.6)',
+              border: '1px solid rgba(0, 0, 0, 0.05)',
+              borderRadius: '24px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '40px',
+              fontSize: '52px',
               fontWeight: 800,
-              color: phoneNumber ? '#fff' : 'var(--text-muted)',
-              letterSpacing: '2px',
-              boxShadow: 'inset 0 4px 10px rgba(0,0,0,0.5)'
+              color: phoneNumber ? 'var(--text-primary)' : 'var(--text-muted)',
+              letterSpacing: '3px',
+              boxShadow: 'inset 0 2px 8px rgba(0, 0, 0, 0.02)'
             }}
           >
             {phoneNumber ? formatPhoneNumber(phoneNumber) : '010-0000-0000'}
           </div>
 
-          {/* 가상 키패드 그리드 */}
-          <div className="virtual-keypad" style={{ width: '480px' }}>
+          {/* 가상 키패드 그리드 (kiosk_design_system.css 의 .virtual-keypad, .keypad-btn 베이스 사용) */}
+          <div className="virtual-keypad" style={{ width: '640px', maxWidth: 'none', gap: '16px' }}>
             {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(n => (
-              <button key={n} onClick={() => handleNumClick(n)} className="keypad-btn">{n}</button>
+              <button 
+                key={n} 
+                onClick={() => handleNumClick(n)} 
+                className="keypad-btn"
+                style={{ height: '100px', fontSize: '40px', borderRadius: '20px' }}
+              >
+                {n}
+              </button>
             ))}
-            <button onClick={handleClear} className="keypad-btn" style={{ fontSize: '20px', color: 'var(--neon-amber)', fontWeight: 800 }}>전체지움</button>
-            <button onClick={() => handleNumClick('0')} className="keypad-btn">0</button>
-            <button onClick={handleBackspace} className="keypad-btn" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Delete size={28} />
+            <button 
+              onClick={handleClear} 
+              className="keypad-btn" 
+              style={{ height: '100px', fontSize: '22px', color: 'var(--neon-red)', borderRadius: '20px' }}
+            >
+              전체지움
+            </button>
+            <button 
+              onClick={() => handleNumClick('0')} 
+              className="keypad-btn"
+              style={{ height: '100px', fontSize: '40px', borderRadius: '20px' }}
+            >
+              0
+            </button>
+            <button 
+              onClick={handleBackspace} 
+              className="keypad-btn" 
+              style={{ height: '100px', borderRadius: '20px', color: 'var(--text-secondary)' }}
+            >
+              <Delete size={36} />
             </button>
           </div>
 
@@ -512,16 +625,26 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             disabled={isSearching}
             className="kiosk-btn kiosk-btn-primary"
             style={{
-              width: '480px',
-              height: '80px',
-              borderRadius: '16px',
-              fontSize: '26px',
+              width: '640px',
+              height: '90px',
+              borderRadius: '24px',
+              fontSize: '28px',
               fontWeight: 800,
               display: 'flex',
-              gap: '12px'
+              gap: '12px',
+              background: 'var(--text-primary)',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)',
+              border: 'none',
+              color: '#fff',
+              transition: 'transform 0.2s, opacity 0.2s',
+              cursor: isSearching ? 'not-allowed' : 'pointer',
+              opacity: isSearching ? 0.7 : 1
             }}
+            onMouseDown={(e) => !isSearching && (e.currentTarget.style.transform = 'scale(0.97)')}
+            onMouseUp={(e) => !isSearching && (e.currentTarget.style.transform = 'scale(1)')}
+            onMouseLeave={(e) => !isSearching && (e.currentTarget.style.transform = 'scale(1)')}
           >
-            <Search size={28} />
+            <Search size={32} />
             {isSearching ? '조회 중...' : '회원 인증 조회'}
           </button>
         </div>

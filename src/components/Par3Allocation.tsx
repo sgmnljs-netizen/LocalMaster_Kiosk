@@ -57,14 +57,28 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // 0. 활성화된 구역(Zone) 목록 로드
+  const [categoryUuid, setCategoryUuid] = useState<string>(''); // 실제 백엔드 카테고리 UUID 저장
+
   useEffect(() => {
     const fetchZones = async () => {
       try {
-        const res = await api.getKioskZones();
-        setZones(res);
-        if (res.length > 0) {
-          setCourse(res[0].zone_code); // 첫 번째 구역 기본 선택
-        }
+        // 1. 백엔드에서 PAR3 카테고리 UUID 조회
+        const kioskZones = await api.getKioskZones();
+        const par3Zone = kioskZones.find(z => z.zone_name.includes('PAR3') || z.zone_code === 'PAR3') || kioskZones[0];
+        const uuid = par3Zone ? par3Zone.zone_code : '';
+        setCategoryUuid(uuid);
+
+        // 2. 화면에 표시할 5개 파3 코스 명시 선언
+        const mappedZones = [
+          { zone_code: 'PAR3-1', zone_name: 'PAR3-1' },
+          { zone_code: 'PAR3-2', zone_name: 'PAR3-2' },
+          { zone_code: 'PAR3-3', zone_name: 'PAR3-3' },
+          { zone_code: 'PAR3-4', zone_name: 'PAR3-4' },
+          { zone_code: 'PAR3-5', zone_name: 'PAR3-5' },
+        ];
+        
+        setZones(mappedZones);
+        setCourse(mappedZones[0].zone_code); // 첫 번째 파3 코스 기본 선택
       } catch {
         setErrorMsg('코스 구역 정보를 불러오는 데 실패했습니다.');
       }
@@ -82,15 +96,15 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
   // 1. 슬롯 데이터 불러오기
   const fetchSlots = useCallback(async () => {
-    if (!course) return;
+    if (!categoryUuid) return;
     try {
-      const res = await api.getPar3Slots(course, getTodayStr());
+      const res = await api.getPar3Slots(categoryUuid, getTodayStr());
       setSlots(res);
       setSelectedSlot(null); // 코스 전환 시 이전 선택 초기화
     } catch {
       setErrorMsg('시간 슬롯 정보를 불러오는 데 실패했습니다.');
     }
-  }, [course]);
+  }, [categoryUuid, course]);
 
   useEffect(() => {
     fetchSlots();
@@ -324,7 +338,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
     try {
       const res = await api.bookPar3Course(
-        course,
+        categoryUuid,
         getTodayStr(),
         selectedSlot.time,
         totalAmount,
@@ -540,9 +554,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           flexShrink: 1
         }}
       >
-        {/* 좌측 Column: 3. 예약 시간대 선택 */}
+        {/* 좌측 Column: 1. 예약 시간대 선택 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', minHeight: '0' }}>
-          <span style={{ fontSize: '18px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '0.5px' }}>3. 예약 시간대 선택</span>
+          <span style={{ fontSize: '18px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '0.5px' }}>1. 예약 시간대 선택</span>
           <div 
             ref={scrollContainerRef}
             className="kiosk-ultra-scrollbar"
@@ -625,9 +639,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         {/* 우측 Column: 코스 선택, 동반자 배정 목록 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%', minHeight: '0', overflowY: 'auto' }} className="kiosk-ultra-scrollbar">
           
-          {/* 1. 코스 선택 */}
+          {/* 2. 코스 선택 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <span style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '0.5px' }}>1. 코스 선택</span>
+            <span style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '0.5px' }}>2. 코스 선택</span>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
               {zones.map(z => {
                 const isActive = course === z.zone_code;
@@ -664,7 +678,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, minHeight: '0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '0.5px' }}>
-                2. 배정 인원 목록 (최대 4인)
+                3. 배정 인원 목록 (최대 4인)
               </span>
               <span style={{ fontSize: '14px', color: '#2e7559', fontWeight: 800 }}>
                 {players.length} / 4 명
@@ -900,29 +914,35 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             style={{
               width: '460px',
               background: '#ffffff',
-              borderRadius: '24px',
-              padding: '30px',
+              borderRadius: '28px',
+              padding: '32px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '20px',
+              gap: '24px',
               color: '#1d1d1f',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-              border: '1.5px solid #e5e5ea'
+              boxShadow: '0 24px 80px rgba(0,0,0,0.5)',
+              border: '1px solid rgba(255,255,255,0.4)'
             }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h4 style={{ fontSize: '20px', fontWeight: 900, margin: 0 }}>
+              <h4 style={{ fontSize: '22px', fontWeight: 900, margin: 0, letterSpacing: '-0.5px' }}>
                 {modalState === 'ADD_MEMBER_PHONE' ? '회원 전화번호 입력' : '비회원 연락처 입력'}
               </h4>
-              <button onClick={closeModal} style={{ background: 'none', border: 'none', color: '#86868b', cursor: 'pointer' }}>
+              <button 
+                onClick={closeModal} 
+                onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.9)'}
+                onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                style={{ background: '#f5f5f7', border: 'none', color: '#86868b', cursor: 'pointer', width: '36px', height: '36px', borderRadius: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'transform 0.1s ease' }}
+              >
                 <X size={20} />
               </button>
             </div>
 
             {/* 에러 문구 */}
             {modalError && (
-              <span style={{ fontSize: '13px', color: '#ff3b30', fontWeight: 800, textAlign: 'center' }}>
+              <span style={{ fontSize: '14px', color: '#ff3b30', fontWeight: 800, textAlign: 'center', marginTop: '-12px' }}>
                 ⚠️ {modalError}
               </span>
             )}
@@ -930,56 +950,111 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             {/* 번호 표시창 */}
             <div 
               style={{
-                height: '70px',
-                background: '#f5f5f7',
-                borderRadius: '12px',
-                border: '1.5px solid #e5e5ea',
+                height: '76px',
+                background: '#fafafa',
+                borderRadius: '16px',
+                border: '1.5px solid rgba(0,0,0,0.06)',
+                boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.02)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '28px',
+                fontSize: '32px',
                 fontWeight: 900,
-                color: modalPhone ? '#1d1d1f' : '#aeaeb2',
-                fontFamily: 'monospace'
+                color: modalPhone ? '#2e7559' : '#d1d1d6',
+                fontFamily: 'monospace',
+                letterSpacing: '2px'
               }}
             >
               {modalPhone ? formatHp(modalPhone) : '010-0000-0000'}
             </div>
 
             {/* 텐키패드 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', height: '240px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', height: 'auto', gridAutoRows: '64px' }}>
               {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(n => (
                 <button
                   type="button"
                   key={n}
                   onClick={() => handleModalPhoneClick(n)}
-                  style={{ fontSize: '18px', fontWeight: 800, borderRadius: '8px', background: '#f5f5f7', border: '1px solid #e5e5ea', color: '#1d1d1f', cursor: 'pointer' }}
-                  className="keypad-btn"
+                  onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.93)'}
+                  onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  style={{ 
+                    fontSize: '24px', fontWeight: 700, borderRadius: '16px', background: '#ffffff', 
+                    border: '1.5px solid rgba(0,0,0,0.06)', color: '#1d1d1f', cursor: 'pointer',
+                    boxShadow: '0 4px 10px rgba(0,0,0,0.03)',
+                    transition: 'transform 0.1s cubic-bezier(0.4, 0, 0.2, 1)'
+                  }}
+                  className="kiosk-keypad-btn"
                 >
                   {n}
                 </button>
               ))}
-              <button type="button" onClick={() => setModalPhone('')} style={{ fontSize: '14px', fontWeight: 800, color: '#ff9500', borderRadius: '8px', background: '#f5f5f7', border: '1px solid #e5e5ea', cursor: 'pointer' }} className="keypad-btn">지움</button>
-              <button type="button" onClick={() => handleModalPhoneClick('0')} style={{ fontSize: '18px', fontWeight: 800, borderRadius: '8px', background: '#f5f5f7', border: '1px solid #e5e5ea', color: '#1d1d1f', cursor: 'pointer' }} className="keypad-btn">0</button>
-              <button type="button" onClick={handleModalPhoneBackspace} style={{ fontSize: '18px', fontWeight: 'bold', borderRadius: '8px', background: '#f5f5f7', border: '1px solid #e5e5ea', color: '#1d1d1f', cursor: 'pointer' }} className="keypad-btn">←</button>
+              <button 
+                type="button" 
+                onClick={() => setModalPhone('')} 
+                onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.93)'}
+                onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                style={{ 
+                  fontSize: '16px', fontWeight: 800, color: '#ff3b30', borderRadius: '16px', 
+                  background: 'rgba(255, 59, 48, 0.05)', border: '1.5px solid rgba(255, 59, 48, 0.1)', cursor: 'pointer',
+                  transition: 'transform 0.1s cubic-bezier(0.4, 0, 0.2, 1)'
+                }}
+              >
+                지움
+              </button>
+              <button 
+                type="button" 
+                onClick={() => handleModalPhoneClick('0')} 
+                onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.93)'}
+                onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                style={{ 
+                  fontSize: '24px', fontWeight: 700, borderRadius: '16px', background: '#ffffff', 
+                  border: '1.5px solid rgba(0,0,0,0.06)', color: '#1d1d1f', cursor: 'pointer',
+                  boxShadow: '0 4px 10px rgba(0,0,0,0.03)',
+                  transition: 'transform 0.1s cubic-bezier(0.4, 0, 0.2, 1)'
+                }}
+              >
+                0
+              </button>
+              <button 
+                type="button" 
+                onClick={handleModalPhoneBackspace} 
+                onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.93)'}
+                onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                style={{ 
+                  fontSize: '22px', fontWeight: 'bold', borderRadius: '16px', background: 'rgba(0,0,0,0.03)', 
+                  border: '1.5px solid rgba(0,0,0,0.05)', color: '#1d1d1f', cursor: 'pointer',
+                  transition: 'transform 0.1s cubic-bezier(0.4, 0, 0.2, 1)'
+                }}
+              >
+                ←
+              </button>
             </div>
 
             <button
               onClick={handlePhoneModalSubmit}
               disabled={loading}
+              onMouseDown={(e) => { if(!loading) e.currentTarget.style.transform = 'scale(0.97)'; }}
+              onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
               style={{
-                height: '60px',
-                borderRadius: '12px',
-                background: '#2e7559',
+                height: '64px',
+                borderRadius: '16px',
+                background: loading ? '#86868b' : 'linear-gradient(135deg, #2e7559 0%, #245c46 100%)',
                 color: '#ffffff',
                 border: 'none',
-                fontSize: '18px',
+                fontSize: '20px',
                 fontWeight: 900,
-                cursor: 'pointer',
+                cursor: loading ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 4px 12px rgba(46, 117, 89, 0.15)'
+                boxShadow: '0 8px 24px rgba(46, 117, 89, 0.3)',
+                transition: 'transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease',
+                marginTop: '4px'
               }}
             >
               {loading ? '검색 중...' : '입력 완료'}

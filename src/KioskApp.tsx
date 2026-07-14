@@ -56,7 +56,7 @@ const TRANSLATIONS = {
     signUp: '회원가입',
     signUpSub: '아직 회원이 아니신가요? 간편하게 신규 즉석 회원가입 후 혜택을 받아보세요.',
     exit: '종료',
-    prev: '이전으로',
+    prev: '돌아가기',
     confirm: '선택 완료',
     popular: '최우선',
     guestAllowed: '비회원 가능',
@@ -91,7 +91,7 @@ export default function KioskApp() {
   const [step, setStep] = useState<KioskStep>('INTRO');
   const [purpose, setPurpose] = useState<KioskPurpose | null>(null);
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
-  const [initialAuthMode, setInitialAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>('PHONE');
+  const [initialAuthMode, setInitialAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>('FACE');
 
   // 세션 정보
   const [authMember, setAuthMember] = useState<Member | null>(null);
@@ -140,6 +140,8 @@ export default function KioskApp() {
 
   // 2. 무인기기 비활성 세션 아웃 (40초간 조작이 없으면 자동으로 광고 인트로로 복귀)
   useEffect(() => {
+    // [TODO: 임시 주석 처리 (테스트 중 40초 튕김 방지)]
+    /*
     if (step === 'INTRO') return;
 
     const resetTimer = () => {
@@ -158,6 +160,7 @@ export default function KioskApp() {
       window.removeEventListener('click', resetTimer);
       clearTimeout(sessionTimeout);
     };
+    */
   }, [step, lang]);
 
   const showToast = (message: string, success = true) => {
@@ -377,7 +380,7 @@ export default function KioskApp() {
     setPurpose(purposeType);
 
     if (purposeType === 'ALLOCATE_MEMBERSHIP') {
-      setInitialAuthMode('PHONE');
+      setInitialAuthMode('FACE');
       if (authMember) {
         await handleBaySelected(bayNo);
       } else {
@@ -667,7 +670,7 @@ export default function KioskApp() {
                 }}
                 onPurchaseMembership={() => {
                   setPurpose('PURCHASE_PRODUCT');
-                  setInitialAuthMode('PHONE');
+                  setInitialAuthMode('FACE');
                   if (authMember) {
                     setStep('PRODUCT_SHOP');
                   } else {
@@ -676,7 +679,7 @@ export default function KioskApp() {
                 }}
                 onMoveBay={() => {
                   setPurpose('MOVE_BAY');
-                  setInitialAuthMode('PHONE');
+                  setInitialAuthMode('FACE');
                   if (authMember) {
                     setStep('TEEBOX_MAP');
                   } else {
@@ -685,7 +688,7 @@ export default function KioskApp() {
                 }}
                 onLockerExtend={() => {
                   setPurpose('EXTEND_LOCKER');
-                  setInitialAuthMode('PHONE');
+                  setInitialAuthMode('FACE');
                   if (authMember) {
                     setStep('LOCKER_EXTEND');
                   } else {
@@ -703,7 +706,13 @@ export default function KioskApp() {
               <MemberAuth
                 initialAuthMode={initialAuthMode}
                 onAuthSuccess={handleAuthSuccess}
-                onCancel={handleGoHome}
+                onCancel={() => {
+                  if (purpose === 'ALLOCATE_MEMBERSHIP') {
+                    setStep('PRACTICE_SELECT');
+                  } else {
+                    handleGoHome();
+                  }
+                }}
                 onSignUpClick={() => setStep('MEMBER_REGISTER')}
                 onAuthError={(code, detail) => {
                   const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -764,8 +773,9 @@ export default function KioskApp() {
               <ProductShop
                 memberNo={authMember?.member_no}
                 memberName={authMember?.member_name}
+                purposeType={purpose as 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT'}
                 onProductSelected={handleProductSelected}
-                onCancel={handleGoHome}
+                onCancel={purpose === 'ALLOCATE_DAILY' ? () => setStep('PRACTICE_SELECT') : handleGoHome}
               />
             )}
 
@@ -976,7 +986,7 @@ export default function KioskApp() {
                       setStep('MEMBER_AUTH');
                     }}
                   >
-                    {lang === 'KO' ? '이전으로' : 'Back'}
+                    {lang === 'KO' ? '돌아가기' : 'Back'}
                   </button>
 
                   <button 

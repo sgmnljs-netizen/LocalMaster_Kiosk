@@ -220,11 +220,8 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
         {sortedFloors.map(floor => {
           const floorBays = floorsMap[floor];
           
-          // 층별 브랜드 명칭 부여
+          // 층별 브랜드 명칭 제거 (백오피스 원본 데이터 그대로 사용)
           let brandLabel = floor;
-          if (floor === '1F') brandLabel = '1F GDR+';
-          else if (floor === '2F') brandLabel = '2F VX';
-          else if (floor === '3F') brandLabel = '3F Room';
 
           const availableCount = floorBays.filter(b => b.status === 'AVAILABLE').length;
 
