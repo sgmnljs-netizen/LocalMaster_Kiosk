@@ -8,6 +8,7 @@ interface PaymentTerminalProps {
   productName: string;
   amount: number;
   assignedBayNo?: number | null;
+  assignedBayNos?: number[];
   assignedLockerNo?: number | null;
   resId?: string | null;
   memberName?: string;
@@ -20,6 +21,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   productName,
   amount,
   assignedBayNo,
+  assignedBayNos,
   assignedLockerNo,
   resId,
   memberName,
@@ -230,12 +232,20 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                     <strong>{productName}</strong>
                   </div>
 
-                  {assignedBayNo !== undefined && assignedBayNo !== null && (
+                  {(assignedBayNos && assignedBayNos.length > 0) ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', border: '1px solid #000', padding: '8px', margin: '6px 0', background: '#f8fafc' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>배정 타석 목록 ({assignedBayNos.length}석):</span>
+                        <strong style={{ fontSize: '16px', color: '#047857' }}>{assignedBayNos.join(', ')}번 타석</strong>
+                      </div>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>* 동반자별 입실 티켓 및 출입 바코드가 아래에 각각 인출됩니다.</span>
+                    </div>
+                  ) : (assignedBayNo !== undefined && assignedBayNo !== null && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', border: '1px solid #000', padding: '6px', margin: '6px 0', background: '#f8fafc' }}>
                       <span>배정 타석:</span>
                       <strong style={{ fontSize: '16px' }}>{assignedBayNo}번 타석 (즉시입실)</strong>
                     </div>
-                  )}
+                  ))}
 
                   {assignedLockerNo !== undefined && assignedLockerNo !== null && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', border: '1px solid #000', padding: '6px', margin: '6px 0', background: '#f8fafc' }}>

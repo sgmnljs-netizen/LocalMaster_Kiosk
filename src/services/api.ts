@@ -70,6 +70,7 @@ export interface Bay {
   minutes_left?: number;
   lock_terminal_id?: string | null;
   lock_expired_at?: string | null;
+  bay_name?: string;
 }
 
 export interface Locker {
@@ -287,6 +288,10 @@ class HybridAPIClient {
     this.terminalId = tid;
   }
 
+  public getStoreCd(): string {
+    return localStorage.getItem('LM_STORE_CD') || 'H01-SE-001';
+  }
+
   getTerminalId() {
     return this.terminalId;
   }
@@ -310,21 +315,40 @@ class HybridAPIClient {
     }
   }
 
-  // 가맹점 상호명 조회 (SGM Golf Academy 기본 매핑)
-  async getStoreName(): Promise<string> {
-    try {
-      const res = await fetch(`${BASE_URL}/store`, { 
-        method: 'GET',
-        headers: { 'x-store-cd': STORE_CODE }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return data.store_nm || 'SGM Golf Academy';
+  // 가맹점 상호명 및 동적 체크인 정책 종합 정보 조회 (Local Fallback 포함)
+  async getStoreInfo(): Promise<{ store_nm: string; checkin_policy: string }> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/store-info?store_cd=${this.getStoreCd()}`);
+        if (res.ok) {
+          const data = await res.json();
+          localStorage.setItem('LM_STORE_INFO', JSON.stringify(data));
+          return {
+            store_nm: data.store_nm || 'SGM Golf Academy',
+            checkin_policy: data.checkin_policy || 'CHECKIN_REQUIRED'
+          };
+        }
+      } catch (err) {
+        console.warn('Backend getStoreInfo failed, using local cache:', err);
       }
-      return 'SGM Golf Academy';
-    } catch {
-      return 'SGM Golf Academy';
     }
+    // Offline Fallback
+    const cached = JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}');
+    return {
+      store_nm: cached.store_nm || 'SGM Golf Academy',
+      checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED'
+    };
+  }
+
+  async getStoreName(): Promise<string> {
+    const info = await this.getStoreInfo();
+    return info.store_nm;
+  }
+
+  async getCheckinPolicy(): Promise<string> {
+    const info = await this.getStoreInfo();
+    return info.checkin_policy;
   }
 
   // 1. 회원 조회 (QR 또는 휴대폰 번호)
@@ -359,6 +383,10 @@ class HybridAPIClient {
     );
 
     return found || null;
+  }
+
+  async getMemberByHp(hp: string): Promise<Member | null> {
+    return this.getMember(hp);
   }
 
   // 2. 타석 목록 및 상태 조회
@@ -417,7 +445,13 @@ class HybridAPIClient {
   }
 
   // 3. 타석 선점 (Preoccupy) - 동시성 방어용
+  // 3. 타석 선점 (Pre-emption) - 단일 및 다중 타석 지원
   async preoccupyBay(bayNo: number): Promise<boolean> {
+    return this.preoccupyBays([bayNo]);
+  }
+
+  async preoccupyBays(bayNos: number[]): Promise<boolean> {
+    if (!bayNos || bayNos.length === 0) return false;
     const isConnected = await this.checkConnection();
     
     if (isConnected) {
@@ -429,7 +463,7 @@ class HybridAPIClient {
             'x-store-cd': STORE_CODE
           },
           body: JSON.stringify({
-            bay_nos: [bayNo],
+            bay_nos: bayNos,
             terminal_id: this.terminalId
           })
         });
@@ -441,16 +475,27 @@ class HybridAPIClient {
 
     // Edge DB 모드
     const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
-    const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
-    
-    if (targetIdx !== -1 && (bays[targetIdx].status === 'AVAILABLE' || bays[targetIdx].status === 'PRE_OCCUPIED')) {
-      // 1분간 선점 락 설정
+    let allAvailable = true;
+    for (const bayNo of bayNos) {
+      const b = bays.find(item => item.bay_no === bayNo);
+      if (!b || (b.status !== 'AVAILABLE' && b.status !== 'PRE_OCCUPIED')) {
+        allAvailable = false;
+        break;
+      }
+    }
+
+    if (allAvailable) {
       const expires = new Date();
-      expires.setMinutes(expires.getMinutes() + 1);
+      expires.setMinutes(expires.getMinutes() + 2); // 다중선점은 2분간 유효
       
-      bays[targetIdx].status = 'PRE_OCCUPIED';
-      bays[targetIdx].lock_terminal_id = this.terminalId;
-      bays[targetIdx].lock_expired_at = expires.toISOString();
+      bayNos.forEach(bayNo => {
+        const idx = bays.findIndex(b => b.bay_no === bayNo);
+        if (idx !== -1) {
+          bays[idx].status = 'PRE_OCCUPIED';
+          bays[idx].lock_terminal_id = this.terminalId;
+          bays[idx].lock_expired_at = expires.toISOString();
+        }
+      });
       
       localStorage.setItem('LM_BAYS', JSON.stringify(bays));
       return true;
@@ -459,8 +504,64 @@ class HybridAPIClient {
     return false;
   }
 
-  // 4. 타석 선점 해제 (Release)
+  // 4. 타석 선점 해제 (Release) - 단일 및 다중 타석 지원
   async releaseBay(bayNo: number): Promise<void> {
+    return this.releaseBays([bayNo]);
+  }
+
+  // 5. 키오스크 전용 예약 타석 체크인 API
+  async getMemberCheckinReservations(memberNo: string): Promise<any[]> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/checkin/reservations?store_cd=${this.getStoreCd()}&member_no=${memberNo}`);
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (err) {
+        console.warn('Backend getMemberCheckinReservations failed, fallback to local storage:', err);
+      }
+    }
+    // Local Fallback
+    const reservations = JSON.parse(localStorage.getItem('LM_RESERVATIONS') || '[]') as any[];
+    return reservations.filter(r => r.member_no === memberNo && ['RSV', 'REQ', 'HOLD', 'CHK'].includes(r.status_cd));
+  }
+
+  async verifyKioskCheckin(memberNo: string, resId?: string): Promise<{ success: boolean; message: string; bay_no?: number }> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/checkin/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            store_cd: this.getStoreCd(),
+            member_no: memberNo,
+            res_id: resId
+          })
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (err) {
+        console.warn('Backend verifyKioskCheckin failed, fallback to local:', err);
+      }
+    }
+
+    // Local Fallback
+    const reservations = JSON.parse(localStorage.getItem('LM_RESERVATIONS') || '[]') as any[];
+    const target = reservations.find(r => r.member_no === memberNo && (!resId || r.res_id === resId));
+    if (target) {
+      target.status_cd = 'CHK';
+      localStorage.setItem('LM_RESERVATIONS', JSON.stringify(reservations));
+      const bayNo = parseInt(target.resource_no || '1') || 1;
+      return { success: true, message: `${bayNo}번 타석 체크인이 완료되었습니다.`, bay_no: bayNo };
+    }
+    return { success: false, message: '당일 체크인 가능한 타석 예약 내역이 없습니다.' };
+  }
+
+  async releaseBays(bayNos: number[]): Promise<void> {
+    if (!bayNos || bayNos.length === 0) return;
     const isConnected = await this.checkConnection();
     
     if (isConnected) {
@@ -472,7 +573,7 @@ class HybridAPIClient {
             'x-store-cd': STORE_CODE
           },
           body: JSON.stringify({
-            bay_nos: [bayNo],
+            bay_nos: bayNos,
             terminal_id: this.terminalId
           })
         });
@@ -484,14 +585,15 @@ class HybridAPIClient {
 
     // Edge DB 모드
     const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
-    const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
-    
-    if (targetIdx !== -1 && bays[targetIdx].status === 'PRE_OCCUPIED' && bays[targetIdx].lock_terminal_id === this.terminalId) {
-      bays[targetIdx].status = 'AVAILABLE';
-      bays[targetIdx].lock_terminal_id = null;
-      bays[targetIdx].lock_expired_at = null;
-      localStorage.setItem('LM_BAYS', JSON.stringify(bays));
-    }
+    bayNos.forEach(bayNo => {
+      const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
+      if (targetIdx !== -1 && bays[targetIdx].status === 'PRE_OCCUPIED' && bays[targetIdx].lock_terminal_id === this.terminalId) {
+        bays[targetIdx].status = 'AVAILABLE';
+        bays[targetIdx].lock_terminal_id = null;
+        bays[targetIdx].lock_expired_at = null;
+      }
+    });
+    localStorage.setItem('LM_BAYS', JSON.stringify(bays));
   }
 
   // 5. 타석 최종 배정 완료 (예약 & 입실 확정)

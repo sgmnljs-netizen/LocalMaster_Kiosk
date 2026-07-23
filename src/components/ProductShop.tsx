@@ -67,7 +67,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
 
   // 일일 타석 배정권 여부 판별 헬퍼
   const checkIfDaily = (prod: Product) => {
-    return prod.logic_type === 'DAILY' && (prod.prod_cd.startsWith('D') || prod.prod_nm.includes('일일타석'));
+    return (prod.logic_type as string) === 'DAILY' && (prod.prod_cd.startsWith('D') || prod.prod_nm.includes('일일타석'));
   };
 
   // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB의 duration_min이 None/null인 케이스 대응)

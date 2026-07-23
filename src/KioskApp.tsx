@@ -13,6 +13,8 @@ import { PaymentTerminal } from './components/PaymentTerminal';
 import { Par3Allocation } from './components/Par3Allocation';
 import { TopTeeboxDashboard } from './components/TopTeeboxDashboard';
 import { PracticeSelect } from './components/PracticeSelect';
+import { CompanionSetupModal, CompanionTargetItem } from './components/CompanionSetupModal';
+import { CheckinSelect } from './components/CheckinSelect';
 import { api, Member, Product, Bay } from './services/api';
 import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
 
@@ -22,6 +24,7 @@ type KioskStep =
   | 'MEMBER_AUTH' 
   | 'MEMBER_REGISTER'
   | 'PRACTICE_SELECT'
+  | 'CHECKIN_SELECT'
   | 'TEEBOX_MAP' 
   | 'PRODUCT_SHOP' 
   | 'LOCKER_EXTEND'
@@ -35,7 +38,8 @@ type KioskPurpose =
   | 'PURCHASE_PRODUCT'     // 회원권/일일권 구매
   | 'EXTEND_LOCKER'        // 라카 대여 및 연장
   | 'MOVE_BAY'             // 사용 중인 타석 변경
-  | 'BOOK_PAR3';           // 파3 연습 라운딩 예약
+  | 'BOOK_PAR3'            // 파3 연습 라운딩 예약
+  | 'CHECKIN_RESERVATION'; // 사전 예약 타석 체크인
 
 // 🌐 글로벌 다국어 번역 딕셔너리 (i18n)
 const TRANSLATIONS = {
@@ -96,6 +100,8 @@ export default function KioskApp() {
   // 세션 정보
   const [authMember, setAuthMember] = useState<Member | null>(null);
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(null);
+  const [selectedBayNos, setSelectedBayNos] = useState<number[]>([]);
+  const [showCompanionModal, setShowCompanionModal] = useState<boolean>(false);
   const [selectedLockerNo, setSelectedLockerNo] = useState<number | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<number | null>(null);
@@ -105,6 +111,7 @@ export default function KioskApp() {
   const [toast, setToast] = useState<{ message: string; success: boolean } | null>(null);
   const [errorMasterCard, setErrorMasterCard] = useState<{ code: string; detail: string; traceId: string } | null>(null);
   const [storeName, setStoreName] = useState<string>('SGM Golf Academy');
+  const [checkinPolicy, setCheckinPolicy] = useState<string>('CHECKIN_REQUIRED');
 
   // 실시간 타석 데이터 상태
   const [bays, setBays] = useState<Bay[]>([]);
@@ -118,15 +125,19 @@ export default function KioskApp() {
     }
   };
 
-  // 0. 가맹점 상호명 동적 바인딩 및 실시간 타석 상태 로드
+  // 0. 가맹점 상호명 및 동적 체크인 정책 로드
   useEffect(() => {
-    const fetchStore = async () => {
-      const nm = await api.getStoreName();
-      setStoreName(nm);
+    const fetchStoreInfo = async () => {
+      const info = await api.getStoreInfo();
+      setStoreName(info.store_nm);
+      setCheckinPolicy(info.checkin_policy);
     };
-    fetchStore();
+    fetchStoreInfo();
     loadBays();
-    const interval = setInterval(loadBays, 3000);
+    const interval = setInterval(() => {
+      loadBays();
+      fetchStoreInfo();
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -177,8 +188,13 @@ export default function KioskApp() {
     if (selectedBayNo !== null) {
       api.releaseBay(selectedBayNo).catch(console.error);
     }
+    if (selectedBayNos.length > 0) {
+      api.releaseBays(selectedBayNos).catch(console.error);
+    }
     setAuthMember(null);
     setSelectedBayNo(null);
+    setSelectedBayNos([]);
+    setShowCompanionModal(false);
     setSelectedLockerNo(null);
     setSelectedProduct(null);
     setPurpose(null);
@@ -198,8 +214,13 @@ export default function KioskApp() {
     if (selectedBayNo !== null) {
       api.releaseBay(selectedBayNo).catch(console.error);
     }
+    if (selectedBayNos.length > 0) {
+      api.releaseBays(selectedBayNos).catch(console.error);
+    }
     setAuthMember(null);
     setSelectedBayNo(null);
+    setSelectedBayNos([]);
+    setShowCompanionModal(false);
     setSelectedLockerNo(null);
     setSelectedProduct(null);
     setPurpose(null);
@@ -236,8 +257,13 @@ export default function KioskApp() {
     if (selectedBayNo !== null) {
       api.releaseBay(selectedBayNo).catch(console.error);
     }
+    if (selectedBayNos.length > 0) {
+      api.releaseBays(selectedBayNos).catch(console.error);
+    }
     setAuthMember(null); // 메인화면 복귀 시 로그인 세션 즉시 파기 (공용 키오스크 보안 강화)
     setSelectedBayNo(null);
+    setSelectedBayNos([]);
+    setShowCompanionModal(false);
     setSelectedLockerNo(null);
     setSelectedProduct(null);
     setPurpose(null);
@@ -279,9 +305,13 @@ export default function KioskApp() {
         });
         setStep('MAIN_DASHBOARD');
       } else {
-        // 바로 자동 배정을 수행하지 않고 이용권 선택 화면으로 유도
-        setSelectedAssetId(null);
-        setStep('ASSET_SELECT');
+        if (selectedBayNos.length > 0) {
+          setShowCompanionModal(true);
+          setStep('PRACTICE_SELECT');
+        } else {
+          setSelectedAssetId(null);
+          setStep('ASSET_SELECT');
+        }
       }
     } else if (purpose === 'PURCHASE_PRODUCT') {
       setStep('PRODUCT_SHOP');
@@ -289,6 +319,8 @@ export default function KioskApp() {
       setStep('LOCKER_EXTEND');
     } else if (purpose === 'MOVE_BAY') {
       setStep('TEEBOX_MAP');
+    } else if (purpose === 'CHECKIN_RESERVATION') {
+      setStep('CHECKIN_SELECT');
     } else {
       setStep('MAIN_DASHBOARD');
     }
@@ -385,6 +417,48 @@ export default function KioskApp() {
       }
     } else if (purposeType === 'ALLOCATE_DAILY') {
       setStep('PRODUCT_SHOP');
+    }
+  };
+
+  // 2.6. 동반자 다중 타석 선택 완료 핸들러
+  const handleGroupBaySelected = (bayNos: number[]) => {
+    setSelectedBayNos(bayNos);
+    setPurpose('ALLOCATE_MEMBERSHIP');
+    if (authMember) {
+      setShowCompanionModal(true);
+    } else {
+      setInitialAuthMode('FACE');
+      setStep('MEMBER_AUTH');
+    }
+  };
+
+  // 2.7. 동반자 배정 설정 완료 및 일괄 배정/결제 승인
+  const handleCompanionConfirm = async (targets: CompanionTargetItem[]) => {
+    setShowCompanionModal(false);
+    const totalPrice = targets.reduce((sum, t) => sum + t.price, 0);
+
+    if (totalPrice === 0) {
+      // 모두 회원권 차감인 경우 즉시 다중 배정 수행
+      showToast(lang === 'KO' ? '동반자 타석 일괄 배정을 진행 중입니다...' : 'Allocating group teeboxes...');
+      try {
+        for (const t of targets) {
+          await api.allocateBay(t.bayNo, t.durationMin, t.memberNo, t.memberName, t.hp, t.memberItemId);
+        }
+        showToast(lang === 'KO' ? '동반자 타석 배정이 모두 완료되었습니다!' : 'Group teebox allocation completed!');
+        setStep('PAYMENT');
+      } catch {
+        showToast(lang === 'KO' ? '동반자 타석 배정 처리 중 오류가 발생했습니다.' : 'Group allocation failed.', false);
+      }
+    } else {
+      // 일일권 결제가 포함된 경우 결제 단말기 퍼널로 전이
+      setSelectedProduct({
+        prod_cd: 'PROD_GROUP',
+        prod_nm: `동반자 ${targets.length}개 타석 일괄 결제`,
+        standard_price: totalPrice,
+        logic_type: 'MEMBERSHIP',
+        duration_min: 60
+      });
+      setStep('PAYMENT');
     }
   };
 
@@ -693,7 +767,38 @@ export default function KioskApp() {
                   }
                 }}
                 onSignUp={() => setStep('MEMBER_REGISTER')}
+                onCheckin={checkinPolicy !== 'DISABLED' ? () => {
+                  setPurpose('CHECKIN_RESERVATION');
+                  setStep('MEMBER_AUTH');
+                } : undefined}
               />
+            )}
+
+            {/* ----------------------------------------------------------------
+                📥 STEP 2.7: 예약 타석 체크인 (CheckinSelect & Route Guard)
+                ---------------------------------------------------------------- */}
+            {step === 'CHECKIN_SELECT' && authMember && (
+              checkinPolicy === 'DISABLED' ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#fff' }}>
+                  <h3>{lang === 'KO' ? '본 매장은 현재 체크인 메뉴를 사용하지 않습니다.' : 'Check-in is currently disabled in this store.'}</h3>
+                  <button onClick={handleGoHome} style={{ padding: '12px 24px', borderRadius: '8px', background: '#10b981', border: 'none', color: '#fff', marginTop: '20px', cursor: 'pointer' }}>
+                    {lang === 'KO' ? '메인 화면으로' : 'Return Main'}
+                  </button>
+                </div>
+              ) : (
+                <CheckinSelect
+                  memberNo={authMember.member_no}
+                  memberName={authMember.member_name}
+                  lang={lang}
+                  onCheckinSuccess={(bayNo, resId) => {
+                    setSelectedBayNo(bayNo);
+                    setCurrentHoldResId(resId);
+                    showToast(lang === 'KO' ? `${bayNo}번 타석 체크인이 완료되었습니다.` : `Bay ${bayNo} check-in completed.`);
+                    setStep('PAYMENT');
+                  }}
+                  onCancel={handleGoHome}
+                />
+              )
             )}
 
             {/* ----------------------------------------------------------------
@@ -743,8 +848,27 @@ export default function KioskApp() {
                 lang={lang}
                 initialSelectedBayNo={selectedBayNo}
                 onBaySelected={handlePracticeSelectConfirm}
+                onGroupBaySelected={handleGroupBaySelected}
                 onCancel={handleGoHome}
                 onRefreshBays={loadBays}
+              />
+            )}
+
+            {/* ----------------------------------------------------------------
+                📥 STEP 2.8: 동반자 다중 타석 설정 팝업 모달
+                ---------------------------------------------------------------- */}
+            {showCompanionModal && authMember && (
+              <CompanionSetupModal
+                selectedBayNos={selectedBayNos}
+                bays={bays}
+                leaderMember={authMember}
+                lang={lang}
+                onConfirm={handleCompanionConfirm}
+                onCancel={() => {
+                  setShowCompanionModal(false);
+                  api.releaseBays(selectedBayNos).catch(console.error);
+                  setSelectedBayNos([]);
+                }}
               />
             )}
 
@@ -814,6 +938,7 @@ export default function KioskApp() {
                 productName={selectedProduct ? selectedProduct.prod_nm : (purpose === 'ALLOCATE_MEMBERSHIP' ? '회원권 타석 배정' : '라카 연장 대여')}
                 amount={selectedProduct ? selectedProduct.standard_price : 0}
                 assignedBayNo={selectedBayNo}
+                assignedBayNos={selectedBayNos}
                 assignedLockerNo={selectedLockerNo}
                 resId={currentHoldResId}
                 memberName={authMember?.member_name}

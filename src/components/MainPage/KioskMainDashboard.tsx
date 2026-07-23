@@ -44,6 +44,7 @@ const TRANSLATIONS = {
 interface KioskMainDashboardProps {
   lang: 'KO' | 'EN';
   onPracticeTeebox: () => void;
+  onCheckin?: () => void;
   onPar3Allocation: () => void;
   onPurchaseMembership: () => void;
   onMoveBay: () => void;
@@ -54,6 +55,7 @@ interface KioskMainDashboardProps {
 export default function KioskMainDashboard({
   lang,
   onPracticeTeebox,
+  onCheckin,
   onPar3Allocation,
   onPurchaseMembership,
   onMoveBay,
@@ -81,7 +83,7 @@ export default function KioskMainDashboard({
       </div>
 
       {/* 헤더 섹션 - Fade Up 0.2s */}
-      <div className="animate-fade-up" style={{ textAlign: 'center', marginBottom: '48px', animationDelay: '0.2s' }}>
+      <div className="animate-fade-up" style={{ textAlign: 'center', marginBottom: '32px', animationDelay: '0.2s' }}>
         <h2 style={{ fontSize: '42px', fontWeight: 900, color: '#1d1d1f', marginBottom: '12px', letterSpacing: '-1px' }}>
           {t.welcome}
         </h2>
@@ -91,16 +93,55 @@ export default function KioskMainDashboard({
       </div>
 
       {/* 🍱 2026 Premium Bento Box 레이아웃 (Soft UI & Liquid Glass) */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', width: '100%', maxWidth: '1080px' }}>
         
-        {/* Row 1: 메인 히어로 - 연습타석배정 - Fade Up 0.3s */}
-        <div className="animate-fade-up" style={{ animationDelay: '0.3s' }}>
+        {/* Row 1: 1순위 예약 체크인 & 히어로 연습타석배정 2단 그리드 - Fade Up 0.3s */}
+        <div className="animate-fade-up" style={{ animationDelay: '0.3s', display: 'grid', gridTemplateColumns: onCheckin ? '1fr 1fr' : '1fr', gap: '20px' }}>
+          
+          {/* 📌 예약 타석 체크인 CTA 카드 */}
+          {onCheckin && (
+            <div
+              onClick={onCheckin}
+              className="bento-item liquid-glass-layer shimmer-effect breathing-glow"
+              style={{
+                height: '240px',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                background: 'linear-gradient(135deg, #064e3b 0%, #022c22 100%)',
+                borderRadius: '24px',
+                padding: '24px',
+                border: '2px solid #10b981',
+                boxShadow: '0 20px 40px rgba(6, 78, 59, 0.4)',
+                position: 'relative',
+                overflow: 'hidden'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10 }}>
+                <span style={{ fontSize: '14px', fontWeight: 900, background: '#10b981', color: '#ffffff', padding: '6px 14px', borderRadius: '16px' }}>
+                  📌 QUICK CHECK-IN
+                </span>
+                <Play size={28} fill="currentColor" strokeWidth={0} style={{ color: '#10b981' }} />
+              </div>
+              <div style={{ zIndex: 10 }}>
+                <h3 style={{ fontSize: '30px', fontWeight: 900, color: '#ffffff', margin: '0 0 8px 0' }}>
+                  {lang === 'KO' ? '예약 타석 체크인' : 'Reservation Check-in'}
+                </h3>
+                <p style={{ fontSize: '15px', color: '#a7f3d0', margin: 0, lineHeight: 1.4 }}>
+                  {lang === 'KO' ? '사전 예약하신 분은 본인 인증 후 체크인을 완료하세요.' : 'Check-in quickly with member verification.'}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* 연습타석배정 히어로 카드 */}
           <div
             onClick={onPracticeTeebox}
             className="bento-item liquid-glass-layer shimmer-effect breathing-glow"
             style={{
               width: '100%',
-              height: '280px',
+              height: onCheckin ? '240px' : '280px',
               cursor: 'pointer',
               display: 'flex',
               flexDirection: 'column',

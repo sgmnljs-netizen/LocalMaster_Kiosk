@@ -8,6 +8,7 @@ interface PracticeSelectProps {
   lang: 'KO' | 'EN';
   initialSelectedBayNo?: number | null;
   onBaySelected: (bayNo: number, purposeType: 'ALLOCATE_MEMBERSHIP' | 'ALLOCATE_DAILY') => void;
+  onGroupBaySelected?: (bayNos: number[]) => void;
   onCancel: () => void;
   onRefreshBays: () => void;
 }
@@ -17,11 +18,14 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   lang,
   initialSelectedBayNo,
   onBaySelected,
+  onGroupBaySelected,
   onCancel,
   onRefreshBays
 }) => {
+  const [allocMode, setAllocMode] = useState<'SINGLE' | 'GROUP'>('SINGLE');
   const [activeFloor, setActiveFloor] = useState<string>('1F');
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(initialSelectedBayNo || null);
+  const [selectedBayNos, setSelectedBayNos] = useState<number[]>(initialSelectedBayNo ? [initialSelectedBayNo] : []);
   const [preoccupyLoading, setPreoccupyLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [countdown, setCountdown] = useState<number>(60);
@@ -34,13 +38,14 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 선점 락 제한시간 1초 간격 갱신
   useEffect(() => {
-    if (selectedBayNo === null) return;
+    const activeList = allocMode === 'SINGLE' ? (selectedBayNo !== null ? [selectedBayNo] : []) : selectedBayNos;
+    if (activeList.length === 0) return;
     
-    setCountdown(60);
+    setCountdown(allocMode === 'GROUP' ? 120 : 60);
     const timer = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          handleRelease();
+          handleReleaseAll();
           setErrorMsg(lang === 'KO' ? '선점 유효 시간이 초과되어 타석 선택이 자동 취소되었습니다.' : 'Selection timeout. Teebox released.');
           return 60;
         }
@@ -49,16 +54,17 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [selectedBayNo, lang]);
+  }, [selectedBayNo, selectedBayNos, allocMode, lang]);
 
   // 컴포넌트 언마운트 시 비정상 이탈(예: 광고 복귀, 홈 이동 등)인 경우 선점 락을 자동으로 즉시 해제하는 Cleanup Guard
   useEffect(() => {
     return () => {
-      if (selectedBayNo !== null && !isConfirmedRef.current) {
-        api.releaseBay(selectedBayNo).catch(err => console.error('Cleanup release failed:', err));
+      const activeList = allocMode === 'SINGLE' ? (selectedBayNo !== null ? [selectedBayNo] : []) : selectedBayNos;
+      if (activeList.length > 0 && !isConfirmedRef.current) {
+        api.releaseBays(activeList).catch(err => console.error('Cleanup release failed:', err));
       }
     };
-  }, [selectedBayNo]);
+  }, [selectedBayNo, selectedBayNos, allocMode]);
 
   // bays 데이터로부터 동적으로 존재하는 층 목록 추출 (1F, 2F, 3F 등 문자열 기준 정렬)
   const floorList = Array.from(new Set(bays.map(b => b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')))).sort((a, b) => {
@@ -74,7 +80,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     }
   }, [bays]);
 
-  // 타석 터치 - 원자적 선점(Pre-emption) 락 시도
+  // 타석 터치 - 단일 및 다중 원자적 선점(Pre-emption) 락 시도
   const handleBayTouch = async (bayNo: number) => {
     const bay = bays.find(b => b.bay_no === bayNo);
     if (!bay) return;
@@ -86,62 +92,110 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       return;
     }
 
-    // 내가 이미 선택한 타석을 다시 누른 경우 -> 선택 해제
-    if (selectedBayNo === bayNo) {
-      handleRelease();
-      return;
-    }
-
-    // 기존에 선택했던 타석이 있었다면 먼저 해제
-    if (selectedBayNo !== null) {
-      await api.releaseBay(selectedBayNo);
-    }
-
-    setErrorMsg('');
-    setPreoccupyLoading(true);
-
-    try {
-      const success = await api.preoccupyBay(bayNo);
-      if (success) {
-        setSelectedBayNo(bayNo);
-        // 상단 현황판 클릭 등으로 인해 층이 다른 곳일 경우 활성 층 자동 연동
-        const bayFloor = bay.floor || (bay.floor_no ? `${bay.floor_no}F` : '1F');
-        if (bayFloor !== activeFloor) {
-          setActiveFloor(bayFloor);
-        }
-      } else {
-        setErrorMsg(lang === 'KO' ? '타석 선점에 실패했습니다. 다시 시도해 주세요.' : 'Failed to secure teebox. Please try again.');
+    if (allocMode === 'SINGLE') {
+      // --- 1인 단일 타석 모드 ---
+      if (selectedBayNo === bayNo) {
+        handleReleaseAll();
+        return;
       }
-    } catch {
-      setErrorMsg(lang === 'KO' ? '타석 선점 중 오류가 발생했습니다.' : 'Error occurred while securing teebox.');
-    } finally {
-      setPreoccupyLoading(false);
-      onRefreshBays(); // 최신 상태 즉시 갱신
+      if (selectedBayNo !== null) {
+        await api.releaseBay(selectedBayNo);
+      }
+
+      setErrorMsg('');
+      setPreoccupyLoading(true);
+
+      try {
+        const success = await api.preoccupyBay(bayNo);
+        if (success) {
+          setSelectedBayNo(bayNo);
+          setSelectedBayNos([bayNo]);
+          const bayFloor = bay.floor || (bay.floor_no ? `${bay.floor_no}F` : '1F');
+          if (bayFloor !== activeFloor) setActiveFloor(bayFloor);
+        } else {
+          setErrorMsg(lang === 'KO' ? '타석 선점에 실패했습니다. 다시 시도해 주세요.' : 'Failed to secure teebox.');
+        }
+      } catch {
+        setErrorMsg(lang === 'KO' ? '타석 선점 중 오류가 발생했습니다.' : 'Error occurred while securing teebox.');
+      } finally {
+        setPreoccupyLoading(false);
+        onRefreshBays();
+      }
+    } else {
+      // --- 👥 동반자 다중 타석 배정 모드 ---
+      setErrorMsg('');
+      
+      // 이미 선택된 타석이면 선택 해제
+      if (selectedBayNos.includes(bayNo)) {
+        const nextList = selectedBayNos.filter(n => n !== bayNo);
+        await api.releaseBay(bayNo);
+        setSelectedBayNos(nextList);
+        onRefreshBays();
+        return;
+      }
+
+      // 최대 4개 제한
+      if (selectedBayNos.length >= 4) {
+        setErrorMsg(lang === 'KO' ? '동반자 배정은 한 번에 최대 4개 타석까지만 가능합니다.' : 'Maximum 4 teeboxes allowed per group allocation.');
+        return;
+      }
+
+      // 층 다름 제약 체크
+      if (selectedBayNos.length > 0) {
+        const firstBay = bays.find(b => b.bay_no === selectedBayNos[0]);
+        const firstFloor = firstBay?.floor || (firstBay?.floor_no ? `${firstBay.floor_no}F` : '1F');
+        const targetFloor = bay.floor || (bay.floor_no ? `${bay.floor_no}F` : '1F');
+        if (firstFloor !== targetFloor) {
+          setErrorMsg(lang === 'KO' ? `동반자 타석은 동일한 층(${firstFloor})에서만 동시 선택 가능합니다.` : `Group teeboxes must be selected from the same floor (${firstFloor}).`);
+          return;
+        }
+      }
+
+      setPreoccupyLoading(true);
+      const nextList = [...selectedBayNos, bayNo];
+      try {
+        const success = await api.preoccupyBays(nextList);
+        if (success) {
+          setSelectedBayNos(nextList);
+        } else {
+          setErrorMsg(lang === 'KO' ? '타석 다중 선점에 실패했습니다.' : 'Failed to secure group teeboxes.');
+        }
+      } catch {
+        setErrorMsg(lang === 'KO' ? '다중 선점 처리 중 오류가 발생했습니다.' : 'Error securing group teeboxes.');
+      } finally {
+        setPreoccupyLoading(false);
+        onRefreshBays();
+      }
     }
   };
 
-  // 선점 수동 해제
-  const handleRelease = async () => {
-    if (selectedBayNo !== null) {
-      await api.releaseBay(selectedBayNo);
+  // 선점 전체 수동 해제
+  const handleReleaseAll = async () => {
+    const activeList = allocMode === 'SINGLE' ? (selectedBayNo !== null ? [selectedBayNo] : []) : selectedBayNos;
+    if (activeList.length > 0) {
+      await api.releaseBays(activeList);
       setSelectedBayNo(null);
+      setSelectedBayNos([]);
       onRefreshBays();
     }
   };
 
-  // 층 이름 및 기술 스펙 하드코딩 함수 삭제 (서버 데이터 그대로 노출)
-
-  // 선택 완료 버튼 클릭 -> 분기 의사결정 모달 노출
+  // 선택 완료 버튼 클릭 -> 분기 의사결정 모달 노출 또는 동반자 설정
   const handleConfirmClick = () => {
-    if (selectedBayNo !== null) {
+    if (allocMode === 'SINGLE' && selectedBayNo !== null) {
       setShowDecisionModal(true);
+    } else if (allocMode === 'GROUP' && selectedBayNos.length > 0) {
+      isConfirmedRef.current = true;
+      if (onGroupBaySelected) {
+        onGroupBaySelected(selectedBayNos);
+      }
     }
   };
 
   // 최종 분기 선택 완료 (회원권 배정 vs 일일권 결제)
   const handleDecisionConfirm = (type: 'MEMBERSHIP' | 'DAILY') => {
     if (selectedBayNo === null) return;
-    isConfirmedRef.current = true; // 정상 승인 상태로 기록하여 unmount cleanup 락 해제 방지
+    isConfirmedRef.current = true;
     setShowDecisionModal(false);
     
     const purposeType = type === 'MEMBERSHIP' ? 'ALLOCATE_MEMBERSHIP' : 'ALLOCATE_DAILY';
@@ -220,6 +274,62 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           gap: '24px'
         }}
       >
+        {/* 배정 모드 토글 스위치 (1인 단일 타석 vs 👥 동반자 다중 배정) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', background: '#f8fafc', padding: '8px 12px', borderRadius: '20px', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => {
+                if (allocMode !== 'SINGLE') {
+                  handleReleaseAll();
+                  setAllocMode('SINGLE');
+                }
+              }}
+              style={{
+                padding: '12px 24px',
+                borderRadius: '16px',
+                border: 'none',
+                fontWeight: 900,
+                fontSize: '17px',
+                cursor: 'pointer',
+                background: allocMode === 'SINGLE' ? '#047857' : 'transparent',
+                color: allocMode === 'SINGLE' ? '#ffffff' : '#64748b',
+                boxShadow: allocMode === 'SINGLE' ? '0 4px 12px rgba(4, 120, 87, 0.25)' : 'none',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              🎯 1인 단일 타석 배정
+            </button>
+            <button
+              onClick={() => {
+                if (allocMode !== 'GROUP') {
+                  handleReleaseAll();
+                  setAllocMode('GROUP');
+                }
+              }}
+              style={{
+                padding: '12px 24px',
+                borderRadius: '16px',
+                border: 'none',
+                fontWeight: 900,
+                fontSize: '17px',
+                cursor: 'pointer',
+                background: allocMode === 'GROUP' ? '#047857' : 'transparent',
+                color: allocMode === 'GROUP' ? '#ffffff' : '#64748b',
+                boxShadow: allocMode === 'GROUP' ? '0 4px 12px rgba(4, 120, 87, 0.25)' : 'none',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              👥 동반자 타석 동시 배정 (최대 4석)
+            </button>
+          </div>
+
+          {allocMode === 'GROUP' && (
+            <div style={{ fontSize: '15px', fontWeight: 800, color: '#047857', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>선택된 타석: <strong>{selectedBayNos.length}</strong> / 4 개</span>
+            </div>
+          )}
+        </div>
+
         {/* 층 전환 대형 탭바 (좌측 정렬 및 버튼 가로사이즈 대폭 확대) */}
         <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: '100%' }}>
           <div style={{ display: 'flex', padding: '12px', borderRadius: '24px', background: '#f3f4f6', gap: '12px', flexWrap: 'nowrap', overflowX: 'auto' }}>
@@ -284,7 +394,12 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           }}
         >
           {floorBays.map((bay) => {
-            const isSelected = selectedBayNo === bay.bay_no;
+            const selectedIdx = allocMode === 'SINGLE' 
+              ? (selectedBayNo === bay.bay_no ? 0 : -1) 
+              : selectedBayNos.indexOf(bay.bay_no);
+            const isSelected = selectedIdx !== -1;
+            const groupBadgeText = selectedIdx === 0 ? '대표자' : `동반자 ${selectedIdx}`;
+            
             const isPreOccupiedByOther = bay.status === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId();
             const isOccupied = bay.status === 'OCCUPIED';
             const isUnderMaintenance = (bay.status as string) === 'UNDER_MAINTENANCE' || (bay.status as string) === 'REPAIR' || (bay.status as string) === 'ERROR';
@@ -309,7 +424,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               containerBg = 'linear-gradient(145deg, #022c22 0%, #064e3b 100%)'; // Midnight Stealth Green 그라데이션
               containerBorder = '1px solid #10b981'; // Neon Green
               boxShadow = '0 12px 30px rgba(16,185,129,0.3), inset 0 2px 0 rgba(255,255,255,0.1)';
-              statusText = lang === 'KO' ? '선택 완료' : 'Selected';
+              statusText = allocMode === 'GROUP' ? groupBadgeText : (lang === 'KO' ? '선택 완료' : 'Selected');
               statusColor = '#022c22';
               statusBadgeBg = '#10b981';
               numberColor = '#ffffff'; // 하얀색 번호
@@ -477,14 +592,14 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           }}
         >
           <div>
-            {selectedBayNo !== null ? (
+            {(allocMode === 'SINGLE' ? selectedBayNo !== null : selectedBayNos.length > 0) ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div 
                   style={{ 
                     background: 'rgba(5, 150, 105, 0.08)', 
                     border: '1px solid rgba(5, 150, 105, 0.3)',
                     padding: '8px 16px', 
-                    borderRadius: '8px', 
+                    borderRadius: '12px', 
                     fontSize: '16px', 
                     fontWeight: 800,
                     display: 'flex',
@@ -495,7 +610,9 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                   <Check size={16} style={{ color: '#059669' }} />
                   <span style={{ color: '#111827' }}>
                     {lang === 'KO' ? '선택된 타석:' : 'Selected:'}{' '}
-                    <strong style={{ color: '#059669', fontSize: '20px' }}>{selectedBayNo}</strong>
+                    <strong style={{ color: '#059669', fontSize: '20px' }}>
+                      {allocMode === 'SINGLE' ? selectedBayNo : selectedBayNos.join(', ')}
+                    </strong>
                     {lang === 'KO' ? '번' : ''}
                   </span>
                 </div>
@@ -516,7 +633,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               className="kiosk-btn" 
               style={{ width: '130px', height: '56px', borderRadius: '10px', fontSize: '16px', fontWeight: 800 }}
               onClick={async () => {
-                await handleRelease();
+                await handleReleaseAll();
                 onCancel();
               }}
             >
