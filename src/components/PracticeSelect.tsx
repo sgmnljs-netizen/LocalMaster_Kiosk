@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer, UserCheck, CreditCard, X } from 'lucide-react';
 import { api, Bay } from '../services/api';
 import { TopTeeboxDashboard } from './TopTeeboxDashboard';
+import { TeeboxTileCard } from './TeeboxTileCard';
 
 interface PracticeSelectProps {
   bays: Bay[];
@@ -22,8 +23,11 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   onCancel,
   onRefreshBays
 }) => {
+  // 연쇄 배정 정밀 시각 안내 정보 상태
+  const [chainedInfo, setChainedInfo] = useState<{ startTimeStr: string; minutesWait: number } | null>(null);
   const [allocMode, setAllocMode] = useState<'SINGLE' | 'GROUP'>('SINGLE');
   const [activeFloor, setActiveFloor] = useState<string>('1F');
+  const [filterChip, setFilterChip] = useState<'ALL' | 'LEFT' | 'GDR' | 'LESSON' | 'AVAILABLE'>('ALL');
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(initialSelectedBayNo || null);
   const [selectedBayNos, setSelectedBayNos] = useState<number[]>(initialSelectedBayNo ? [initialSelectedBayNo] : []);
   const [preoccupyLoading, setPreoccupyLoading] = useState(false);
@@ -112,6 +116,39 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     const bay = bays.find(b => b.bay_no === bayNo);
     if (!bay) return;
     if (bay.status === 'UNDER_MAINTENANCE') return;
+
+    // 이용 중인 타석 선택 시 ➔ 원래 배정 팝업에 연쇄 배정 정밀 시각 안내 바인딩
+    if (bay.status === 'OCCUPIED' || (bay as any).status === 'USE') {
+      let mwMin = 0;
+      if (bay.config_json) {
+        try {
+          const cfg = typeof bay.config_json === 'string' ? JSON.parse(bay.config_json) : bay.config_json;
+          if (cfg && cfg.remaining_time !== undefined) {
+            mwMin = parseInt(cfg.remaining_time, 10) || 0;
+          }
+        } catch {}
+      }
+
+      const currentRemMin = mwMin > 0 ? mwMin : (bay.minutes_left || 0);
+      const extendMin = (bay as any).extend_min || 0;
+      const waitingCount = (bay as any).waiting_res_count || 0;
+      const waitingMin = (bay as any).waiting_res_total_min || (waitingCount * 60);
+      const bufferGapMin = waitingCount > 0 ? (waitingCount * 1) : 1; // 1분 정비 갭
+
+      const totalWaitMin = currentRemMin + extendMin + waitingMin + bufferGapMin;
+
+      const now = new Date();
+      const startDate = new Date(now.getTime() + totalWaitMin * 60 * 1000);
+      const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
+
+      setChainedInfo({ startTimeStr, minutesWait: totalWaitMin });
+      setSelectedBayNo(bayNo);
+      setSelectedBayNos([bayNo]);
+      setShowDecisionModal(true);
+      return;
+    } else {
+      setChainedInfo(null);
+    }
     
     // 이미 타인에 의해 선점된 경우
     if (bay.status === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId()) {
@@ -239,6 +276,16 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 현재 활성 층 타석 필터링
   const floorBays = bays.filter(b => (b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor);
+  const filteredBays = floorBays.filter(b => {
+    if (filterChip === 'LEFT') {
+      const h = b.handedness || (b.type === 'LEFT' ? 'LEFT' : 'RIGHT');
+      return h === 'LEFT' || h === 'BOTH';
+    }
+    if (filterChip === 'GDR') return (b.simulator_type || 'GDR_PLUS') === 'GDR_PLUS';
+    if (filterChip === 'LESSON') return !!b.is_lesson_only;
+    if (filterChip === 'AVAILABLE') return b.status === 'AVAILABLE';
+    return true;
+  });
 
   // 모달 표기용 선택 타석 정보 추출
   const selectedBay = selectedBayNo !== null ? bays.find(b => b.bay_no === selectedBayNo) : null;
@@ -306,8 +353,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         }
       `}</style>
 
-      {/* 1. 상단 실시간 타석 종합 전광판 (메인 화면에 있는 것 그대로 연동) */}
-      <div style={{ width: '100%', background: '#fff', borderRadius: '24px', boxShadow: '0 10px 40px rgba(0,0,0,0.03)', overflow: 'hidden' }}>
+      {/* 1. 상단 실시간 타석 종합 전광판 (Apple Bento Panel) */}
+      <div style={{ width: '100%', background: '#ffffff', borderRadius: '24px', border: '1px solid rgba(229, 229, 234, 0.8)', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)' }}>
         <TopTeeboxDashboard 
           bays={bays} 
           onBayClick={handleBayTouch} 
@@ -315,22 +362,23 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         />
       </div>
 
-      {/* 2. 하단 조작 영역 컨테이너 (Bento Box) */}
+      {/* 2. 하단 조작 영역 컨테이너 (Apple Minimalist Bento Box) */}
       <div 
         style={{
           background: '#ffffff',
           borderRadius: '24px',
-          boxShadow: '0 10px 40px rgba(0,0,0,0.03)',
-          padding: '32px',
+          border: '1px solid rgba(229, 229, 234, 0.8)',
+          boxShadow: '0 8px 30px rgba(0, 0, 0, 0.04)',
+          padding: '28px 32px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '24px'
+          gap: '20px'
         }}
       >
-        {/* 배정 모드 토글 스위치 (1인 단일 타석 vs 👥 동반자 다중 배정 - 동반자 허용 타석 존재 시에만 노출) */}
+        {/* 배정 모드 토글 스위치 (iOS Segmented Control Style) */}
         {hasAnyCompanionBay ? (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', background: '#f8fafc', padding: '8px 12px', borderRadius: '20px', border: '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', background: '#f4f4f5', padding: '5px', borderRadius: '16px', border: '1px solid #e4e4e7' }}>
+            <div style={{ display: 'flex', gap: '4px', width: '100%' }}>
               <button
                 onClick={() => {
                   if (allocMode !== 'SINGLE') {
@@ -339,19 +387,20 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                   }
                 }}
                 style={{
-                  padding: '12px 24px',
-                  borderRadius: '16px',
+                  flex: 1,
+                  padding: '10px 20px',
+                  borderRadius: '12px',
                   border: 'none',
-                  fontWeight: 900,
-                  fontSize: '17px',
+                  fontWeight: 800,
+                  fontSize: '16px',
                   cursor: 'pointer',
-                  background: allocMode === 'SINGLE' ? '#047857' : 'transparent',
-                  color: allocMode === 'SINGLE' ? '#ffffff' : '#64748b',
-                  boxShadow: allocMode === 'SINGLE' ? '0 4px 12px rgba(4, 120, 87, 0.25)' : 'none',
-                  transition: 'all 0.2s ease'
+                  background: allocMode === 'SINGLE' ? '#ffffff' : 'transparent',
+                  color: allocMode === 'SINGLE' ? '#111827' : '#71717a',
+                  boxShadow: allocMode === 'SINGLE' ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+                  transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
                 }}
               >
-                🎯 1인 단일 타석 배정
+                🎯 1인 단일 타석
               </button>
               <button
                 onClick={() => {
@@ -361,315 +410,142 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                   }
                 }}
                 style={{
-                  padding: '12px 24px',
-                  borderRadius: '16px',
+                  flex: 1,
+                  padding: '10px 20px',
+                  borderRadius: '12px',
                   border: 'none',
-                  fontWeight: 900,
-                  fontSize: '17px',
+                  fontWeight: 800,
+                  fontSize: '16px',
                   cursor: 'pointer',
-                  background: allocMode === 'GROUP' ? '#047857' : 'transparent',
-                  color: allocMode === 'GROUP' ? '#ffffff' : '#64748b',
-                  boxShadow: allocMode === 'GROUP' ? '0 4px 12px rgba(4, 120, 87, 0.25)' : 'none',
-                  transition: 'all 0.2s ease'
+                  background: allocMode === 'GROUP' ? '#ffffff' : 'transparent',
+                  color: allocMode === 'GROUP' ? '#111827' : '#71717a',
+                  boxShadow: allocMode === 'GROUP' ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+                  transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
                 }}
               >
-                👥 동반자 타석 동시 배정 (최대 4석)
+                👥 동반자 다중 배정 (최대 4석)
               </button>
             </div>
 
             {allocMode === 'GROUP' && (
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#047857', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>선택된 타석: <strong>{selectedBayNos.length}</strong> / 4 개</span>
+              <div style={{ fontSize: '14px', fontWeight: 800, color: '#059669', paddingRight: '12px', whiteSpace: 'nowrap' }}>
+                선택: <strong>{selectedBayNos.length}</strong> / 4석
               </div>
             )}
           </div>
         ) : null}
 
-        {/* 층 전환 대형 탭바 (좌측 정렬 및 버튼 가로사이즈 대폭 확대) */}
-        <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: '100%' }}>
-          <div style={{ display: 'flex', padding: '12px', borderRadius: '24px', background: '#f3f4f6', gap: '12px', flexWrap: 'nowrap', overflowX: 'auto' }}>
-            {floorList.map(f => {
-              return (
-                <button
-                  key={f}
-                  onClick={() => setActiveFloor(f)}
-                  style={{
-                    minWidth: '160px', // 한 화면에 5개가 들어갈 수 있는 최적 크기
-                    padding: '0 24px',
-                    height: '64px',
-                    fontSize: '22px',
-                    fontWeight: 900,
-                    borderRadius: '16px',
-                    cursor: 'pointer',
-                    color: activeFloor === f ? '#047857' : '#6b7280',
-                    background: activeFloor === f ? '#ffffff' : 'transparent',
-                    border: 'none',
-                    outline: 'none',
-                    boxShadow: activeFloor === f ? '0 6px 16px rgba(0,0,0,0.06)' : 'none',
-                    transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
-                    whiteSpace: 'nowrap',
-                    WebkitTapHighlightColor: 'transparent'
-                  }}
-                >
-                  {/* 백오피스 원본 데이터 그대로 노출 */}
-                  {f}
-                </button>
-              );
-            })}
+        {/* 층 전환 iOS Segmented Control 탭바 & 퀵 필터 칩 바 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: '100%' }}>
+            <div style={{ display: 'flex', padding: '4px', borderRadius: '16px', background: '#f4f4f5', gap: '4px', flexWrap: 'nowrap', overflowX: 'auto', border: '1px solid #e4e4e7' }}>
+              {floorList.map(f => {
+                return (
+                  <button
+                    key={f}
+                    onClick={() => setActiveFloor(f)}
+                    style={{
+                      minWidth: '120px',
+                      padding: '10px 24px',
+                      fontSize: '18px',
+                      fontWeight: 800,
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      color: activeFloor === f ? '#111827' : '#71717a',
+                      background: activeFloor === f ? '#ffffff' : 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      boxShadow: activeFloor === f ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+                      transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                      whiteSpace: 'nowrap',
+                      WebkitTapHighlightColor: 'transparent'
+                    }}
+                  >
+                    {f}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ⚡ 퀵 필터 칩 바 (Apple Pill Chips) */}
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '2px' }}>
+            {[
+              { id: 'ALL', label: '전체' },
+              { id: 'AVAILABLE', label: '🟢 이용 가능만' },
+              { id: 'LEFT', label: '⛳ 좌타석' },
+              { id: 'GDR', label: '⚡ GDR+' },
+              { id: 'LESSON', label: '🎓 레슨전용' },
+            ].map((chip) => (
+              <button
+                key={chip.id}
+                onClick={() => setFilterChip(chip.id as any)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  border: filterChip === chip.id ? '1px solid #111827' : '1px solid #e5e5ea',
+                  backgroundColor: filterChip === chip.id ? '#111827' : '#ffffff',
+                  color: filterChip === chip.id ? '#ffffff' : '#4b5563',
+                  boxShadow: filterChip === chip.id ? '0 4px 12px rgba(0, 0, 0, 0.15)' : '0 2px 6px rgba(0, 0, 0, 0.02)',
+                  transition: 'all 0.2s ease',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {chip.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* 에러 피드백 메세지 */}
         {errorMsg && (
-          <div className="neon-border-red" style={{ background: 'rgba(239,68,68,0.1)', padding: '12px 18px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <ShieldAlert size={20} style={{ color: 'var(--neon-red)' }} />
-            <span style={{ fontSize: '16px', fontWeight: 700, color: '#fca5a5' }}>{errorMsg}</span>
+          <div style={{ background: '#fef2f2', border: '1px solid #fecdd3', padding: '12px 18px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <ShieldAlert size={20} style={{ color: '#ef4444' }} />
+            <span style={{ fontSize: '15px', fontWeight: 700, color: '#991b1b' }}>{errorMsg}</span>
           </div>
         )}
 
-        {/* 실시간 상세 타석 카드 그리드 (Apple Ripple Laser Wave) */}
+        {/* 실시간 상세 타석 카드 그리드 (Apple Pearl Grid) */}
         <div 
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(5, 1fr)',
-            
-            // [현재 뷰: Pebble 조약돌 뷰]
-            gap: '18px',
-            padding: '24px',
-            
-            // [대안 뷰: 여백 없는 Seamless 뷰 (나중을 위해 보존)]
-            // gap: '0px',
-            // padding: '0px',
-            // overflow: 'hidden',
-
+            gap: '16px',
+            padding: '20px',
             background: '#f5f5f7',
-            borderRadius: '16px',
+            borderRadius: '20px',
             border: '1px solid #e5e5ea',
-            minHeight: '320px'
+            minHeight: '340px'
           }}
         >
-          {floorBays.map((bay) => {
-            const selectedIdx = allocMode === 'SINGLE' 
-              ? (selectedBayNo === bay.bay_no ? 0 : -1) 
-              : selectedBayNos.indexOf(bay.bay_no);
-            const isSelected = selectedIdx !== -1;
-            const groupBadgeText = selectedIdx === 0 ? '대표자' : `동반자 ${selectedIdx}`;
-            
-            const isPreOccupiedByOther = bay.status === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId();
-            const isOccupied = bay.status === 'OCCUPIED';
-            const isUnderMaintenance = (bay.status as string) === 'UNDER_MAINTENANCE' || (bay.status as string) === 'REPAIR' || (bay.status as string) === 'ERROR';
-            const isAvailable = bay.status === 'AVAILABLE';
+          {filteredBays.length === 0 ? (
+            <div style={{ gridColumn: 'span 5', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px', color: '#9ca3af', fontSize: '16px', fontWeight: 700 }}>
+              조건에 일치하는 타석이 없습니다.
+            </div>
+          ) : (
+            filteredBays.map((bay) => {
+              const selectedIdx = allocMode === 'SINGLE' 
+                ? (selectedBayNo === bay.bay_no ? 1 : null) 
+                : (selectedBayNos.indexOf(bay.bay_no) !== -1 ? selectedBayNos.indexOf(bay.bay_no) + 1 : null);
+              const isSelected = selectedIdx !== null;
 
-            // 1. 공통 타일 스타일 변수 (Pebble Shape - GPU Optimized Luxury)
-            let containerBg = 'linear-gradient(145deg, #ffffff 0%, #f9fafb 100%)'; // 은은한 펄 그라데이션
-            let containerBorder = '1px solid rgba(209, 213, 219, 0.5)'; // 은은한 경계선
-            let boxShadow = '0 6px 16px rgba(0,0,0,0.04), inset 0 2px 0 rgba(255,255,255,1)'; // 상단 하이라이트 인셋 섀도우
-            let statusText = lang === 'KO' ? '이용가능' : 'Available';
-            let statusColor = '#047857'; // 시인성 극대화를 위해 기존보다 더 짙은 에메랄드 텍스트로 변경 
-            let statusBadgeBg = '#ecfdf5'; // 맑은 민트 뱃지 배경
-            let numberColor = '#111827'; // 타석 번호
-            let numberTextShadow = '0 1px 1px rgba(255,255,255,0.8)'; // 메탈릭 양각 느낌
-            let cursorStyle = 'pointer';
-            let opacity = '1';
-            let pointerEvents: React.CSSProperties['pointerEvents'] = 'auto';
-            let transform = 'none';
-            let zIndex = 1;
-
-            if (isSelected) {
-              containerBg = 'linear-gradient(145deg, #022c22 0%, #064e3b 100%)'; // Midnight Stealth Green 그라데이션
-              containerBorder = '1px solid #10b981'; // Neon Green
-              boxShadow = '0 12px 30px rgba(16,185,129,0.3), inset 0 2px 0 rgba(255,255,255,0.1)';
-              statusText = allocMode === 'GROUP' ? groupBadgeText : (lang === 'KO' ? '선택 완료' : 'Selected');
-              statusColor = '#022c22';
-              statusBadgeBg = '#10b981';
-              numberColor = '#ffffff'; // 하얀색 번호
-              numberTextShadow = 'none';
-              transform = 'scale(1.02) translateY(-2px)'; // 선택 시 약간 팝업
-              zIndex = 10;
-            } else if (isOccupied) {
-              containerBg = '#f3f4f6';
-              containerBorder = '1px solid #e5e7eb';
-              boxShadow = 'inset 0 4px 10px rgba(0,0,0,0.02)';
-              statusText = lang === 'KO' ? '이용중' : 'Occupied';
-              statusColor = '#6b7280';
-              statusBadgeBg = '#e5e7eb';
-              numberColor = '#9ca3af'; // 연한 회색 번호
-              numberTextShadow = 'none';
-              cursorStyle = 'not-allowed';
-            } else if (isPreOccupiedByOther) {
-              containerBg = '#f9fafb';
-              containerBorder = '1px solid #e5e7eb';
-              boxShadow = 'none';
-              statusText = lang === 'KO' ? '선택 중' : 'Hold';
-              statusColor = '#9ca3af';
-              statusBadgeBg = '#f3f4f6';
-              numberColor = '#d1d5db';
-              numberTextShadow = 'none';
-              cursorStyle = 'not-allowed';
-              pointerEvents = 'none';
-            } else if (isUnderMaintenance) {
-              containerBg = '#fef2f2';
-              containerBorder = '1px solid #fca5a5';
-              boxShadow = 'none';
-              statusText = lang === 'KO' ? '점검중' : 'Maint';
-              statusColor = '#dc2626';
-              statusBadgeBg = '#fee2e2';
-              numberColor = '#f87171';
-              numberTextShadow = 'none';
-              cursorStyle = 'not-allowed';
-              pointerEvents = 'none';
-            }
-
-            return (
-              <div 
-                key={bay.bay_no}
-                style={{ position: 'relative', zIndex: zIndex }}
-              >
-                {/* --- RIPPLE LASER WAVE EFFECT (2중 동심원 방출) --- */}
-                {isSelected && (
-                  <>
-                    <div style={{
-                      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                      borderRadius: '20px', border: '2.5px solid #34c759',
-                      animation: 'rippleWave 1.8s infinite linear',
-                      pointerEvents: 'none', zIndex: -1
-                    }} />
-                    <div style={{
-                      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                      borderRadius: '20px', border: '2.5px solid #34c759',
-                      animation: 'rippleWave 1.8s infinite linear', animationDelay: '0.9s',
-                      pointerEvents: 'none', zIndex: -1
-                    }} />
-                  </>
-                )}
-
-                {/* --- CARD MAIN BODY --- */}
-                <div
-                  className={isAvailable ? "luxury-tile" : ""}
-                  onClick={() => (isAvailable || isSelected) && handleBayTouch(bay.bay_no)}
-                  style={{
-                    height: '140px',
-                    borderRadius: '20px', // [현재 뷰: 둥근 모서리]
-                    // borderRadius: '0px', // [대안 뷰: 여백 없는 Seamless 뷰 적용 시 직각 모서리 사용]
-                    border: containerBorder,
-                    background: containerBg,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '12px', // 번호와 뱃지 사이의 확실한 여백
-                    cursor: cursorStyle,
-                    transition: 'all 0.2s ease',
-                    transform: transform,
-                    position: 'relative',
-                    overflow: 'hidden',
-                    pointerEvents: pointerEvents,
-                    boxShadow: boxShadow
-                  }}
-                >
-                  {/* --- LEFT/RIGHT BADGE (우상단 아이콘) --- */}
-                  {bay.type === 'LEFT' && (
-                    <div style={{
-                      position: 'absolute',
-                      top: '12px',
-                      right: '12px',
-                      background: isSelected ? 'rgba(255,255,255,0.2)' : '#e0f2fe',
-                      color: isSelected ? '#ffffff' : '#0284c7',
-                      padding: '4px 8px',
-                      borderRadius: '8px',
-                      fontSize: '11px',
-                      fontWeight: 800,
-                    }}>
-                      {lang === 'KO' ? '좌타' : 'L'}
-                    </div>
-                  )}
-
-                  {/* --- NUMBER (선명한 메탈릭 양각 번호) --- */}
-                  <div style={{
-                    fontSize: '38px',
-                    fontWeight: 900,
-                    fontFamily: 'monospace',
-                    color: numberColor,
-                    textShadow: numberTextShadow,
-                    letterSpacing: '-1px',
-                    lineHeight: '1'
-                  }}>
-                    {bay.bay_no.toString().padStart(2, '0')}
-                  </div>
-
-                  {/* --- STATUS BADGE & TIMER (상태 뱃지) --- */}
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}>
-                    {isOccupied && bay.minutes_left !== undefined ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                        <div style={{ background: statusBadgeBg, padding: '4px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <Timer size={14} style={{ color: statusColor }} />
-                          <span style={{ fontSize: '14px', fontWeight: 700, color: statusColor }}>{bay.minutes_left}분 남음</span>
-                        </div>
-                        <div style={{ width: '100%', height: '4px', backgroundColor: '#e5e7eb', borderRadius: '2px', overflow: 'hidden' }}>
-                          <div style={{ width: `${Math.min(100, (bay.minutes_left / 60) * 100)}%`, height: '100%', backgroundColor: statusColor, transition: 'width 0.5s ease' }} />
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ background: statusBadgeBg, padding: '6px 16px', borderRadius: '12px' }}>
-                          <span style={{ fontSize: '15px', fontWeight: 900, color: statusColor, letterSpacing: '-0.3px' }}>
-                            {statusText}
-                          </span>
-                        </div>
-                        {isSelected && (
-                          <span style={{ position: 'absolute', bottom: '8px', fontSize: '12px', fontWeight: 700, color: '#10b981', animation: 'softBlink 1s infinite alternate' }}>
-                            {countdown}s left
-                          </span>
-                        )}
-                      </>
-                    )}
-
-                    {/* --- SPEC BADGES BAR --- */}
-                    {(() => {
-                      const simType = bay.simulator_type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).simulator_type; } catch { return null; } })() : null);
-                      const handed = bay.handedness || bay.type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).handedness; } catch { return null; } })() : null);
-                      const lessonOnly = bay.is_lesson_only || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).is_lesson_only; } catch { return false; } })() : false);
-                      const companionAllowed = bay.allow_companion || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).allow_companion; } catch { return false; } })() : false);
-
-                      const hasBadges = (simType && simType !== 'NONE') || (handed && (handed === 'LEFT' || handed === 'BOTH')) || lessonOnly || companionAllowed;
-                      if (!hasBadges) return null;
-
-                      return (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', justifyContent: 'center', marginTop: '2px' }}>
-                          {simType && simType !== 'NONE' && (
-                            <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe' }}>
-                              {simType === 'GDR_PLUS' ? 'GDR+' : simType === 'KAKAO_VX' ? 'VX' : simType === 'QED' ? 'QED' : simType === 'SDR' ? 'SDR' : simType}
-                            </span>
-                          )}
-                          {handed && (handed === 'LEFT' || handed === 'BOTH') && (
-                            <span style={{ fontSize: '9px', fontWeight: 900, padding: '1px 4px', borderRadius: '3px', background: handed === 'LEFT' ? '#ffe4e6' : '#f3e8ff', color: handed === 'LEFT' ? '#9f1239' : '#6b21a8', border: '1px solid #fecdd3' }}>
-                              {handed === 'LEFT' ? '좌타 🎯' : '양타 ↔'}
-                            </span>
-                          )}
-                          {lessonOnly && (
-                            <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #e9d5ff' }}>
-                              레슨 🎓
-                            </span>
-                          )}
-                          {companionAllowed && (
-                            <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#ecfeff', color: '#155e75', border: '1px solid #a5f3fc' }}>
-                              동반자 👥
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              return (
+                <TeeboxTileCard
+                  key={bay.bay_no}
+                  bay={bay}
+                  isSelected={isSelected}
+                  selectionIndex={allocMode === 'GROUP' ? selectedIdx : null}
+                  lang={lang}
+                  onSelect={(bayNo) => handleBayTouch(bayNo)}
+                />
+              );
+            })
+          )}
         </div>
+
 
         {/* 3. 하단 액션 컨트롤러 바 */}
         <div 
@@ -860,6 +736,28 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                       ? (lang === 'KO' ? '✨ 즉시 배정' : 'Instant Allocation') 
                       : (lang === 'KO' ? '👥 대기 예약' : 'Waitlist Booking')}
                   </span>
+                </div>
+              </div>
+            )}
+
+            {/* ⏰ 연쇄 배정 정밀 시각 일원화 안내 배너 */}
+            {chainedInfo && (
+              <div
+                style={{
+                  backgroundColor: '#f0fdf4',
+                  border: '2px solid #22c55e',
+                  borderRadius: '20px',
+                  padding: '16px 24px',
+                  marginBottom: '24px',
+                  textAlign: 'center',
+                  boxShadow: '0 8px 20px -4px rgba(34, 197, 94, 0.12)',
+                }}
+              >
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#15803d', marginBottom: '2px' }}>
+                  이용 중 타석 연쇄 배정 (앞 세션 종료 1분 후 자동 시작)
+                </div>
+                <div style={{ fontSize: '28px', fontWeight: 900, color: '#15803d', letterSpacing: '-0.5px' }}>
+                  ⏰ {chainedInfo.startTimeStr} 시작 예정 ({chainedInfo.minutesWait}분 뒤 입장)
                 </div>
               </div>
             )}

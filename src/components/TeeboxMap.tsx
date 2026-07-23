@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer } from 'lucide-react';
 import { api, Bay } from '../services/api';
+import { TeeboxTileCard } from './TeeboxTileCard';
 
 interface TeeboxMapProps {
   memberNo?: string;

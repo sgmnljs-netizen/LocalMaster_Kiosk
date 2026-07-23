@@ -14,6 +14,7 @@ import { Par3Allocation } from './components/Par3Allocation';
 import { TopTeeboxDashboard } from './components/TopTeeboxDashboard';
 import { PracticeSelect } from './components/PracticeSelect';
 import { CompanionSetupModal, CompanionTargetItem } from './components/CompanionSetupModal';
+import { ErrorMessageModal, ErrorModalData } from './components/ErrorMessageModal';
 import { CheckinSelect } from './components/CheckinSelect';
 import { api, Member, Product, Bay } from './services/api';
 import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
@@ -110,10 +111,34 @@ export default function KioskApp() {
   // UI 상태
   const [toast, setToast] = useState<{ message: string; success: boolean } | null>(null);
   const [errorMasterCard, setErrorMasterCard] = useState<{ code: string; detail: string; traceId: string } | null>(null);
+  const [errorModal, setErrorModal] = useState<ErrorModalData>({ isVisible: false, message: '' });
   const [storeName, setStoreName] = useState<string>('SGM Golf Academy');
   const [checkinPolicy, setCheckinPolicy] = useState<string>('CHECKIN_REQUIRED');
-  // [Fix-5] hardware_success=false 시 직원 호출 모달 표시
   const [hwFailAlert, setHwFailAlert] = useState<{ bayNo: number; resId: string } | null>(null);
+
+  // 미들웨어 헬스체크 오프라인 감지
+  const [isMiddlewareOffline, setIsMiddlewareOffline] = useState<boolean>(false);
+
+  useEffect(() => {
+    const checkMw = async () => {
+      const status = await api.getMiddlewareStatus();
+      setIsMiddlewareOffline(!status.online);
+    };
+
+    checkMw();
+    const interval = setInterval(checkMw, 30000); // 30초 주기 Heartbeat Polling
+    return () => clearInterval(interval);
+  }, []);
+
+  const showErrorModal = (message: string, title?: string, isHw: boolean = false, errorCode?: string | number) => {
+    setErrorModal({
+      isVisible: true,
+      title: title || (isHw ? '타석 기기 가동 확인 필요' : '타석 배정 오류'),
+      message,
+      errorCode,
+      isHardwareFail: isHw
+    });
+  };
 
   // 실시간 타석 데이터 상태
   const [bays, setBays] = useState<Bay[]>([]);
@@ -398,10 +423,10 @@ export default function KioskApp() {
           showToast(res.message);
           handleLogout();
         } else {
-          showToast(res.message, false);
+          showErrorModal(res.message || '타석 이동을 진행할 수 없습니다.');
         }
-      } catch {
-        showToast(lang === 'KO' ? '타석 이동 처리 중 오류가 발생했습니다.' : 'Failed to move teebox.', false);
+      } catch (err: any) {
+        showErrorModal(err?.message || (lang === 'KO' ? '타석 이동 처리 중 오류가 발생했습니다.' : 'Failed to move teebox.'));
       }
     }
   };
@@ -418,17 +443,17 @@ export default function KioskApp() {
         );
         if (res.success) {
           await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId})`, authMember.member_no);
-          if (!res.hardware_success) {
-            showToast(lang === 'KO' ? '배정은 완료되었으나 기기 가동에 실패했습니다. 직원에게 문의해주세요.' : 'Allocated but hardware start failed.', false);
+          if (res.hardware_success === false) {
+            showErrorModal(`${selectedBayNo}번 타석 배정은 완료되었으나, 센서/타석 기기 시작에 실패했습니다. 직원을 호출해 주세요.`, '타석 기기 가동 미완료', true);
           }
           const updated = await api.getMember(authMember.member_no);
           if (updated) setAuthMember(updated);
           setStep('PAYMENT');
         } else {
-          showToast(res.message, false);
+          showErrorModal(res.message || '회원 이용권 타석 배정에 실패했습니다.');
         }
-      } catch (err) {
-        showToast(lang === 'KO' ? '타석 배정 처리 중 오류가 발생했습니다.' : 'Failed to allocate teebox.', false);
+      } catch (err: any) {
+        showErrorModal(err?.message || (lang === 'KO' ? '타석 배정 처리 중 시스템 오류가 발생했습니다.' : 'Failed to allocate teebox.'));
       }
     }
   };
@@ -473,12 +498,16 @@ export default function KioskApp() {
       try {
         for (const t of targets) {
           // [BUG-3 FIX] payment_method='TICKET' 명시 전달
-          await api.allocateBay(t.bayNo, t.durationMin, t.memberNo, t.memberName, t.hp, t.memberItemId, 'TICKET', 0);
+          const res = await api.allocateBay(t.bayNo, t.durationMin, t.memberNo, t.memberName, t.hp, t.memberItemId, 'TICKET', 0);
+          if (!res.success) {
+            showErrorModal(res.message || `${t.bayNo}번 동반자 타석 배정에 실패했습니다.`);
+            return;
+          }
         }
         showToast(lang === 'KO' ? '동반자 타석 배정이 모두 완료되었습니다!' : 'Group teebox allocation completed!');
         setStep('PAYMENT');
-      } catch {
-        showToast(lang === 'KO' ? '동반자 타석 배정 처리 중 오류가 발생했습니다.' : 'Group allocation failed.', false);
+      } catch (err: any) {
+        showErrorModal(err?.message || (lang === 'KO' ? '동반자 타석 배정 처리 중 오류가 발생했습니다.' : 'Group allocation failed.'));
       }
     } else {
       // 일일권 결제가 포함된 경우 결제 단말기 퍼널로 전이
@@ -510,10 +539,10 @@ export default function KioskApp() {
           setSelectedProduct(prod);
           setStep('PAYMENT');
         } else {
-          showToast(res.message, false);
+          showErrorModal(res.message || '결제 대기 예약 생성에 실패했습니다.');
         }
-      } catch (err) {
-        showToast(lang === 'KO' ? '결제 대기 예약 생성 중 오류가 발생했습니다.' : 'Failed to create hold reservation.', false);
+      } catch (err: any) {
+        showErrorModal(err?.message || (lang === 'KO' ? '결제 대기 예약 생성 중 오류가 발생했습니다.' : 'Failed to create hold reservation.'));
       }
     } else {
       setSelectedProduct(prod);
@@ -535,10 +564,9 @@ export default function KioskApp() {
     showToast('모든 처리가 안전하게 완료되었습니다. 이용권을 챙겨주세요!');
     
     // [BUG-1 FIX] 일일권 배정: allocateBay + processPaymentWebhook 이중 호출 제거
-    // 통합 API(POST /kiosk/allocate-bay)로 단일 처리 (CoreEngine 2회 호출 방지)
+    // 통합 API(POST /api/v1/kiosk/allocate-bay)로 단일 처리 (CoreEngine 2회 호출 방지)
     if (purpose === 'ALLOCATE_DAILY' && selectedBayNo && selectedProduct) {
       try {
-        // [Fix-5] allocateBay 반환값 명시적 확인 (기존: 반환값 무시 버그)
         const allocResult = await api.allocateBay(
           selectedBayNo,
           selectedProduct.duration_min || 60,
@@ -549,15 +577,17 @@ export default function KioskApp() {
           'CARD',          // [BUG-3 FIX] payment_method 명시
           selectedProduct.standard_price  // [BUG-3 FIX] 매출 금액 전달
         );
-        // [Fix-5] hardware_success=false 시 직원 호출 알림 UI 표시
-        if (allocResult && allocResult.hardware_success === false) {
-          setHwFailAlert({ bayNo: selectedBayNo, resId: allocResult.res_id || '' });
-          showToast(`${selectedBayNo}번 타석 기기 가동 실패 — 직원을 호출해주세요.`, false);
+        if (allocResult) {
+          if (!allocResult.success) {
+            showErrorModal(allocResult.message || '일일권 타석 배정에 실패했습니다. 카운터 직원을 호출해 주세요.');
+          } else if (allocResult.hardware_success === false) {
+            setHwFailAlert({ bayNo: selectedBayNo, resId: allocResult.res_id || '' });
+            showErrorModal(`${selectedBayNo}번 타석 결제는 완료되었으나 센서 기기 가동에 실패했습니다. 직원을 호출해주세요.`, '타석 기기 시작 확인 필요', true);
+          }
         }
-        // [BUG-1 FIX] processPaymentWebhook 직접 호출 제거 — 통합 API 내부에서 이미 처리됨
-      } catch (err) {
+      } catch (err: any) {
         console.error('[BUG-1 FIX] 일일권 타석 배정 실패:', err);
-        showToast('타석 배정 중 오류가 발생했습니다. 직원에게 문의해주세요.', false);
+        showErrorModal(err?.message || '타석 배정 중 오류가 발생했습니다. 직원에게 문의해주세요.');
       }
     }
 
@@ -1215,6 +1245,73 @@ export default function KioskApp() {
 
           </div>
         </>
+      )}
+
+      {/* 시각적 에러 메시지 팝업 모달 */}
+      <ErrorMessageModal
+        data={errorModal}
+        onClose={() => setErrorModal((prev) => ({ ...prev, isVisible: false }))}
+      />
+
+      {/* 🛑 미들웨어 장애 점검 대형 차단 모달 (POS 표준) */}
+      {isMiddlewareOffline && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(10, 12, 16, 0.92)',
+            backdropFilter: 'blur(20px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '40px',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#1e293b',
+              borderRadius: '32px',
+              border: '2px solid #ef4444',
+              padding: '48px',
+              maxWidth: '640px',
+              textAlign: 'center',
+              boxShadow: '0 24px 60px rgba(239, 68, 68, 0.3)',
+              color: '#ffffff',
+            }}
+          >
+            <div style={{ fontSize: '64px', marginBottom: '16px' }}>⚠️</div>
+            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#f87171', marginBottom: '12px' }}>
+              타석 장비 미들웨어 점검 중
+            </h2>
+            <p style={{ fontSize: '18px', color: '#cbd5e1', lineHeight: '1.6', marginBottom: '32px' }}>
+              현재 센서 기기 제어 서버(미들웨어) 점검 및 통신 확인 중입니다.<br />
+              안전한 영업을 위해 키오스크 배정이 일시 차단되었습니다.<br />
+              <strong>안내 데스크 직원에게 문의해 주세요.</strong>
+            </p>
+            <div style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
+              <button
+                onClick={() => {
+                  api.writeKioskLog('STAFF_CALL', '미들웨어 점검 장애 화면에서 직원을 호출함');
+                  alert('안내 데스크로 직원 호출 알림이 전송되었습니다.');
+                }}
+                style={{
+                  padding: '16px 36px',
+                  borderRadius: '20px',
+                  backgroundColor: '#ef4444',
+                  color: '#ffffff',
+                  fontWeight: 900,
+                  fontSize: '20px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 8px 24px rgba(239, 68, 68, 0.4)',
+                }}
+              >
+                🔔 직원 호출
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

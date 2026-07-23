@@ -317,6 +317,21 @@ class HybridAPIClient {
     return this.terminalId;
   }
 
+  // 미들웨어 통합 제어 센터 30초 헬스체크
+  async getMiddlewareStatus(): Promise<{ online: boolean; status: string }> {
+    try {
+      const res = await fetch(`${BASE_URL}/v1/kiosk/middleware/status`, {
+        headers: { 'x-store-cd': this.getStoreCd() }
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+      return { online: false, status: 'OFFLINE' };
+    } catch {
+      return { online: false, status: 'OFFLINE' };
+    }
+  }
+
   // =========================================================================
   // [Phase 2: WS-2] WebSocket 실시간 연결 관리
   // 배정 완료/해제 이벤트를 폴링 없이 즉시 수신합니다.
@@ -327,7 +342,7 @@ class HybridAPIClient {
     
     const storeCd = this.getStoreCd();
     // [Fix-4] WS_BASE_URL 기반으로 동적 생성 (localhost:8000 하드코딩 제거)
-    const wsUrl = `${WS_BASE_URL}/ws/kiosk?store_cd=${storeCd}&terminal_id=${this.terminalId}&api_key=${KIOSK_WS_KEY}`;
+    const wsUrl = `${WS_BASE_URL}/ws/kiosk?store_cd=${encodeURIComponent(storeCd)}&terminal_id=${encodeURIComponent(this.terminalId)}&api_key=${encodeURIComponent(KIOSK_WS_KEY)}`;
 
     const connect = () => {
       if (this.ws && this.ws.readyState <= WebSocket.OPEN) return;
@@ -356,14 +371,14 @@ class HybridAPIClient {
             const data = JSON.parse(evt.data) as Record<string, unknown>;
             onMessage?.(data);
 
-            if (data.type === 'bay_updated') {
+            if (data.type === 'bay_updated' || data.type === 'bay_update') {
               // Edge DB LocalStorage 즉시 동기화
               const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
               const idx = bays.findIndex(b => b.bay_no === (data.bay_no as number));
               if (idx !== -1) {
                 if (data.status === 'OCCUPIED') {
                   bays[idx].status = 'OCCUPIED';
-                  bays[idx].current_user_name = (data.user_name as string) || '손님';
+                  bays[idx].current_user_name = (data.user_name as string) || (data.member_name as string) || '손님';
                   bays[idx].lock_terminal_id = null;
                   bays[idx].lock_expired_at = null;
                 } else if (data.status === 'AVAILABLE') {
@@ -376,26 +391,45 @@ class HybridAPIClient {
                 this.bayUpdateListeners.forEach(listener => listener(bays[idx]));
               }
             }
+
+            // [Fix-3C] bay_release: 종료된 타석 AVAILABLE 복원
+            if (data.type === 'bay_release') {
+              const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
+              const bayNos = (data.bay_nos as number[]) || (data.bay_no ? [data.bay_no as number] : []);
+              let changed = false;
+              for (const bayNo of bayNos) {
+                const idx = bays.findIndex(b => b.bay_no === bayNo);
+                if (idx !== -1) {
+                  bays[idx].status = 'AVAILABLE';
+                  bays[idx].current_user_name = null;
+                  bays[idx].end_time = null;
+                  bays[idx].minutes_left = undefined;
+                  bays[idx].lock_terminal_id = null;
+                  this.bayUpdateListeners.forEach(listener => listener(bays[idx]));
+                  changed = true;
+                }
+              }
+              if (changed) localStorage.setItem('LM_BAYS', JSON.stringify(bays));
+            }
           } catch (e) {
             console.warn('[WS-Kiosk] 메시지 파싱 실패:', e);
           }
         };
 
         this.ws.onclose = (evt) => {
-          console.warn(`[WS-Kiosk] 연결 종료 (code=${evt.code}). 15초 후 재연결...`);
+          console.warn(`[WS-Kiosk] 연결 해제됨 (code=${evt.code}). 3초 후 자동 재연결 시도...`);
           this.ws = null;
           // 자동 재연결 (1008: 인증 실패는 제외)
           if (evt.code !== 1008) {
-            this.wsReconnectTimer = setTimeout(connect, 15000);
+            this.wsReconnectTimer = setTimeout(connect, 3000);
           }
         };
 
-        this.ws.onerror = (err) => {
-          console.error('[WS-Kiosk] 오류:', err);
+        this.ws.onerror = () => {
+          // 새로고침이나 네트워크 재연결 시 자연스러운 이벤트이므로 콘솔 빨간 에러 노이즈 억제
         };
       } catch (e) {
-        console.error('[WS-Kiosk] WebSocket 초기화 실패 — 폴링 모드 유지:', e);
-        this.wsReconnectTimer = setTimeout(connect, 15000);
+        this.wsReconnectTimer = setTimeout(connect, 3000);
       }
     };
 
@@ -428,7 +462,6 @@ class HybridAPIClient {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          // [Fix-4] 하드코딩 제거 → localStorage 또는 settings.MIDDLEWARE_API_KEY와 동기화
           'X-API-Key': MIDDLEWARE_API_KEY_CLIENT
         },
         body: JSON.stringify({
@@ -769,14 +802,14 @@ class HybridAPIClient {
     localStorage.setItem('LM_BAYS', JSON.stringify(bays));
   }
 
-  // 5. 타석 최종 배정 완료 — [BUG-1·2·3 FIX] 통합 API 단일 호출
+  // 5. 타석 최종 배정 완료 — [BUG-1·2·3 FIX] 통합 API 단일 호출 (/v1/kiosk/allocate-bay)
   async allocateBay(
     bayNo: number, 
     durationMin: number, 
     memberNo?: string, 
     guestName?: string, 
     hpNo?: string,
-    memberItemId?: number,
+    memberItemId?: number | string,
     paymentMethod: 'TICKET' | 'CARD' = 'TICKET',
     amount: number = 0
   ): Promise<{ success: boolean; res_id?: string; message: string; hardware_success?: boolean }> {
@@ -785,9 +818,9 @@ class HybridAPIClient {
 
     if (isConnected) {
       try {
-        // [BUG-1 FIX] 2-Step 호출 제거 → 통합 API 단일 호출
-        // 선점 락 검증(terminal_id 필수) + 이용권 차감 + 하드웨어 가동이 원자적으로 처리됨
-        const res = await fetch(`${BASE_URL}/kiosk/allocate-bay?store_cd=${STORE_CODE}`, {
+        // [BUG-1 FIX] 백엔드 SSOT 라우트 표준 (/v1/kiosk/allocate-bay) 일치화
+        const parsedItemId = memberItemId !== undefined && memberItemId !== null ? Number(memberItemId) : null;
+        const res = await fetch(`${BASE_URL}/v1/kiosk/allocate-bay?store_cd=${STORE_CODE}`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -799,16 +832,16 @@ class HybridAPIClient {
             member_no: memberNo || null,
             guest_name: guestName || null,
             hp_no: hpNo || null,
-            member_item_id: memberItemId || null,
+            member_item_id: isNaN(parsedItemId as number) ? null : parsedItemId,
             payment_method: paymentMethod,     // TICKET(회원권) | CARD(일일권)
-            terminal_id: this.terminalId,      // [BUG-2 FIX] 선점 락 검증 필수값
-            amount: amount                     // [BUG-3 FIX] 일일권 결제 금액
+            terminal_id: this.terminalId,      // 선점 락 검증 필수값
+            amount: amount                     // 일일권 결제 금액
           })
         });
 
         if (res.ok) {
           const data = await res.json();
-          // 로컈스토리지 즉시 동기화 (폴링 5초 지연 없이 UI 반영)
+          // 로컬스토리지 즉시 동기화 (폴링 5초 지연 없이 UI 반영)
           const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
           const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
           if (targetIdx !== -1) {
@@ -826,15 +859,16 @@ class HybridAPIClient {
           return { 
             success: true, 
             res_id: data.res_id, 
-            message: data.message,
+            message: data.message || '타석 배정이 완료되었습니다.',
             hardware_success: data.hardware_success
           };
         } else {
-          const errData = await res.json().catch(() => ({ detail: '알 수 없는 오류' }));
-          return { success: false, message: errData.detail || '타석 배정에 실패했습니다.' };
+          const errData = await res.json().catch(() => ({ detail: `HTTP ${res.status} 오류가 발생했습니다.` }));
+          const errMsg = errData.detail || errData.message || `타석 배정에 실패했습니다. (코드: ${res.status})`;
+          return { success: false, message: errMsg };
         }
       } catch (err) {
-        console.error('[BUG-1 FIX] 통합 배정 API 실패, Edge DB 폴백:', err);
+        console.error('[BUG-1 FIX] 통합 배정 API 호출 실패, Edge DB 폴백:', err);
       }
     }
 
@@ -1404,29 +1438,21 @@ class HybridAPIClient {
     hpNo?: string
   ): Promise<{ success: boolean; res_id?: string; message: string }> {
     const isConnected = await this.checkConnection();
-    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const nowHourMin = new Date().toTimeString().slice(0, 5).replace(/:/g, '');
 
     if (isConnected) {
       try {
-        const createRes = await fetch(`${BASE_URL}/reservations/`, {
+        const createRes = await fetch(`${BASE_URL}/v1/kiosk/hold-reservation?store_cd=${encodeURIComponent(STORE_CODE)}`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
             'x-store-cd': STORE_CODE
           },
           body: JSON.stringify({
-            resource_type: 'BAY',
-            resource_no: bayNo,
-            member_no: memberNo || null,
-            guest_nm: guestName || null,
-            hp_no: hpNo || null,
-            res_date: todayStr,
-            start_time: nowHourMin,
+            bay_no: bayNo,
             duration_min: durationMin,
-            res_type: 'SLOT',
-            status_cd: 'HOLD',
-            payment_mode: 'OFFLINE_CARD'
+            member_no: memberNo || null,
+            guest_name: guestName || null,
+            hp_no: hpNo || null
           })
         });
         
