@@ -59,6 +59,8 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
       setPayStep('PRINT_RECEIPT');
+      // 승인 완료 즉시 실제 백엔드/로컬스토리지 타석 배정 실행
+      onPaymentSuccess();
     } catch (err: any) {
       setPayStep('INSERT_CARD');
       setErrorMsg(err.message || '결제 처리 중 서버 승인 오류가 발생했습니다.');
@@ -76,6 +78,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
       );
       setAppNo(Math.floor(10000000 + Math.random() * 90000000).toString());
+      onPaymentSuccess();
       return;
     }
     const timer = setTimeout(triggerSimulation, 4500); // 4.5초 뒤 알아서 시뮬레이션 작동

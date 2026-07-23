@@ -80,6 +80,33 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     }
   }, [bays]);
 
+  // 타석별 동반자 배정 허용 여부 체크 헬퍼
+  const isCompanionAllowed = (bayObj: any) => {
+    if (bayObj.allow_companion === true) return true;
+    if (bayObj.config_json) {
+      try {
+        const cfg = typeof bayObj.config_json === 'string' ? JSON.parse(bayObj.config_json) : bayObj.config_json;
+        if (cfg && cfg.allow_companion === true) return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  };
+
+  // 매장/구역 전체 타석 중 동반자 배정 허용 타석이 1개라도 존재하는지 체크
+  const hasAnyCompanionBay = React.useMemo(() => {
+    return bays.some(b => isCompanionAllowed(b));
+  }, [bays]);
+
+  // 동반자 허용 타석이 없으면 무조건 1인 단일 타석 모드로 강제 고정
+  useEffect(() => {
+    if (!hasAnyCompanionBay && allocMode === 'GROUP') {
+      setAllocMode('SINGLE');
+      handleReleaseAll();
+    }
+  }, [hasAnyCompanionBay, allocMode]);
+
   // 타석 터치 - 단일 및 다중 원자적 선점(Pre-emption) 락 시도
   const handleBayTouch = async (bayNo: number) => {
     const bay = bays.find(b => b.bay_no === bayNo);
@@ -112,6 +139,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           setSelectedBayNos([bayNo]);
           const bayFloor = bay.floor || (bay.floor_no ? `${bay.floor_no}F` : '1F');
           if (bayFloor !== activeFloor) setActiveFloor(bayFloor);
+          // 타석 클릭 즉시 배정 방식 선택 모달 팝업
+          setShowDecisionModal(true);
         } else {
           setErrorMsg(lang === 'KO' ? '타석 선점에 실패했습니다. 다시 시도해 주세요.' : 'Failed to secure teebox.');
         }
@@ -124,6 +153,12 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     } else {
       // --- 👥 동반자 다중 타석 배정 모드 ---
       setErrorMsg('');
+
+      // 선택하려는 타석이 1인 전용 타석인 경우 동반자 배정 불가 처리
+      if (!isCompanionAllowed(bay)) {
+        setErrorMsg(lang === 'KO' ? '선택하신 타석은 1인 전용 타석으로 동반자 동시 배정이 불가능합니다.' : 'This teebox is designated for single player only and cannot be assigned to groups.');
+        return;
+      }
       
       // 이미 선택된 타석이면 선택 해제
       if (selectedBayNos.includes(bayNo)) {
@@ -243,6 +278,24 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
             opacity: 1;
           }
         }
+        @keyframes modalSmoothPopIn {
+          0% {
+            opacity: 0;
+            transform: scale(0.94) translateY(12px);
+          }
+          100% {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+          }
+        }
+        @keyframes overlaySmoothFadeIn {
+          0% {
+            opacity: 0;
+          }
+          100% {
+            opacity: 1;
+          }
+        }
         /* 추가: 타일 액티브(터치) GPU 가속 애니메이션 */
         .luxury-tile {
           transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.15s ease;
@@ -274,61 +327,63 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           gap: '24px'
         }}
       >
-        {/* 배정 모드 토글 스위치 (1인 단일 타석 vs 👥 동반자 다중 배정) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', background: '#f8fafc', padding: '8px 12px', borderRadius: '20px', border: '1px solid #e2e8f0' }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={() => {
-                if (allocMode !== 'SINGLE') {
-                  handleReleaseAll();
-                  setAllocMode('SINGLE');
-                }
-              }}
-              style={{
-                padding: '12px 24px',
-                borderRadius: '16px',
-                border: 'none',
-                fontWeight: 900,
-                fontSize: '17px',
-                cursor: 'pointer',
-                background: allocMode === 'SINGLE' ? '#047857' : 'transparent',
-                color: allocMode === 'SINGLE' ? '#ffffff' : '#64748b',
-                boxShadow: allocMode === 'SINGLE' ? '0 4px 12px rgba(4, 120, 87, 0.25)' : 'none',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              🎯 1인 단일 타석 배정
-            </button>
-            <button
-              onClick={() => {
-                if (allocMode !== 'GROUP') {
-                  handleReleaseAll();
-                  setAllocMode('GROUP');
-                }
-              }}
-              style={{
-                padding: '12px 24px',
-                borderRadius: '16px',
-                border: 'none',
-                fontWeight: 900,
-                fontSize: '17px',
-                cursor: 'pointer',
-                background: allocMode === 'GROUP' ? '#047857' : 'transparent',
-                color: allocMode === 'GROUP' ? '#ffffff' : '#64748b',
-                boxShadow: allocMode === 'GROUP' ? '0 4px 12px rgba(4, 120, 87, 0.25)' : 'none',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              👥 동반자 타석 동시 배정 (최대 4석)
-            </button>
-          </div>
-
-          {allocMode === 'GROUP' && (
-            <div style={{ fontSize: '15px', fontWeight: 800, color: '#047857', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>선택된 타석: <strong>{selectedBayNos.length}</strong> / 4 개</span>
+        {/* 배정 모드 토글 스위치 (1인 단일 타석 vs 👥 동반자 다중 배정 - 동반자 허용 타석 존재 시에만 노출) */}
+        {hasAnyCompanionBay ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', background: '#f8fafc', padding: '8px 12px', borderRadius: '20px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => {
+                  if (allocMode !== 'SINGLE') {
+                    handleReleaseAll();
+                    setAllocMode('SINGLE');
+                  }
+                }}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '16px',
+                  border: 'none',
+                  fontWeight: 900,
+                  fontSize: '17px',
+                  cursor: 'pointer',
+                  background: allocMode === 'SINGLE' ? '#047857' : 'transparent',
+                  color: allocMode === 'SINGLE' ? '#ffffff' : '#64748b',
+                  boxShadow: allocMode === 'SINGLE' ? '0 4px 12px rgba(4, 120, 87, 0.25)' : 'none',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                🎯 1인 단일 타석 배정
+              </button>
+              <button
+                onClick={() => {
+                  if (allocMode !== 'GROUP') {
+                    handleReleaseAll();
+                    setAllocMode('GROUP');
+                  }
+                }}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '16px',
+                  border: 'none',
+                  fontWeight: 900,
+                  fontSize: '17px',
+                  cursor: 'pointer',
+                  background: allocMode === 'GROUP' ? '#047857' : 'transparent',
+                  color: allocMode === 'GROUP' ? '#ffffff' : '#64748b',
+                  boxShadow: allocMode === 'GROUP' ? '0 4px 12px rgba(4, 120, 87, 0.25)' : 'none',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                👥 동반자 타석 동시 배정 (최대 4석)
+              </button>
             </div>
-          )}
-        </div>
+
+            {allocMode === 'GROUP' && (
+              <div style={{ fontSize: '15px', fontWeight: 800, color: '#047857', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>선택된 타석: <strong>{selectedBayNos.length}</strong> / 4 개</span>
+              </div>
+            )}
+          </div>
+        ) : null}
 
         {/* 층 전환 대형 탭바 (좌측 정렬 및 버튼 가로사이즈 대폭 확대) */}
         <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: '100%' }}>
@@ -579,8 +634,9 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                       const simType = bay.simulator_type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).simulator_type; } catch { return null; } })() : null);
                       const handed = bay.handedness || bay.type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).handedness; } catch { return null; } })() : null);
                       const lessonOnly = bay.is_lesson_only || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).is_lesson_only; } catch { return false; } })() : false);
+                      const companionAllowed = bay.allow_companion || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).allow_companion; } catch { return false; } })() : false);
 
-                      const hasBadges = (simType && simType !== 'NONE') || (handed && (handed === 'LEFT' || handed === 'BOTH')) || lessonOnly;
+                      const hasBadges = (simType && simType !== 'NONE') || (handed && (handed === 'LEFT' || handed === 'BOTH')) || lessonOnly || companionAllowed;
                       if (!hasBadges) return null;
 
                       return (
@@ -598,6 +654,11 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                           {lessonOnly && (
                             <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #e9d5ff' }}>
                               레슨 🎓
+                            </span>
+                          )}
+                          {companionAllowed && (
+                            <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#ecfeff', color: '#155e75', border: '1px solid #a5f3fc' }}>
+                              동반자 👥
                             </span>
                           )}
                         </div>
@@ -704,14 +765,14 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
             left: 0,
             width: '100%',
             height: '100%',
-            background: 'var(--overlay-bg, rgba(255, 255, 255, 0.6))',
-            backdropFilter: 'blur(32px)',
-            WebkitBackdropFilter: 'blur(32px)',
+            background: 'transparent',
+            backdropFilter: 'none',
+            WebkitBackdropFilter: 'none',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 1000,
-            animation: 'fadeIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)'
+            animation: 'overlaySmoothFadeIn 0.22s ease-out'
           }}
         >
           <div 
@@ -722,7 +783,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               display: 'flex',
               flexDirection: 'column',
               gap: '40px',
-              position: 'relative'
+              position: 'relative',
+              borderRadius: '32px',
+              boxShadow: '0 30px 80px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.08)',
+              animation: 'modalSmoothPopIn 0.28s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
           >
             {/* Header */}
@@ -887,7 +951,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
               <button 
                 className="kiosk-btn"
-                onClick={() => setShowDecisionModal(false)}
+                onClick={() => {
+                  handleReleaseAll();
+                  setShowDecisionModal(false);
+                }}
                 style={{ 
                   width: '200px', 
                   height: '56px', 

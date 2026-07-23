@@ -646,9 +646,10 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                     const simType = bay.simulator_type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).simulator_type; } catch { return null; } })() : null);
                     const handed = bay.handedness || bay.type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).handedness; } catch { return null; } })() : null);
                     const lessonOnly = bay.is_lesson_only || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).is_lesson_only; } catch { return false; } })() : false);
+                    const companionAllowed = bay.allow_companion || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).allow_companion; } catch { return false; } })() : false);
                     const screenSpec = bay.screen_spec || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).screen_spec; } catch { return null; } })() : null);
 
-                    const hasBadges = (simType && simType !== 'NONE') || (handed && (handed === 'LEFT' || handed === 'BOTH')) || lessonOnly || (screenSpec && screenSpec !== 'STANDARD');
+                    const hasBadges = (simType && simType !== 'NONE') || (handed && (handed === 'LEFT' || handed === 'BOTH')) || lessonOnly || companionAllowed || (screenSpec && screenSpec !== 'STANDARD');
                     if (!hasBadges) return null;
 
                     return (
@@ -666,6 +667,11 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                         {lessonOnly && (
                           <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #e9d5ff' }}>
                             레슨 🎓
+                          </span>
+                        )}
+                        {companionAllowed && (
+                          <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#ecfeff', color: '#155e75', border: '1px solid #a5f3fc' }}>
+                            동반자 👥
                           </span>
                         )}
                         {screenSpec && screenSpec !== 'STANDARD' && (

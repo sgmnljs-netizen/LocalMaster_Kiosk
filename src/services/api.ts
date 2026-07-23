@@ -10,6 +10,12 @@
 const BASE_URL = 'http://localhost:8000/api'; 
 export const STORE_CODE = 'H01-SE-001';
 
+// WebSocket 베이스 URL (BASE_URL에서 동적 생성 — localhost 하드코딩 제거)
+// [Fix-4] localhost:8000 하드코딩 제거 → BASE_URL 기반 생성
+const _baseHost = BASE_URL.replace('/api', '').replace('http://', 'ws://').replace('https://', 'wss://');
+export const WS_BASE_URL = _baseHost;
+
+
 export interface MemberAsset {
   member_item_id: string;
   item_name: string;
@@ -75,6 +81,8 @@ export interface Bay {
   handedness?: string;
   is_lesson_only?: boolean;
   screen_spec?: string;
+  allow_companion?: boolean;
+  max_occupancy?: number;
   config_json?: string;
 }
 
@@ -161,49 +169,43 @@ const SEED_PRODUCTS: Product[] = [
   { prod_cd: 'PROD_LK3', prod_nm: '라카 이용권 3개월', standard_price: 25000, logic_type: 'FACILITY', days: 90 }
 ];
 
-const initializeEdgeDB = () => {
-  if (!localStorage.getItem('LM_KIOSK_EDGEDB_INIT')) {
+const initializeEdgeDB = (force: boolean = false) => {
+  const existingBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
+  const isV51 = localStorage.getItem('LM_KIOSK_EDGEDB_INIT_V51');
+  
+  if (force || !isV51 || existingBays.length < 50) {
     // 1. Members
     localStorage.setItem('LM_MEMBERS', JSON.stringify(SEED_MEMBERS));
     
     // 2. Products
     localStorage.setItem('LM_PRODUCTS', JSON.stringify(SEED_PRODUCTS));
     
-    // 3. Bays (타석 20개 생성)
+    // 3. Bays (백오피스 표적 50개 타석 생성: 1F 20개, 2F 20개, 3F 10개)
     const bays: Bay[] = [];
-    for (let i = 1; i <= 20; i++) {
-      const floor = i <= 10 ? 1 : 2;
-      const type = (i === 5 || i === 6 || i === 15 || i === 16) ? 'LEFT' : 'RIGHT'; // 일부 좌타 배치
+    for (let i = 1; i <= 50; i++) {
+      const floor = i <= 20 ? 1 : (i <= 40 ? 2 : 3);
+      // 백오피스 handedness 스펙 미러링 (5번, 6번, 15번, 16번, 25번, 26번 ... 타석)
+      const type: Bay['type'] = (i === 5 || i === 6 || i === 15 || i === 16 || i === 25 || i === 26 || i === 35 || i === 36 || i === 45 || i === 46) ? 'LEFT' : 'RIGHT';
       let status: Bay['status'] = 'AVAILABLE';
       let current_user_name = null;
       let minutes_left = undefined;
       let end_time = null;
 
-      if (i === 3) {
-        status = 'OCCUPIED';
-        current_user_name = '홍길동';
-        minutes_left = 42;
-        const end = new Date();
-        end.setMinutes(end.getMinutes() + 42);
-        end_time = `${String(end.getHours()).padStart(2, '0')}${String(end.getMinutes()).padStart(2, '0')}`;
-      } else if (i === 12) {
-        status = 'UNDER_MAINTENANCE';
-      }
-
       bays.push({
         bay_id: i,
         bay_no: i,
         floor_no: floor,
+        floor: `${floor}F`,
         type,
-        status,
-        current_user_name,
-        minutes_left,
-        end_time
+        status: 'AVAILABLE',
+        current_user_name: null,
+        minutes_left: undefined,
+        end_time: null
       });
     }
 
     // 파3 미니 라운딩 타석 5개 추가 (zone_code: 'PAR3')
-    for (let i = 21; i <= 25; i++) {
+    for (let i = 51; i <= 55; i++) {
       bays.push({
         bay_id: i,
         bay_no: i,
@@ -214,7 +216,7 @@ const initializeEdgeDB = () => {
         minutes_left: undefined,
         end_time: null,
         zone_code: 'PAR3',
-        bay_name: `PAR3-${i - 20}`
+        bay_name: `PAR3-${i - 50}`
       });
     }
 
@@ -268,7 +270,8 @@ const initializeEdgeDB = () => {
     localStorage.setItem('LM_PAR3_SLOTS', JSON.stringify(slots));
 
     localStorage.setItem('LM_KIOSK_EDGEDB_INIT', 'true');
-    console.log('⛳ LocalMaster Kiosk: Edge DB Initialized Successfully.');
+    localStorage.setItem('LM_KIOSK_EDGEDB_INIT_V51', 'true');
+    console.log('⛳ LocalMaster Kiosk: Edge DB 50-Bay Clean Initialized Successfully.');
   }
 };
 
@@ -279,9 +282,22 @@ initializeEdgeDB();
 // 🔗 Hybrid API Client Implementation
 // --------------------------------------------------------------------------
 
+// 미들웨어 직접 통신 URL (Edge DB 오프라인 모드 전용)
+// 환경변수 또는 localStorage 설정에서 읽음
+const MIDDLEWARE_URL = localStorage.getItem('LM_MIDDLEWARE_URL') || 'http://127.0.0.1:5001';
+// [Fix-4] KIOSK_WS_KEY: localStorage 또는 .env로 주입된 값 사용
+// LM_KIOSK_WS_KEY 설정으로 settings.KIOSK_WS_KEY와 동기화 가능
+const KIOSK_WS_KEY = localStorage.getItem('LM_KIOSK_WS_KEY') || 'kiosk-ws-key-2025';
+// [Fix-4] 미들웨어 API Key: localStorage 또는 settings.MIDDLEWARE_API_KEY와 동기화
+const MIDDLEWARE_API_KEY_CLIENT = localStorage.getItem('LM_MIDDLEWARE_API_KEY') || 'secret-key-changeme';
+
+
 class HybridAPIClient {
   private terminalId: string;
   private isOnline: boolean = true;
+  private ws: WebSocket | null = null;                   // [Phase 2: WS-2] 실시간 WS 연결
+  private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private bayUpdateListeners: Array<(data: Bay) => void> = [];
 
   constructor() {
     // 키오스크 단말기 고유 ID 생성 (윈도우 맥 주소 대체 등)
@@ -301,6 +317,158 @@ class HybridAPIClient {
     return this.terminalId;
   }
 
+  // =========================================================================
+  // [Phase 2: WS-2] WebSocket 실시간 연결 관리
+  // 배정 완료/해제 이벤트를 폴링 없이 즉시 수신합니다.
+  // 연결 실패 시 15초 후 자동 재연결 (Exponential Backoff).
+  // =========================================================================
+  connectBayWebSocket(onBayUpdate: (data: Bay) => void, onMessage?: (msg: unknown) => void): () => void {
+    this.bayUpdateListeners.push(onBayUpdate);
+    
+    const storeCd = this.getStoreCd();
+    // [Fix-4] WS_BASE_URL 기반으로 동적 생성 (localhost:8000 하드코딩 제거)
+    const wsUrl = `${WS_BASE_URL}/ws/kiosk?store_cd=${storeCd}&terminal_id=${this.terminalId}&api_key=${KIOSK_WS_KEY}`;
+
+    const connect = () => {
+      if (this.ws && this.ws.readyState <= WebSocket.OPEN) return;
+      
+      try {
+        this.ws = new WebSocket(wsUrl);
+
+        this.ws.onopen = () => {
+          console.log('[WS-Kiosk] 연결 수립:', wsUrl);
+          if (this.wsReconnectTimer) {
+            clearTimeout(this.wsReconnectTimer);
+            this.wsReconnectTimer = null;
+          }
+          // Ping 유지 (30초마다)
+          const pingInterval = setInterval(() => {
+            if (this.ws?.readyState === WebSocket.OPEN) {
+              this.ws.send('PING');
+            } else {
+              clearInterval(pingInterval);
+            }
+          }, 30000);
+        };
+
+        this.ws.onmessage = (evt) => {
+          try {
+            const data = JSON.parse(evt.data) as Record<string, unknown>;
+            onMessage?.(data);
+
+            if (data.type === 'bay_updated') {
+              // Edge DB LocalStorage 즉시 동기화
+              const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
+              const idx = bays.findIndex(b => b.bay_no === (data.bay_no as number));
+              if (idx !== -1) {
+                if (data.status === 'OCCUPIED') {
+                  bays[idx].status = 'OCCUPIED';
+                  bays[idx].current_user_name = (data.user_name as string) || '손님';
+                  bays[idx].lock_terminal_id = null;
+                  bays[idx].lock_expired_at = null;
+                } else if (data.status === 'AVAILABLE') {
+                  bays[idx].status = 'AVAILABLE';
+                  bays[idx].current_user_name = null;
+                  bays[idx].end_time = null;
+                  bays[idx].minutes_left = undefined;
+                }
+                localStorage.setItem('LM_BAYS', JSON.stringify(bays));
+                this.bayUpdateListeners.forEach(listener => listener(bays[idx]));
+              }
+            }
+          } catch (e) {
+            console.warn('[WS-Kiosk] 메시지 파싱 실패:', e);
+          }
+        };
+
+        this.ws.onclose = (evt) => {
+          console.warn(`[WS-Kiosk] 연결 종료 (code=${evt.code}). 15초 후 재연결...`);
+          this.ws = null;
+          // 자동 재연결 (1008: 인증 실패는 제외)
+          if (evt.code !== 1008) {
+            this.wsReconnectTimer = setTimeout(connect, 15000);
+          }
+        };
+
+        this.ws.onerror = (err) => {
+          console.error('[WS-Kiosk] 오류:', err);
+        };
+      } catch (e) {
+        console.error('[WS-Kiosk] WebSocket 초기화 실패 — 폴링 모드 유지:', e);
+        this.wsReconnectTimer = setTimeout(connect, 15000);
+      }
+    };
+
+    connect();
+
+    // Cleanup 함수 반환 (React useEffect return용)
+    return () => {
+      if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
+      if (this.ws) {
+        this.ws.onclose = null; // 자동 재연결 방지
+        this.ws.close();
+        this.ws = null;
+      }
+      this.bayUpdateListeners = this.bayUpdateListeners.filter(l => l !== onBayUpdate);
+    };
+  }
+
+  // =========================================================================
+  // [Phase 2: MW-1] Edge DB 오프라인 모드 전용 — 미들웨어 직접 HTTP 호출
+  // 백엔드 서버가 다운된 상태에서도 타석 하드웨어를 가동합니다.
+  // MIDDLEWARE_URL은 localhost:5001 기본값 (LM_MIDDLEWARE_URL로 재정의 가능)
+  // =========================================================================
+  async activateMiddlewareDirect(bayNo: number, durationMin: number, memberName: string = '손님'): Promise<boolean> {
+    const endTime = new Date();
+    endTime.setMinutes(endTime.getMinutes() + durationMin);
+    const endTimeStr = `${String(endTime.getHours()).padStart(2, '0')}:${String(endTime.getMinutes()).padStart(2, '0')}`;
+
+    try {
+      const response = await fetch(`${MIDDLEWARE_URL}/api/seat/${bayNo}/assign`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          // [Fix-4] 하드코딩 제거 → localStorage 또는 settings.MIDDLEWARE_API_KEY와 동기화
+          'X-API-Key': MIDDLEWARE_API_KEY_CLIENT
+        },
+        body: JSON.stringify({
+          priority: 5,
+          time: durationMin,
+          balls: 0,
+          member_name: memberName,
+          memberName: memberName,
+          user_name: memberName,
+          userName: memberName,
+          product_name: `일일 타석권 ${durationMin}분`,
+          productName: `일일 타석권 ${durationMin}분`,
+          end_time: endTimeStr,
+          endTime: endTimeStr
+        })
+      });
+      
+      if (response.ok) {
+        console.log(`[MW-Direct] Bay ${bayNo} 미들웨어 직접 가동 성공`);
+        return true;
+      }
+      console.warn(`[MW-Direct] Bay ${bayNo} 미들웨어 응답 오류: ${response.status}`);
+      return false;
+    } catch (err) {
+      console.error(`[MW-Direct] Bay ${bayNo} 미들웨어 연결 실패:`, err);
+      return false;
+    }
+  }
+
+  // [Security Layer 2] 단말기 시큐어 헤더 공통 생성기
+  getSecureHeaders(additionalHeaders: Record<string, string> = {}): Record<string, string> {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    return {
+      'x-store-cd': STORE_CODE,
+      'x-terminal-id': this.terminalId,
+      'x-timestamp': timestamp,
+      ...additionalHeaders
+    };
+  }
+
   // 네트워크 헬스 체크
   async checkConnection(): Promise<boolean> {
     try {
@@ -308,7 +476,7 @@ class HybridAPIClient {
       const timeoutId = setTimeout(() => controller.abort(), 2000); // 2초 타임아웃
       const res = await fetch(`${BASE_URL}/store`, { 
         method: 'GET',
-        headers: { 'x-store-cd': STORE_CODE },
+        headers: this.getSecureHeaders(),
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -601,62 +769,76 @@ class HybridAPIClient {
     localStorage.setItem('LM_BAYS', JSON.stringify(bays));
   }
 
-  // 5. 타석 최종 배정 완료 (예약 & 입실 확정)
+  // 5. 타석 최종 배정 완료 — [BUG-1·2·3 FIX] 통합 API 단일 호출
   async allocateBay(
     bayNo: number, 
     durationMin: number, 
     memberNo?: string, 
     guestName?: string, 
     hpNo?: string,
-    memberItemId?: number
-  ): Promise<{ success: boolean; res_id?: string; message: string }> {
+    memberItemId?: number,
+    paymentMethod: 'TICKET' | 'CARD' = 'TICKET',
+    amount: number = 0
+  ): Promise<{ success: boolean; res_id?: string; message: string; hardware_success?: boolean }> {
     const isConnected = await this.checkConnection();
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const nowHourMin = new Date().toTimeString().slice(0, 5).replace(/:/g, '');
-    
+
     if (isConnected) {
       try {
-        // 1) 예약 생성
-        const createRes = await fetch(`${BASE_URL}/reservations/`, {
+        // [BUG-1 FIX] 2-Step 호출 제거 → 통합 API 단일 호출
+        // 선점 락 검증(terminal_id 필수) + 이용권 차감 + 하드웨어 가동이 원자적으로 처리됨
+        const res = await fetch(`${BASE_URL}/kiosk/allocate-bay?store_cd=${STORE_CODE}`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
             'x-store-cd': STORE_CODE
           },
           body: JSON.stringify({
-            resource_type: 'BAY',
-            resource_no: bayNo,
-            member_no: memberNo || null,
-            guest_nm: guestName || null,
-            hp_no: hpNo || null,
-            res_date: todayStr,
-            start_time: nowHourMin,
+            bay_no: bayNo,
             duration_min: durationMin,
-            res_type: 'SLOT',
-            member_item_id: memberItemId || null
+            member_no: memberNo || null,
+            guest_name: guestName || null,
+            hp_no: hpNo || null,
+            member_item_id: memberItemId || null,
+            payment_method: paymentMethod,     // TICKET(회원권) | CARD(일일권)
+            terminal_id: this.terminalId,      // [BUG-2 FIX] 선점 락 검증 필수값
+            amount: amount                     // [BUG-3 FIX] 일일권 결제 금액
           })
         });
-        
-        if (createRes.ok) {
-          const createData = await createRes.json();
-          const resId = createData.res_id;
-          
-          // 2) 즉시 입실 확정
-          const confirmRes = await fetch(`${BASE_URL}/reservations/${resId}/confirm`, {
-            method: 'PATCH',
-            headers: { 'x-store-cd': STORE_CODE }
-          });
-          
-          if (confirmRes.ok) {
-            return { success: true, res_id: resId, message: '타석 배정이 성공적으로 완료되었습니다.' };
+
+        if (res.ok) {
+          const data = await res.json();
+          // 로컈스토리지 즉시 동기화 (폴링 5초 지연 없이 UI 반영)
+          const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
+          const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
+          if (targetIdx !== -1) {
+            const end = new Date();
+            end.setMinutes(end.getMinutes() + durationMin);
+            const end_time = `${String(end.getHours()).padStart(2, '0')}${String(end.getMinutes()).padStart(2, '0')}`;
+            bays[targetIdx].status = 'OCCUPIED';
+            bays[targetIdx].current_user_name = guestName || memberNo || '손님';
+            bays[targetIdx].end_time = end_time;
+            bays[targetIdx].minutes_left = durationMin;
+            bays[targetIdx].lock_terminal_id = null;
+            bays[targetIdx].lock_expired_at = null;
+            localStorage.setItem('LM_BAYS', JSON.stringify(bays));
           }
+          return { 
+            success: true, 
+            res_id: data.res_id, 
+            message: data.message,
+            hardware_success: data.hardware_success
+          };
+        } else {
+          const errData = await res.json().catch(() => ({ detail: '알 수 없는 오류' }));
+          return { success: false, message: errData.detail || '타석 배정에 실패했습니다.' };
         }
       } catch (err) {
-        console.error('Backend allocate failed. Falling back to EdgeDB:', err);
+        console.error('[BUG-1 FIX] 통합 배정 API 실패, Edge DB 폴백:', err);
       }
     }
 
-    // Edge DB 모드
+    // Edge DB 모드 (offline fallback)
     const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
     const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
     
@@ -675,14 +857,14 @@ class HybridAPIClient {
 
       localStorage.setItem('LM_BAYS', JSON.stringify(bays));
       
-      // 판매 기록 로그 추가 (일비 결제인 경우)
-      if (!memberNo) {
+      // 일일권 매입 기록 (Edge DB)
+      if (paymentMethod === 'CARD' && !memberNo) {
         const sales = JSON.parse(localStorage.getItem('LM_SALES') || '[]') as unknown[];
         sales.push({
           sale_id: `S-${Date.now()}`,
           sale_dt: todayStr,
-          total_amt: durationMin === 60 ? 15000 : 20000,
-          pay_amt: durationMin === 60 ? 15000 : 20000,
+          total_amt: amount || (durationMin === 60 ? 15000 : 20000),
+          pay_amt: amount || (durationMin === 60 ? 15000 : 20000),
           pay_method: 'CARD',
           items: `일일 타석권 ${durationMin}분 배정`,
           status: 'COMPLETED'
@@ -690,11 +872,25 @@ class HybridAPIClient {
         localStorage.setItem('LM_SALES', JSON.stringify(sales));
       }
 
+      // [Phase 2: MW-1] Edge DB 오프라인 모드에서 미들웨어 직접 가동
+      // 백엔드가 다운되어도 하드웨어(타석)는 실제로 작동해야 함
+      const mwSuccess = await this.activateMiddlewareDirect(
+        bayNo, 
+        durationMin, 
+        guestName || memberNo || '손님'
+      );
+      if (!mwSuccess) {
+        console.warn(`[MW-Direct] Bay ${bayNo} 미들웨어 가동 실패 — 직원에게 문의 필요`);
+      }
+
       return {
         success: true,
         res_id: `R-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-        message: '타석 배정이 성공적으로 완료되었습니다. (Edge DB 저장)'
+        message: mwSuccess
+          ? '타석 배정이 완료되었습니다. (Edge DB 저장)'
+          : '타석 배정이 완료되었으나 기기 가동에 실패했습니다. 직원에게 문의해주세요.'
       };
+
     }
 
     return { success: false, message: '타석 상태 변경 실패' };
