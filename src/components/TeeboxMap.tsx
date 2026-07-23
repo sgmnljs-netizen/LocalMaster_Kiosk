@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer } from 'lucide-react';
 import { api, Bay } from '../services/api';
 
@@ -6,6 +6,7 @@ interface TeeboxMapProps {
   memberNo?: string;
   memberName?: string;
   isMoveMode?: boolean; // 타석 이동 모드 여부
+  lang?: 'KO' | 'EN';
   onBaySelected: (bayNo: number) => void;
   onCancel: () => void;
   bays: Bay[];
@@ -16,6 +17,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   memberNo,
   memberName,
   isMoveMode = false,
+  lang = 'KO',
   onBaySelected,
   onCancel,
   bays,
@@ -27,6 +29,50 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [countdown, setCountdown] = useState<number>(60); // 선점 락 카운트다운 (1분)
 
+  // 이동 모드 시 현재 회원이 점유 중인 타석 검색
+  const currentBay = isMoveMode
+    ? bays.find(
+        b =>
+          b.status === 'OCCUPIED' &&
+          ((memberNo && b.current_user_name === memberNo) ||
+            (memberName && b.current_user_name === memberName) ||
+            (memberName && b.current_user_name && b.current_user_name.includes(memberName)))
+      )
+    : null;
+
+  // minutes_left 정밀 파싱 및 end_time fallback 계산
+  const calculateRemMin = useCallback((bay: Bay | null | undefined): number => {
+    if (!bay) return 0;
+    if (bay.minutes_left !== undefined && bay.minutes_left !== null) {
+      return bay.minutes_left;
+    }
+    if (bay.end_time) {
+      try {
+        const endMs = new Date(bay.end_time).getTime();
+        const nowMs = new Date().getTime();
+        if (!isNaN(endMs)) {
+          return Math.max(0, Math.floor((endMs - nowMs) / 60000));
+        }
+      } catch {
+        return 0;
+      }
+    }
+    return 0;
+  }, []);
+
+  const currentRemMin = calculateRemMin(currentBay);
+  const isTimeRestricted = isMoveMode && currentBay && currentRemMin < 5;
+  const hasNoActiveBay = isMoveMode && !currentBay;
+
+  // 선점 수동 해제 (useCallback 가딩)
+  const handleRelease = useCallback(async () => {
+    if (selectedBayNo !== null) {
+      await api.releaseBay(selectedBayNo);
+      setSelectedBayNo(null);
+      onRefreshBays();
+    }
+  }, [selectedBayNo, onRefreshBays]);
+
   // 선점 락 제한시간 1초 간격 갱신
   useEffect(() => {
     if (selectedBayNo === null) return;
@@ -37,7 +83,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         if (prev <= 1) {
           // 선점 시간 초과 -> 자동 락 해제
           handleRelease();
-          setErrorMsg('선점 유효 시간이 초과되어 타석 선택이 자동 취소되었습니다.');
+          setErrorMsg(lang === 'KO' ? '선점 유효 시간이 초과되어 타석 선택이 자동 취소되었습니다.' : 'Pre-occupation lock expired.');
           return 60;
         }
         return prev - 1;
@@ -45,14 +91,15 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [selectedBayNo]);
+  }, [selectedBayNo, handleRelease, lang]);
 
-  // 타석 터치 - 원자적 선점(Pre-emption) 락 시도
-  const handleBayTouch = async (bay: Bay) => {
+  // 타석 터치 - 원자적 선점(Pre-emption) 락 시도 (useCallback 가딩)
+  const handleBayTouch = useCallback(async (bay: Bay) => {
+    if (isTimeRestricted || hasNoActiveBay) return;
     if (bay.status === 'UNDER_MAINTENANCE') return;
     if (bay.status === 'OCCUPIED') return;
     if (bay.status === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId()) {
-      setErrorMsg('이미 다른 고객님께서 선택 중인 타석입니다.');
+      setErrorMsg(lang === 'KO' ? '이미 다른 고객님께서 선택 중인 타석입니다.' : 'Teebox selected by another user.');
       return;
     }
 
@@ -69,31 +116,22 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       if (success) {
         setSelectedBayNo(bay.bay_no);
       } else {
-        setErrorMsg('타석 선점에 실패했습니다. 다시 시도해 주세요.');
+        setErrorMsg(lang === 'KO' ? '타석 선점에 실패했습니다. 다시 시도해 주세요.' : 'Failed to preoccupy teebox.');
       }
     } catch {
-      setErrorMsg('타석 선점 중 오류가 발생했습니다.');
+      setErrorMsg(lang === 'KO' ? '타석 선점 중 오류가 발생했습니다.' : 'Error preoccupying teebox.');
     } finally {
       setPreoccupyLoading(false);
       onRefreshBays(); // 즉시 상태 갱신
     }
-  };
+  }, [isTimeRestricted, hasNoActiveBay, selectedBayNo, onRefreshBays, lang]);
 
-  // 선점 수동 해제
-  const handleRelease = async () => {
-    if (selectedBayNo !== null) {
-      await api.releaseBay(selectedBayNo);
-      setSelectedBayNo(null);
-      onRefreshBays();
-    }
-  };
-
-  // 배정 최종 확인 버튼 클릭
-  const handleConfirm = () => {
+  // 배정 최종 확인 버튼 클릭 (useCallback 가딩)
+  const handleConfirm = useCallback(() => {
     if (selectedBayNo !== null) {
       onBaySelected(selectedBayNo);
     }
-  };
+  }, [selectedBayNo, onBaySelected]);
 
   // 필터링된 층별 타석 목록
   const floorBays = bays.filter(b => b.floor_no === activeFloor);
@@ -159,6 +197,139 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           ))}
         </div>
       </div>
+
+      {/* 타석 이동(MOVE_BAY) 전용 오버레이 헤더 패널 */}
+      {isMoveMode && (
+        <>
+          {hasNoActiveBay ? (
+            <div
+              className="neon-border-red"
+              style={{
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '2px solid var(--neon-red)',
+                borderRadius: '20px',
+                padding: '20px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <ShieldAlert size={36} style={{ color: 'var(--neon-red)' }} />
+                <div>
+                  <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#ffffff', margin: 0 }}>
+                    현재 이용 중인 타석 내역이 없습니다
+                  </h3>
+                  <p style={{ fontSize: '15px', color: '#fca5a5', margin: '4px 0 0 0' }}>
+                    <strong>{memberName || '고객'}</strong> 님 명의로 점유 중인 타석을 찾을 수 없습니다. [연습타석배정] 메뉴에서 신규 배정을 진행해 주세요.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={onCancel}
+                style={{
+                  padding: '12px 20px',
+                  borderRadius: '12px',
+                  background: '#ffffff',
+                  color: '#1d1d1f',
+                  border: 'none',
+                  fontWeight: 800,
+                  fontSize: '15px',
+                  cursor: 'pointer'
+                }}
+              >
+                메인으로 복귀
+              </button>
+            </div>
+          ) : isTimeRestricted ? (
+            <div
+              className="neon-border-red"
+              style={{
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '2px solid var(--neon-red)',
+                borderRadius: '20px',
+                padding: '20px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <ShieldAlert size={36} style={{ color: 'var(--neon-red)' }} />
+                <div>
+                  <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#ffffff', margin: 0 }}>
+                    ⏱️ 타석 이동 불가 (잔여시간 5분 미만)
+                  </h3>
+                  <p style={{ fontSize: '15px', color: '#fca5a5', margin: '4px 0 0 0' }}>
+                    현재 이용 중인 <strong>{currentBay.bay_no}번 타석</strong>의 남은 시간이 5분 미만(<strong>{currentRemMin}분 남음</strong>)이므로 자리 이동이 제한됩니다.
+                  </p>
+                </div>
+              </div>
+              <span
+                style={{
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  color: '#ef4444',
+                  background: '#ffffff',
+                  padding: '8px 16px',
+                  borderRadius: '12px'
+                }}
+              >
+                이용 종료 임박
+              </span>
+            </div>
+          ) : (
+            <div
+              style={{
+                background: 'linear-gradient(135deg, #031510 0%, #022c22 100%)',
+                border: '2px solid #10b981',
+                borderRadius: '20px',
+                padding: '20px 28px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                boxShadow: '0 8px 24px rgba(6, 78, 59, 0.3)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div style={{ background: 'rgba(16, 185, 129, 0.2)', padding: '12px', borderRadius: '16px', border: '1px solid #10b981' }}>
+                  <ArrowLeftRight size={28} style={{ color: '#10b981' }} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 900, background: '#10b981', color: '#ffffff', padding: '3px 10px', borderRadius: '8px' }}>
+                      현재 이용 중
+                    </span>
+                    <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#ffffff', margin: 0 }}>
+                      {currentBay?.bay_no}번 타석
+                    </h3>
+                    {selectedBayNo !== null && (
+                      <>
+                        <span style={{ fontSize: '20px', color: '#10b981', fontWeight: 900 }}>➔</span>
+                        <span style={{ fontSize: '13px', fontWeight: 900, background: '#3b82f6', color: '#ffffff', padding: '3px 10px', borderRadius: '8px' }}>
+                          이동 대상
+                        </span>
+                        <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#60a5fa', margin: 0 }}>
+                          {selectedBayNo}번 타석
+                        </h3>
+                      </>
+                    )}
+                  </div>
+                  <p style={{ fontSize: '15px', color: '#a7f3d0', margin: '4px 0 0 0' }}>
+                    회원명: <strong style={{ color: '#fff' }}>{memberName}</strong> | 이용 잔여 시간: <strong style={{ color: '#6ee7b7' }}>{currentRemMin}분 남음</strong> {currentBay?.end_time ? `(종료: ${currentBay.end_time})` : ''}
+                  </p>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '13px', color: '#6ee7b7', fontWeight: 800 }}>잔여시간 100% 보전 (상품 호환)</div>
+                <div style={{ fontSize: '14px', color: '#a7f3d0', marginTop: '2px' }}>
+                  {selectedBayNo !== null ? '하단 [선택 완료] 버튼을 누르면 즉시 이동됩니다.' : '이동을 원하시는 빈 타석 카드를 선택해 주세요.'}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* 에러 또는 주의 알림 */}
       {errorMsg && (
@@ -469,6 +640,42 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                       {countdown}초 남음
                     </span>
                   )}
+
+                  {/* 스펙 뱃지 바 (GDR+, VX, 좌타, 레슨전용 등) */}
+                  {(() => {
+                    const simType = bay.simulator_type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).simulator_type; } catch { return null; } })() : null);
+                    const handed = bay.handedness || bay.type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).handedness; } catch { return null; } })() : null);
+                    const lessonOnly = bay.is_lesson_only || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).is_lesson_only; } catch { return false; } })() : false);
+                    const screenSpec = bay.screen_spec || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).screen_spec; } catch { return null; } })() : null);
+
+                    const hasBadges = (simType && simType !== 'NONE') || (handed && (handed === 'LEFT' || handed === 'BOTH')) || lessonOnly || (screenSpec && screenSpec !== 'STANDARD');
+                    if (!hasBadges) return null;
+
+                    return (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', justifyContent: 'center', marginTop: '2px' }}>
+                        {simType && simType !== 'NONE' && (
+                          <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe' }}>
+                            {simType === 'GDR_PLUS' ? 'GDR+' : simType === 'KAKAO_VX' ? 'VX' : simType === 'QED' ? 'QED' : simType === 'SDR' ? 'SDR' : simType}
+                          </span>
+                        )}
+                        {handed && (handed === 'LEFT' || handed === 'BOTH') && (
+                          <span style={{ fontSize: '9px', fontWeight: 900, padding: '1px 4px', borderRadius: '3px', background: handed === 'LEFT' ? '#ffe4e6' : '#f3e8ff', color: handed === 'LEFT' ? '#9f1239' : '#6b21a8', border: '1px solid #fecdd3' }}>
+                            {handed === 'LEFT' ? '좌타 🎯' : '양타 ↔'}
+                          </span>
+                        )}
+                        {lessonOnly && (
+                          <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #e9d5ff' }}>
+                            레슨 🎓
+                          </span>
+                        )}
+                        {screenSpec && screenSpec !== 'STANDARD' && (
+                          <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: '3px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>
+                            {screenSpec === 'WIDE_16_9' ? '16:9' : '커브드'}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -487,7 +694,37 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         }}
       >
         <div>
-          {selectedBayNo !== null ? (
+          {isMoveMode && currentBay && selectedBayNo !== null ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #064e3b 0%, #022c22 100%)',
+                  border: '2px solid #10b981',
+                  borderRadius: '16px',
+                  padding: '12px 24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  boxShadow: '0 4px 16px rgba(16, 185, 129, 0.25)'
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: '#a7f3d0', fontWeight: 700 }}>이전 타석</span>
+                  <span style={{ fontSize: '22px', fontWeight: 900, color: '#ffffff' }}>{currentBay.bay_no}번</span>
+                </div>
+                <ArrowLeftRight size={24} style={{ color: '#10b981' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: '#34d399', fontWeight: 700 }}>이동할 타석</span>
+                  <span style={{ fontSize: '22px', fontWeight: 900, color: '#6ee7b7' }}>{selectedBayNo}번</span>
+                </div>
+                <div style={{ width: '1px', height: '32px', background: 'rgba(255,255,255,0.2)', margin: '0 4px' }} />
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '14px', color: '#ffffff', fontWeight: 800 }}>남은 {currentRemMin}분 100% 보전</span>
+                  <span style={{ fontSize: '12px', color: '#a7f3d0' }}>선점 락: {countdown}초 남음</span>
+                </div>
+              </div>
+            </div>
+          ) : selectedBayNo !== null ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div 
                 className="neon-border-indigo"
@@ -510,8 +747,14 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               </span>
             </div>
           ) : (
-            <span style={{ fontSize: '16px', color: 'var(--text-secondary)', fontWeight: 600 }}>
-              배정하실 타석 카드를 터치하여 선택해 주세요.
+            <span style={{ fontSize: '16px', color: isTimeRestricted ? 'var(--neon-red)' : 'var(--text-secondary)', fontWeight: 700 }}>
+              {isMoveMode 
+                ? isTimeRestricted 
+                  ? '⏱️ 이용 종료 임박(5분 미만)으로 자리 이동이 불가능합니다.' 
+                  : hasNoActiveBay 
+                  ? '현재 이용 중인 타석이 없습니다.' 
+                  : '이동하실 목적지 빈 타석을 선택해 주세요.'
+                : '배정하실 타석 카드를 터치하여 선택해 주세요.'}
             </span>
           )}
         </div>
@@ -530,17 +773,19 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           
           <button
             onClick={handleConfirm}
-            disabled={selectedBayNo === null || preoccupyLoading}
+            disabled={selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay}
             className="kiosk-btn kiosk-btn-primary"
             style={{ 
               width: '220px', 
               height: '64px', 
               borderRadius: '12px', 
               fontSize: '20px', 
-              fontWeight: 800 
+              fontWeight: 800,
+              opacity: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay) ? 0.5 : 1,
+              cursor: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay) ? 'not-allowed' : 'pointer'
             }}
           >
-            {preoccupyLoading ? '선점 처리 중...' : isMoveMode ? '타석 이동 완료' : '선택 완료'}
+            {preoccupyLoading ? '선점 처리 중...' : isMoveMode ? '타석 이동 확정' : '선택 완료'}
           </button>
         </div>
       </div>

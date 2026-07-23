@@ -880,6 +880,7 @@ export default function KioskApp() {
                 memberNo={authMember?.member_no}
                 memberName={authMember?.member_name}
                 isMoveMode={purpose === 'MOVE_BAY'}
+                lang={lang}
                 onBaySelected={handleBaySelected}
                 onCancel={handleGoHome}
                 bays={bays}

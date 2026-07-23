@@ -71,6 +71,11 @@ export interface Bay {
   lock_terminal_id?: string | null;
   lock_expired_at?: string | null;
   bay_name?: string;
+  simulator_type?: string;
+  handedness?: string;
+  is_lesson_only?: boolean;
+  screen_spec?: string;
+  config_json?: string;
 }
 
 export interface Locker {
@@ -697,22 +702,52 @@ class HybridAPIClient {
 
   // 6. 타석 이동 (사용 중인 타석 변경)
   async moveBay(memberNo: string, targetBayNo: number): Promise<{ success: boolean; message: string }> {
+    const isConnected = await this.checkConnection();
+
+    if (isConnected) {
+      try {
+        // 1. 회원의 현재 실시간 이용 중(USE) 또는 체크인(CHK) 예약 내역 조회
+        const resList = await this.getMemberCheckinReservations(memberNo);
+        const activeRes = resList.find(r => r.status_cd === 'USE' || r.status_cd === 'CHK' || r.status === 'OCCUPIED');
+
+        if (activeRes && activeRes.res_id) {
+          const moveRes = await fetch(`${BASE_URL}/reservations/${activeRes.res_id}/move`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-store-cd': STORE_CODE
+            },
+            body: JSON.stringify({
+              resource_no: targetBayNo
+            })
+          });
+
+          if (moveRes.ok) {
+            const data = await moveRes.json();
+            return {
+              success: true,
+              message: data.message || `타석이 ${targetBayNo}번으로 성공적으로 변경되었습니다.`
+            };
+          }
+        }
+      } catch (err) {
+        console.error('Online moveBay failed, falling back to Edge DB:', err);
+      }
+    }
+
+    // 2. Edge DB 모드 (Fallback)
     const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
     
-    // 1. 기존 사용 중이던 타석 찾기
-    const oldBayIdx = bays.findIndex(b => 
-      b.status === 'OCCUPIED' && 
-      (b.current_user_name === memberNo || (b.current_user_name && b.current_user_name.includes(memberNo)))
-    );
-
-    // Edge DB용 가벼운 이름/회원번호 Fallback 매칭 지원
     let searchName = memberNo;
     const member = await this.getMember(memberNo);
     if (member) {
       searchName = member.member_name;
     }
 
-    const sourceIdx = bays.findIndex(b => b.status === 'OCCUPIED' && b.current_user_name === searchName);
+    const sourceIdx = bays.findIndex(b => 
+      b.status === 'OCCUPIED' && 
+      (b.current_user_name === searchName || b.current_user_name === memberNo || (b.current_user_name && b.current_user_name.includes(searchName)))
+    );
     const destIdx = bays.findIndex(b => b.bay_no === targetBayNo && b.status === 'AVAILABLE');
 
     if (sourceIdx !== -1 && destIdx !== -1) {

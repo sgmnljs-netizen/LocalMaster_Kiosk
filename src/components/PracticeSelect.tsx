@@ -573,6 +573,36 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                         )}
                       </>
                     )}
+
+                    {/* --- SPEC BADGES BAR --- */}
+                    {(() => {
+                      const simType = bay.simulator_type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).simulator_type; } catch { return null; } })() : null);
+                      const handed = bay.handedness || bay.type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).handedness; } catch { return null; } })() : null);
+                      const lessonOnly = bay.is_lesson_only || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).is_lesson_only; } catch { return false; } })() : false);
+
+                      const hasBadges = (simType && simType !== 'NONE') || (handed && (handed === 'LEFT' || handed === 'BOTH')) || lessonOnly;
+                      if (!hasBadges) return null;
+
+                      return (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', justifyContent: 'center', marginTop: '2px' }}>
+                          {simType && simType !== 'NONE' && (
+                            <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe' }}>
+                              {simType === 'GDR_PLUS' ? 'GDR+' : simType === 'KAKAO_VX' ? 'VX' : simType === 'QED' ? 'QED' : simType === 'SDR' ? 'SDR' : simType}
+                            </span>
+                          )}
+                          {handed && (handed === 'LEFT' || handed === 'BOTH') && (
+                            <span style={{ fontSize: '9px', fontWeight: 900, padding: '1px 4px', borderRadius: '3px', background: handed === 'LEFT' ? '#ffe4e6' : '#f3e8ff', color: handed === 'LEFT' ? '#9f1239' : '#6b21a8', border: '1px solid #fecdd3' }}>
+                              {handed === 'LEFT' ? '좌타 🎯' : '양타 ↔'}
+                            </span>
+                          )}
+                          {lessonOnly && (
+                            <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #e9d5ff' }}>
+                              레슨 🎓
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
