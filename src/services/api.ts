@@ -1265,21 +1265,11 @@ class HybridAPIClient {
     };
   }
 
-  // 13. 가상 안면인식 스캔 API (테넌트 격리 필터 적용)
+  // 13. 안면인식 스캔 API (자동 로그인 차단: 스캔 시도 상태만 유지)
   async scanFace(): Promise<Member | null> {
-    // 1.5초 딜레이 모사 (카메라 프레임 처리 속도)
+    // 1.5초간 카메라 스캔 처리만 수행 후 자동 로그인 차단 (수동 인증 또는 카메라 모듈 연동 대기)
     await new Promise(resolve => setTimeout(resolve, 1500));
-
-    // 로컬스토리지에서 회원 목록 읽기
-    const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
-    // 테넌트 격리: 현재 단말 가맹점 코드(STORE_CODE)에 속하고 안면 등록이 활성화된 회원만 조회
-    const registeredMembers = members.filter(m => m.face_registered && m.store_cd === STORE_CODE);
-
-    if (registeredMembers.length === 0) return null;
-
-    // 등록된 회원 중 랜덤 반환 (김골프, 이프로 등)
-    const randomIndex = Math.floor(Math.random() * registeredMembers.length);
-    return registeredMembers[randomIndex];
+    return null;
   }
 
   // 14. 안면 정보 등록 API

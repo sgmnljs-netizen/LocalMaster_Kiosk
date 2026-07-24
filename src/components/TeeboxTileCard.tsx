@@ -69,21 +69,28 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
     // ➔ 백엔드 end_time(예: "09:44" 또는 "0944") 전달 시 현재 시각 기준 실제 남은 분(Minute) 정밀 동기화
     if (bay.end_time) {
       try {
-        const cleanEndTime = bay.end_time.replace(':', '').trim();
-        if (cleanEndTime.length === 4) {
-          const endH = parseInt(cleanEndTime.substring(0, 2), 10);
-          const endM = parseInt(cleanEndTime.substring(2, 4), 10);
-          const now = new Date();
-          const targetDate = new Date(now);
-          targetDate.setHours(endH, endM, 0, 0);
+        const now = new Date();
+        let targetDate: Date | null = null;
 
-          if (targetDate > now) {
-            const diffMs = targetDate.getTime() - now.getTime();
-            const diffMin = Math.ceil(diffMs / (60 * 1000));
-            // end_time 기반 남은 분이 대기시간 미합산 분보다 크면 실제 end_time 남은 분(61분 등)을 최우선 반영
-            if (diffMin > totalRemainingMin) {
-              totalRemainingMin = diffMin;
-            }
+        if (bay.end_time.includes('T') || bay.end_time.includes('-')) {
+          targetDate = new Date(bay.end_time);
+        } else {
+          const cleanEndTime = bay.end_time.replace(':', '').trim();
+          if (cleanEndTime.length === 4) {
+            const endH = parseInt(cleanEndTime.substring(0, 2), 10);
+            const endM = parseInt(cleanEndTime.substring(2, 4), 10);
+            targetDate = new Date(now);
+            targetDate.setHours(endH, endM, 0, 0);
+          }
+        }
+
+        if (targetDate && !isNaN(targetDate.getTime()) && targetDate > now) {
+          const diffMs = targetDate.getTime() - now.getTime();
+          const diffMin = Math.ceil(diffMs / (60 * 1000));
+          // 대기 세션시간(waitingMin)과 1번째 세션 남은 시간(diffMin)을 누적 합산
+          const accumulatedMin = diffMin + waitingMin + extendMin + bufferGapMin + holdMin + prepareMin;
+          if (accumulatedMin > totalRemainingMin) {
+            totalRemainingMin = accumulatedMin;
           }
         }
       } catch (e) {}
@@ -111,15 +118,23 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   const hasActiveRemainingTime = totalRemainingMin > 0;
 
   const rawAvailable = bay.status === 'AVAILABLE';
-  const rawOccupied = bay.status === 'OCCUPIED' || (bay as any).status === 'USE' || isPendingState || hasWaitingSessions;
+  const rawOccupied = bay.status === 'OCCUPIED' || (bay as any).status === 'USE' || (bay.status as any) === 'PREPARE' || isPendingState || hasWaitingSessions;
 
-  // 체크인 대기중이거나 대기 세션이 있거나 잔여 시간이 있으면 무조건 사용중/배정대기중(isOccupied = true)
-  const isOccupied = rawOccupied && (hasActiveRemainingTime || isPendingState || hasWaitingSessions);
+  // [UI 붕괴 방지 가딩] rawOccupied 상태면 파싱 오차 여부와 무관하게 무조건 사용중(isOccupied = true)으로 보장
+  const isOccupied = rawOccupied;
   const isAvailable = rawAvailable && !isOccupied && !isPendingState && !hasWaitingSessions;
   const isPreOccupied = bay.status === 'PRE_OCCUPIED';
   const isMaintenance = bay.status === 'UNDER_MAINTENANCE' || (bay.status as any) === 'REPAIR' || (bay.status as any) === 'ERROR';
 
-  const progressPercent = Math.max(0, Math.min(100, (totalRemainingMin / 120) * 100));
+  // 🔄 [동적 총 기준시간 산출] 초기 부여시간 + 연장시간 기반 하드코딩 120분 제거
+  const initialDuration = (bay as any).initial_duration || (bay as any).duration_min || (bay as any).initial_min || 60;
+  const extendMin = (bay as any).extend_min || (bay as any).bonus_min || 0;
+  const waitingMin = ((bay as any).waiting_res_count || 0) > 0 ? ((bay as any).waiting_res_total_min || 0) : 0;
+  const totalBaseDuration = Math.max(initialDuration + extendMin + waitingMin, totalRemainingMin);
+
+  const progressPercent = totalBaseDuration > 0
+    ? Math.max(0, Math.min(100, (totalRemainingMin / totalBaseDuration) * 100))
+    : 0;
 
   // 스펙 텍스트 라벨 (좌타/장비)
   const handed = bay.handedness || (bay.type === 'LEFT' ? 'LEFT' : 'RIGHT');

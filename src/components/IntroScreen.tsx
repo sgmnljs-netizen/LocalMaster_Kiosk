@@ -5,6 +5,7 @@ import { api } from '../services/api';
 interface IntroScreenProps {
   onStart: () => void;
   storeName: string;
+  bays?: any[];
 }
 
 const ADS = [
@@ -28,7 +29,7 @@ const ADS = [
   }
 ];
 
-export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName }) => {
+export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName, bays = [] }) => {
   const [currentAdIdx, setCurrentAdIdx] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
 
@@ -116,7 +117,6 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName }) 
       </div>
 
       {/* 2. 하단 본격 키오스크 터치 유도 영역 */}
-      {/* 2. 하단 터치 유도 영역 (Apple-inspired Vibrant Luxury Web) */}
       <div 
         className="kiosk-terminal-area-luxury animate-fluid-gradient" 
         style={{ 
@@ -124,11 +124,94 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName }) 
           flexDirection: 'column', 
           justifyContent: 'center',
           alignItems: 'center',
-          padding: '120px 60px 80px 60px',
+          padding: '80px 60px 60px 60px',
           background: 'linear-gradient(135deg, rgba(0,0,0,1) 0%, rgba(10,12,16,1) 100%)'
         }}
       >
         
+        {/* 🟢 [실시간 층별 타석 현황 럭셔리 요약 위젯] GOLF CLUB 로고 직상단 배치 */}
+        {(() => {
+          const practiceBays = (bays || []).filter(b => {
+            const zCode = b.zone_code || b.zoneCode || '';
+            return zCode !== 'PAR3' && zCode !== 'ROOM';
+          });
+          if (practiceBays.length === 0) return null;
+
+          const floorMap: { [key: string]: { total: number; avail: number } } = {};
+          practiceBays.forEach(b => {
+            const fKey = b.floor ? String(b.floor) : (b.floor_no ? `${b.floor_no}F` : '1F');
+            if (!floorMap[fKey]) floorMap[fKey] = { total: 0, avail: 0 };
+            floorMap[fKey].total += 1;
+            if (b.status === 'AVAILABLE') floorMap[fKey].avail += 1;
+          });
+
+          const sortedFloorKeys = Object.keys(floorMap).sort((a, b) => {
+            const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
+            const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
+            return numA - numB;
+          });
+
+          const totalAvail = practiceBays.filter(b => b.status === 'AVAILABLE').length;
+
+          return (
+            <div 
+              style={{
+                marginBottom: '40px',
+                padding: '20px 44px',
+                borderRadius: '32px',
+                background: 'rgba(255, 255, 255, 0.07)',
+                backdropFilter: 'blur(24px)',
+                WebkitBackdropFilter: 'blur(24px)',
+                border: '1.5px solid rgba(16, 185, 129, 0.45)',
+                boxShadow: '0 16px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(16, 185, 129, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '24px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span 
+                  style={{
+                    width: '14px',
+                    height: '14px',
+                    borderRadius: '50%',
+                    backgroundColor: '#10b981',
+                    boxShadow: '0 0 12px #10b981'
+                  }}
+                  className="animate-pulse-ring"
+                />
+                <span style={{ fontSize: '22px', fontWeight: 900, color: '#10b981', letterSpacing: '-0.5px' }}>
+                  LIVE 타석 현황
+                </span>
+              </div>
+
+              <div style={{ width: '1.5px', height: '24px', background: 'rgba(255, 255, 255, 0.2)' }} />
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                {sortedFloorKeys.map(fKey => (
+                  <div key={fKey} style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
+                    <span style={{ fontSize: '20px', fontWeight: 800, color: 'rgba(255, 255, 255, 0.65)' }}>
+                      {fKey}
+                    </span>
+                    <span style={{ fontSize: '30px', fontWeight: 950, color: '#ffffff', letterSpacing: '-0.5px' }}>
+                      {floorMap[fKey].avail}
+                    </span>
+                    <span style={{ fontSize: '18px', color: 'rgba(255, 255, 255, 0.4)', fontWeight: 700 }}>
+                      /{floorMap[fKey].total}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ width: '1.5px', height: '24px', background: 'rgba(255, 255, 255, 0.2)' }} />
+
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#a7f3d0' }}>
+                총 <strong style={{ fontSize: '32px', color: '#10b981', fontWeight: 950 }}>{totalAvail}</strong>석 가능
+              </div>
+            </div>
+          );
+        })()}
+
         {/* 거대한 상호명 타이포그래피 (High Contrast) */}
         <div style={{ textAlign: 'center', width: '100%', marginBottom: '60px' }}>
           <h1 style={{ fontSize: '72px', letterSpacing: '-3px', color: '#fff', display: 'flex', justifyContent: 'center', gap: '12px' }}>

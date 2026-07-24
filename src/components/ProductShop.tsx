@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Calendar, CheckCircle2, CreditCard, ShoppingBag, X, Layers, Ticket } from 'lucide-react';
+import { Award, Calendar, CheckCircle2, CreditCard, ShoppingBag, X, Layers, Ticket, Hand } from 'lucide-react';
 import { api, Product } from '../services/api';
 
 interface ProductShopProps {
@@ -263,73 +263,110 @@ export const ProductShop: React.FC<ProductShopProps> = ({
             return (
               <div
                 key={prod.prod_cd}
-                className="glass-card"
                 onClick={() => onProductSelected(prod)}
                 style={{
-                  padding: '30px',
-                  borderRadius: '20px',
-                  border: '1px solid var(--glass-border)',
-                  background: 'var(--glass-bg)',
+                  padding: '36px 30px',
+                  borderRadius: '28px',
+                  border: '1px solid #e5e5ea',
+                  background: '#ffffff',
                   cursor: 'pointer',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
-                  gap: '20px',
-                  transition: 'transform 0.2s ease, border-color 0.2s ease',
+                  gap: '24px',
+                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.04)',
+                  transition: 'all 0.25s cubic-bezier(0.25, 1, 0.5, 1)',
                   position: 'relative',
                   overflow: 'hidden'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--neon-indigo)';
+                  e.currentTarget.style.borderColor = '#0071e3';
                   e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.boxShadow = '0 15px 40px rgba(0, 113, 227, 0.12)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--glass-border)';
+                  e.currentTarget.style.borderColor = '#e5e5ea';
                   e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 10px 30px rgba(0, 0, 0, 0.04)';
                 }}
               >
-                {/* 카드 우측 상단 인기/추천 배지 */}
-                <div style={{ position: 'absolute', top: '15px', right: '15px' }}>
-                  <span style={{
-                    fontSize: '11px',
-                    fontWeight: 900,
-                    padding: '4px 8px',
-                    borderRadius: '8px',
-                    background: isDaily ? 'rgba(16, 185, 129, 0.1)' : 'rgba(79, 70, 229, 0.1)',
-                    color: isDaily ? '#10b981' : '#6366f1',
-                    border: isDaily ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(79,70,229,0.2)'
-                  }}>
-                    {isDaily ? '즉시 배정' : '기간 이용권'}
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <span style={{ fontSize: '13px', color: 'var(--text-secondary, #4b5563)', fontWeight: 700 }}>
+                {/* 상단 뱃지 및 헤더 */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: '#86868b', fontWeight: 700, letterSpacing: '0.5px' }}>
                     {isDaily ? 'DAILY PASS' : 'MEMBERSHIP'}
                   </span>
-                  <h3 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary, #111827)', letterSpacing: '-0.5px' }}>
-                    {prod.prod_nm}
-                  </h3>
+                  <span style={{
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    padding: '6px 14px',
+                    borderRadius: '999px',
+                    background: durationMin === 60 ? '#34c759' : '#0071e3',
+                    color: '#ffffff',
+                    boxShadow: durationMin === 60 ? '0 4px 12px rgba(52, 199, 89, 0.25)' : '0 4px 12px rgba(0, 113, 227, 0.25)'
+                  }}>
+                    {durationMin === 60 ? '★ BEST 60분 추천' : 'PREMIUM 90분'}
+                  </span>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid rgba(0,0,0,0.06)', paddingTop: '15px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary, #4b5563)', fontSize: '14px' }}>
-                    <CheckCircle2 size={16} style={{ color: 'var(--neon-indigo)' }} />
-                    <span>
-                      {isDaily ? `타석 지정 즉시 입장 (${durationMin}분)` : `정기 기간 적용 (${prod.days}일 이용 가능)`}
+                {/* 48px SF Pro Display 대형 이용시간 표출 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <h3 style={{ fontSize: '26px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '-0.8px' }}>
+                    {prod.prod_nm}
+                  </h3>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '6px' }}>
+                    <span style={{ fontSize: '48px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-1.5px' }}>
+                      {durationMin}
+                    </span>
+                    <span style={{ fontSize: '20px', fontWeight: 700, color: '#86868b' }}>
+                      분 타석 이용권
                     </span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary, #4b5563)', fontSize: '14px' }}>
-                    <CheckCircle2 size={16} style={{ color: 'var(--neon-indigo)' }} />
+                </div>
+
+                {/* 상품 혜택 안내 목록 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #e5e5ea', paddingTop: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1d1d1f', fontSize: '15px', fontWeight: 600 }}>
+                    <CheckCircle2 size={18} style={{ color: '#0071e3' }} />
+                    <span>{isDaily ? `타석 지정 후 즉시 입장 (${durationMin}분)` : `정기 기간 적용 (${prod.days}일 이용)`}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#86868b', fontSize: '14px', fontWeight: 500 }}>
+                    <CheckCircle2 size={18} style={{ color: '#34c759' }} />
                     <span>신용카드 결제 및 승인 즉시 자동 연동 가동</span>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '10px' }}>
-                  <span style={{ fontSize: '14px', color: 'var(--text-secondary, #4b5563)' }}>이용요금</span>
-                  <span style={{ fontSize: '26px', fontWeight: 900, color: 'var(--neon-emerald, #059669)' }}>
-                    {priceFormatted}원
-                  </span>
+                {/* 가격 및 애플 필 구매 버튼 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>이용요금</span>
+                    <span style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.8px' }}>
+                      {priceFormatted}원
+                    </span>
+                  </div>
+
+                  <button
+                    style={{
+                      width: '100%',
+                      height: '56px',
+                      borderRadius: '999px',
+                      background: '#1d1d1f',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontSize: '17px',
+                      fontWeight: 700,
+                      letterSpacing: '-0.3px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      boxShadow: '0 6px 18px rgba(0, 0, 0, 0.12)',
+                      transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
+                    }}
+                  >
+                    <Hand size={18} className="animate-hand-tap" style={{ color: durationMin === 60 ? '#34c759' : '#2997ff' }} />
+                    <span>{priceFormatted}원 선택 및 결제</span>
+                  </button>
                 </div>
               </div>
             );

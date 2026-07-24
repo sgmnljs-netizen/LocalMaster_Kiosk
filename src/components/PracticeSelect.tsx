@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer, UserCheck, CreditCard, X } from 'lucide-react';
+import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer, UserCheck, CreditCard, X, Hand } from 'lucide-react';
 import { api, Bay } from '../services/api';
 import { TopTeeboxDashboard } from './TopTeeboxDashboard';
 import { TeeboxTileCard } from './TeeboxTileCard';
@@ -70,8 +70,14 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     };
   }, [selectedBayNo, selectedBayNos, allocMode]);
 
-  // bays 데이터로부터 동적으로 존재하는 층 목록 추출 (1F, 2F, 3F 등 문자열 기준 정렬)
-  const floorList = Array.from(new Set(bays.map(b => b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')))).sort((a, b) => {
+  // 🔄 [구역 카테고리 동적 격리] 파3(PAR3) 및 룸(ROOM) 구역 타석은 연습타석배정 메뉴에서 전면 동적 제외
+  const practiceBays = bays.filter(bay => {
+    const zCode = (bay as any).zone_code || (bay as any).zoneCode || '';
+    return zCode !== 'PAR3' && zCode !== 'ROOM';
+  });
+
+  // practiceBays 데이터로부터 동적으로 존재하는 층 목록 추출 (1F, 2F, 3F 등 문자열 기준 정렬)
+  const floorList = Array.from(new Set(practiceBays.map(b => b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')))).sort((a, b) => {
     const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
     const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
     return numA - numB;
@@ -118,7 +124,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     if (bay.status === 'UNDER_MAINTENANCE') return;
 
     // 이용 중인 타석 선택 시 ➔ 원래 배정 팝업에 연쇄 배정 정밀 시각 안내 바인딩
-    if (bay.status === 'OCCUPIED' || (bay as any).status === 'USE') {
+    const isBayOccupiedStatus = bay.status === 'OCCUPIED' || (bay as any).status === 'USE' || (bay as any).status === 'IN_USE' || (bay as any).status === 'PREPARE';
+    if (isBayOccupiedStatus) {
       let mwMin = 0;
       if (bay.config_json) {
         try {
@@ -129,13 +136,39 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         } catch {}
       }
 
-      const currentRemMin = mwMin > 0 ? mwMin : (bay.minutes_left || 0);
+      let currentRemMin = mwMin > 0 ? mwMin : (bay.minutes_left || 0);
+
+      // end_time 파싱으로 currentRemMin 파이프라인 보완 (ISO datetime 및 HHMM 전천후 지원)
+      if (currentRemMin <= 0 && bay.end_time) {
+        try {
+          const endStr = String(bay.end_time);
+          let endDt: Date | null = null;
+          if (endStr.includes('T') || endStr.includes('-') || endStr.includes(':')) {
+            endDt = new Date(endStr);
+          } else if (endStr.length === 4) {
+            const hh = parseInt(endStr.substring(0, 2), 10);
+            const mm = parseInt(endStr.substring(2, 4), 10);
+            endDt = new Date();
+            endDt.setHours(hh, mm, 0, 0);
+            if (endDt.getTime() < Date.now()) {
+              endDt.setDate(endDt.getDate() + 1);
+            }
+          }
+          if (endDt && !isNaN(endDt.getTime())) {
+            const diffMs = endDt.getTime() - Date.now();
+            if (diffMs > 0) {
+              currentRemMin = Math.ceil(diffMs / (60 * 1000));
+            }
+          }
+        } catch {}
+      }
+
       const extendMin = (bay as any).extend_min || 0;
       const waitingCount = (bay as any).waiting_res_count || 0;
       const waitingMin = (bay as any).waiting_res_total_min || 0;
       const bufferGapMin = waitingCount > 0 ? (waitingCount * 1) : 1; // 1분 정비 갭
 
-      const totalWaitMin = currentRemMin + extendMin + waitingMin + bufferGapMin;
+      const totalWaitMin = Math.max(1, currentRemMin + extendMin + waitingMin + bufferGapMin);
 
       const now = new Date();
       const startDate = new Date(now.getTime() + totalWaitMin * 60 * 1000);
@@ -274,8 +307,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     onBaySelected(selectedBayNo, purposeType);
   };
 
-  // 현재 활성 층 타석 필터링
-  const floorBays = bays.filter(b => (b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor);
+  // 현재 활성 층 타석 필터링 (practiceBays 기준 전면 동적 제외)
+  const floorBays = practiceBays.filter(b => (b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor);
   const filteredBays = floorBays.filter(b => {
     if (filterChip === 'LEFT') {
       const h = b.handedness || (b.type === 'LEFT' ? 'LEFT' : 'RIGHT');
@@ -289,7 +322,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 모달 표기용 선택 타석 정보 추출
   const selectedBay = selectedBayNo !== null ? bays.find(b => b.bay_no === selectedBayNo) : null;
-  const isOccupied = selectedBay?.status === 'OCCUPIED';
+  const isOccupied = !!selectedBay && ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(selectedBay.status as any);
 
   return (
     <div 
@@ -677,69 +710,69 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               </p>
             </div>
 
-            {/* Double Check 티켓 (라이트 글래스) */}
+            {/* Double Check 티켓 (애플 미니멀 3단 세그먼트 수직/수평 100% 밸런스) */}
             {selectedBay && (
               <div 
-                className="glass-panel"
                 style={{
-                  padding: '24px 32px',
+                  padding: '24px 36px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   borderRadius: '24px',
-                  background: 'rgba(255, 255, 255, 0.7)'
+                  background: '#ffffff',
+                  border: '1px solid #e5e5ea',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.04)',
+                  marginBottom: '20px'
                 }}
               >
-                {/* 1. 타석 번호 */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <span style={{ fontSize: '14px', color: 'var(--text-tertiary)', fontWeight: 600 }}>{lang === 'KO' ? '선택 타석' : 'Selected Bay'}</span>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '36px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-1px', lineHeight: 1 }}>{selectedBay.bay_no}</span>
-                    <span style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-secondary)' }}>{lang === 'KO' ? '번' : ''}</span>
+                {/* 1. 선택 타석 */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '6px' }}>
+                  <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>{lang === 'KO' ? '선택 타석' : 'Selected Bay'}</span>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
+                    <span style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-1px', lineHeight: 1 }}>
+                      {selectedBay.bay_no}
+                    </span>
+                    <span style={{ fontSize: '18px', fontWeight: 700, color: '#1d1d1f' }}>{lang === 'KO' ? '번' : ''}</span>
                   </div>
                 </div>
                 
-                {/* 세로선 */}
-                <div style={{ width: '1px', height: '48px', background: 'var(--glass-border)' }} />
+                {/* 세로 구분선 */}
+                <div style={{ width: '1px', height: '42px', background: '#e5e5ea', margin: '0 20px' }} />
 
-                {/* 2. 시작 시간 */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '180px' }}>
-                  <span style={{ fontSize: '14px', color: 'var(--text-tertiary)', fontWeight: 600 }}>{lang === 'KO' ? '이용 시작 시간' : 'Start Time'}</span>
+                {/* 2. 이용 시작 시간 (구도 교정: 1줄 정갈하게 통합하여 높이 100% 맞춤) */}
+                <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>{lang === 'KO' ? '이용 시작 시간' : 'Start Time'}</span>
                   {!isOccupied ? (
-                    <span style={{ fontSize: '22px', fontWeight: 800, color: 'var(--system-blue)', letterSpacing: '-0.5px' }}>
-                      {lang === 'KO' ? '결제 완료 즉시 (NOW)' : 'Start Immediately'}
+                    <span style={{ fontSize: '22px', fontWeight: 800, color: '#0071e3', letterSpacing: '-0.5px' }}>
+                      {lang === 'KO' ? '즉시 입장 가능 (NOW)' : 'Start Immediately'}
                     </span>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ fontSize: '22px', fontWeight: 800, color: 'var(--system-orange)', letterSpacing: '-0.5px' }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', justifyContent: 'center' }}>
+                      <span style={{ fontSize: '24px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
                         {chainedInfo?.startTimeStr 
-                          ? (lang === 'KO' ? `약 ${chainedInfo.startTimeStr} 예상` : `Around ${chainedInfo.startTimeStr}`)
+                          ? chainedInfo.startTimeStr
                           : (selectedBay.end_time 
-                              ? (lang === 'KO' 
-                                  ? `약 ${selectedBay.end_time.includes(':') 
-                                      ? (selectedBay.end_time.split(' ')[1] || selectedBay.end_time).slice(0, 5) 
-                                      : `${selectedBay.end_time.slice(0, 2)}:${selectedBay.end_time.slice(2, 4)}`} 예상` 
-                                  : `Around ${selectedBay.end_time}`)
-                              : (lang === 'KO' ? '대기 시간 발생' : 'Wait Required'))}
+                              ? (selectedBay.end_time.includes(':') 
+                                  ? (selectedBay.end_time.split(' ')[1] || selectedBay.end_time).slice(0, 5) 
+                                  : `${selectedBay.end_time.slice(0, 2)}:${selectedBay.end_time.slice(2, 4)}`)
+                              : '대기 중')}
                       </span>
-                      {(chainedInfo?.minutesWait !== undefined || selectedBay.minutes_left !== undefined) && (
-                        <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--system-orange)', marginTop: '2px', opacity: 0.8 }}>
-                          {lang === 'KO' 
-                            ? `(약 ${chainedInfo?.minutesWait ?? selectedBay.minutes_left}분 대기)` 
-                            : `(Approx. ${chainedInfo?.minutesWait ?? selectedBay.minutes_left}m wait)`}
-                        </span>
-                      )}
+                      <span style={{ fontSize: '15px', fontWeight: 700, color: '#0071e3' }}>
+                        예상 {chainedInfo?.minutesWait !== undefined || selectedBay.minutes_left !== undefined 
+                          ? `(약 ${chainedInfo?.minutesWait ?? selectedBay.minutes_left}분 대기)` 
+                          : ''}
+                      </span>
                     </div>
                   )}
                 </div>
 
-                {/* 세로선 */}
-                <div style={{ width: '1px', height: '48px', background: 'var(--glass-border)' }} />
+                {/* 세로 구분선 */}
+                <div style={{ width: '1px', height: '42px', background: '#e5e5ea', margin: '0 20px' }} />
 
-                {/* 3. 배정 유형 */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <span style={{ fontSize: '14px', color: 'var(--text-tertiary)', fontWeight: 600 }}>{lang === 'KO' ? '이용 유형' : 'Type'}</span>
-                  <span style={{ fontSize: '20px', fontWeight: 800, color: !isOccupied ? 'var(--system-blue)' : 'var(--system-orange)', letterSpacing: '-0.5px' }}>
+                {/* 3. 이용 유형 */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                  <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>{lang === 'KO' ? '이용 유형' : 'Type'}</span>
+                  <span style={{ fontSize: '20px', fontWeight: 800, color: !isOccupied ? '#0071e3' : '#1d1d1f', letterSpacing: '-0.5px' }}>
                     {!isOccupied 
                       ? (lang === 'KO' ? '✨ 즉시 배정' : 'Instant Allocation') 
                       : (lang === 'KO' ? '👥 대기 예약' : 'Waitlist Booking')}
@@ -770,85 +803,107 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               </div>
             )}
 
-            {/* Card Buttons (프리미엄 럭셔리 스타일) */}
+            {/* Card Buttons (Apple Pure White & Deep Charcoal Minimalist Style) */}
             <div style={{ display: 'flex', flexDirection: 'row', gap: '20px' }}>
               {/* Type 1: 회원권 */}
               <div 
                 onClick={() => handleDecisionConfirm('MEMBERSHIP')}
-                className="glass-panel"
                 style={{
                   flex: 1,
                   padding: '40px 24px',
-                  borderRadius: '24px',
+                  borderRadius: '28px',
                   cursor: 'pointer',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   textAlign: 'center',
-                  gap: '20px',
-                  background: 'rgba(255, 255, 255, 0.85)',
-                  border: '1px solid var(--glass-border)',
-                  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.04)',
-                  transition: 'transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.2s'
+                  gap: '18px',
+                  background: '#ffffff',
+                  border: '1px solid #e5e5ea',
+                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.05)',
+                  transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
+                  position: 'relative'
                 }}
-                onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.background = 'rgba(240, 240, 245, 0.9)'; }}
-                onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.85)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.85)'; }}
-                onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.background = 'rgba(240, 240, 245, 0.9)'; }}
-                onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.85)'; }}
+                onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.borderColor = '#0071e3'; }}
+                onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e5ea'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e5ea'; }}
+                onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.borderColor = '#0071e3'; }}
+                onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e5ea'; }}
               >
-                <div style={{ background: 'var(--text-primary)', padding: '20px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <UserCheck size={36} style={{ color: '#ffffff' }} />
+                {/* 애플 딥 차콜 원형 아이콘 + 미니멀 에메랄드 닷 */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ background: '#1d1d1f', padding: '22px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(0, 0, 0, 0.12)' }}>
+                    <UserCheck size={38} style={{ color: '#ffffff' }} />
+                  </div>
+                  <div style={{ position: 'absolute', top: 2, right: 2, width: '14px', height: '14px', borderRadius: '50%', background: '#34c759', border: '2px solid #ffffff', boxShadow: '0 0 8px rgba(52, 199, 89, 0.6)' }} />
                 </div>
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <span style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  <span style={{ fontSize: '24px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '-0.8px' }}>
                     {lang === 'KO' ? '보유 회원권으로 배정' : 'Membership Pass'}
                   </span>
-                  <span style={{ fontSize: '15px', color: 'var(--text-secondary)', fontWeight: 500, lineHeight: 1.4, whiteSpace: 'pre-line' }}>
+                  <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 500, lineHeight: 1.4, whiteSpace: 'pre-line' }}>
                     {lang === 'KO' 
                       ? '보유 중인 회원권(기간/횟수제)으로\n회원 인증 후 즉시 배정합니다.' 
                       : 'Authenticate with your active membership pass.'}
                   </span>
+                </div>
+
+                {/* 애플 딥 차콜 필 버튼 */}
+                <div style={{ marginTop: '12px', padding: '12px 24px', borderRadius: '999px', background: '#1d1d1f', color: '#ffffff', fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 14px rgba(0, 0, 0, 0.15)' }}>
+                  <Hand size={18} className="animate-hand-tap" style={{ color: '#34c759' }} />
+                  <span>Touch : 회원 인증 배정</span>
                 </div>
               </div>
 
               {/* Type 2: 일일권 */}
               <div 
                 onClick={() => handleDecisionConfirm('DAILY')}
-                className="glass-panel"
                 style={{
                   flex: 1,
                   padding: '40px 24px',
-                  borderRadius: '24px',
+                  borderRadius: '28px',
                   cursor: 'pointer',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   textAlign: 'center',
-                  gap: '20px',
-                  background: 'rgba(255, 255, 255, 0.85)',
-                  border: '1px solid var(--glass-border)',
-                  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.04)',
-                  transition: 'transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.2s'
+                  gap: '18px',
+                  background: '#ffffff',
+                  border: '1px solid #e5e5ea',
+                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.05)',
+                  transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
+                  position: 'relative'
                 }}
-                onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.background = 'rgba(240, 240, 245, 0.9)'; }}
-                onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.85)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.85)'; }}
-                onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.background = 'rgba(240, 240, 245, 0.9)'; }}
-                onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = 'rgba(255, 255, 255, 0.85)'; }}
+                onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.borderColor = '#0071e3'; }}
+                onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e5ea'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e5ea'; }}
+                onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.borderColor = '#0071e3'; }}
+                onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e5ea'; }}
               >
-                <div style={{ background: 'var(--text-primary)', padding: '20px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <CreditCard size={36} style={{ color: '#ffffff' }} />
+                {/* 애플 딥 차콜 원형 아이콘 + 미니멀 블루 닷 */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ background: '#1d1d1f', padding: '22px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(0, 0, 0, 0.12)' }}>
+                    <CreditCard size={38} style={{ color: '#ffffff' }} />
+                  </div>
+                  <div style={{ position: 'absolute', top: 2, right: 2, width: '14px', height: '14px', borderRadius: '50%', background: '#0071e3', border: '2px solid #ffffff', boxShadow: '0 0 8px rgba(0, 113, 227, 0.6)' }} />
                 </div>
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <span style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  <span style={{ fontSize: '24px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '-0.8px' }}>
                     {lang === 'KO' ? '일일권 즉시 결제' : 'Daily Pass Payment'}
                   </span>
-                  <span style={{ fontSize: '15px', color: 'var(--text-secondary)', fontWeight: 500, lineHeight: 1.4, whiteSpace: 'pre-line' }}>
+                  <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 500, lineHeight: 1.4, whiteSpace: 'pre-line' }}>
                     {lang === 'KO' 
                       ? '비회원 또는 정보 입력 없이\n일일 타석권을 현장 결제합니다.' 
                       : 'Purchase a daily pass directly.'}
                   </span>
+                </div>
+
+                {/* 애플 딥 차콜 필 버튼 */}
+                <div style={{ marginTop: '12px', padding: '12px 24px', borderRadius: '999px', background: '#1d1d1f', color: '#ffffff', fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 14px rgba(0, 0, 0, 0.15)' }}>
+                  <Hand size={18} className="animate-hand-tap" style={{ color: '#2997ff' }} />
+                  <span>Touch : 현장 즉시 결제</span>
                 </div>
               </div>
             </div>

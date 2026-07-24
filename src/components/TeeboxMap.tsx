@@ -65,6 +65,11 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const isTimeRestricted = isMoveMode && currentBay && currentRemMin < 5;
   const hasNoActiveBay = isMoveMode && !currentBay;
 
+  // 컴포넌트 마운트 시 최신 타석 정보 강제 갱신
+  useEffect(() => {
+    onRefreshBays();
+  }, [onRefreshBays]);
+
   // 선점 수동 해제 (useCallback 가딩)
   const handleRelease = useCallback(async () => {
     if (selectedBayNo !== null) {
@@ -134,8 +139,12 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     }
   }, [selectedBayNo, onBaySelected]);
 
-  // 필터링된 층별 타석 목록
-  const floorBays = bays.filter(b => b.floor_no === activeFloor);
+  // 🔄 [구역 카테고리 동적 격리] 파3(PAR3) 및 룸(ROOM) 구역 타석은 일반 연습타석 배치도에서 전면 동적 제외
+  const floorBays = bays.filter(b => {
+    const zCode = (b as any).zone_code || (b as any).zoneCode || '';
+    const isPracticeZone = zCode !== 'PAR3' && zCode !== 'ROOM';
+    return b.floor_no === activeFloor && isPracticeZone;
+  });
 
   return (
     <div 

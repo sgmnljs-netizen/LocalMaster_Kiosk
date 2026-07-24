@@ -11,7 +11,7 @@ interface MemberAuthProps {
 }
 
 export const MemberAuth: React.FC<MemberAuthProps> = ({ 
-  initialAuthMode = 'FACE', 
+  initialAuthMode = 'PHONE', 
   onAuthSuccess, 
   onCancel, 
   onSignUpClick,
@@ -139,12 +139,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           onAuthSuccess(member);
         }, 1200);
       } else {
-        setErrorMsg('등록된 안면 정보가 일치하는 회원을 찾을 수 없습니다.');
+        setErrorMsg('등록된 안면 정보가 없습니다. 휴대폰 번호 또는 QR 인증을 진행해 주세요.');
         setFaceScanning(false);
-        // [TODO: 임시 주석 처리 (안면인식 UI 렌더링 테스트 목적)]
-        // if (onAuthError) {
-        //   onAuthError('ERR_FACE_NOT_FOUND', '카메라 프레임 내 등록된 회원 정보와 부합하는 페이스 ID가 없습니다.');
-        // }
       }
     } catch {
       setErrorMsg('안면인식 장치 응답 지연이 발생했습니다.');

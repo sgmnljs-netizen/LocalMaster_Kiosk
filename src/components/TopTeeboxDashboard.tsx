@@ -13,9 +13,15 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   onBayClick,
   lang
 }) => {
+  // 🔄 [구역 카테고리 동적 격리] 파3(PAR3) 및 룸(ROOM) 구역 타석은 일반 연습타석 현황판에서 전면 동적 제외
+  const practiceBays = bays.filter(bay => {
+    const zCode = (bay as any).zone_code || (bay as any).zoneCode || '';
+    return zCode !== 'PAR3' && zCode !== 'ROOM';
+  });
+
   // 층별 동적 그룹핑 (floor 문자열 필드 기준, 없을 시 floor_no 백업)
   const floorsMap: { [key: string]: Bay[] } = {};
-  bays.forEach(bay => {
+  practiceBays.forEach(bay => {
     let floorKey = '1F';
     if (bay.floor) {
       floorKey = String(bay.floor);
@@ -36,8 +42,9 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
     return numA - numB;
   });
 
-  // 전체 이용 가능 타석 계산
-  const totalAvailable = bays.filter(b => b.status === 'AVAILABLE').length;
+  // 전체 이용 가능 타석 계산 (연습타석 구역 기준)
+  const totalAvailable = practiceBays.filter(b => b.status === 'AVAILABLE').length;
+  const totalPracticeBays = practiceBays.length;
 
   const renderBayCard = (bay: Bay) => {
     const isAvailable = bay.status === 'AVAILABLE';
@@ -210,7 +217,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
             {totalAvailable}
           </span>
           <span style={{ fontSize: '14px', color: 'rgba(5, 150, 105, 0.5)', fontWeight: 800, marginLeft: '4px' }}>
-            / {bays.length}
+            / {totalPracticeBays}
           </span>
         </div>
       </div>

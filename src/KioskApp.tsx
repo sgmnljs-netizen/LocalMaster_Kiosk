@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   ArrowLeftRight, Calendar, Compass, CreditCard, 
   KeyRound, RefreshCw, LogOut, ShieldAlert, Sparkles, UserCheck, UserPlus
@@ -16,6 +16,7 @@ import { PracticeSelect } from './components/PracticeSelect';
 import { CompanionSetupModal, CompanionTargetItem } from './components/CompanionSetupModal';
 import { ErrorMessageModal, ErrorModalData } from './components/ErrorMessageModal';
 import { CheckinSelect } from './components/CheckinSelect';
+import { AllocationCompleteModal } from './components/AllocationCompleteModal';
 import { api, Member, Product, Bay } from './services/api';
 import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
 
@@ -96,7 +97,10 @@ export default function KioskApp() {
   const [step, setStep] = useState<KioskStep>('INTRO');
   const [purpose, setPurpose] = useState<KioskPurpose | null>(null);
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
-  const [initialAuthMode, setInitialAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>('FACE');
+  const [initialAuthMode, setInitialAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>('PHONE');
+
+  // 이중 클릭 및 중복 API 호출 방어 락 Ref
+  const isAllocatingRef = useRef(false);
 
   // 세션 정보
   const [authMember, setAuthMember] = useState<Member | null>(null);
@@ -115,6 +119,12 @@ export default function KioskApp() {
   const [storeName, setStoreName] = useState<string>('SGM Golf Academy');
   const [checkinPolicy, setCheckinPolicy] = useState<string>('CHECKIN_REQUIRED');
   const [hwFailAlert, setHwFailAlert] = useState<{ bayNo: number; resId: string } | null>(null);
+  const [completedAllocationInfo, setCompletedAllocationInfo] = useState<{
+    bayNo: number | string;
+    durationMin: number;
+    startTime?: string;
+    endTime?: string;
+  } | null>(null);
 
   // 미들웨어 헬스체크 오프라인 감지
   const [isMiddlewareOffline, setIsMiddlewareOffline] = useState<boolean>(false);
@@ -164,16 +174,20 @@ export default function KioskApp() {
     loadBays();
 
     // [Phase 2: WS-2] WebSocket 실시간 수신 연결
-    // bay_updated 이벤트를 받으면 폴링 없이 즉시 setBays 업데이트
+    // bay_updated 이벤트를 받으면 폴링 없이 즉시 setBays 및 loadBays 실행
     const wsCleanup = api.connectBayWebSocket(
       (updatedBay) => {
-        // 단일 타석 온라인 업데이트 — 전체 재조회 없이 O(n) 부분 갱신
+        // 단일 타석 온라인 업데이트 — 전체 재조회 없이 O(n) 부분 갱신 + loadBays 확정 갱신
         setBays(prev => prev.map(b => b.bay_no === updatedBay.bay_no ? { ...b, ...updatedBay } : b));
+        loadBays();
       },
       (msg) => {
         const data = msg as Record<string, unknown>;
         if (data.type === 'middleware_offline') {
           console.warn('[WS-Kiosk] 미들웨어 오프라인 신호 수신');
+        }
+        if (['bay_release', 'bay_update', 'bay_updated', 'checkin_complete', 'checkin_status'].includes(data.type as string)) {
+          loadBays();
         }
       }
     );
@@ -189,6 +203,13 @@ export default function KioskApp() {
       clearInterval(interval);
     };
   }, []);
+
+  // 0-1. 화면 전환 시 (특히 타석 배치도 진입 시) 최신 타석 데이터 즉시 강제 갱신
+  useEffect(() => {
+    if (step === 'TEEBOX_MAP' || step === 'MAIN_DASHBOARD' || step === 'PRACTICE_SELECT') {
+      loadBays();
+    }
+  }, [step]);
 
   // 1. 토스트 알림 타이머 자동 제거
   useEffect(() => {
@@ -419,7 +440,7 @@ export default function KioskApp() {
         if (res.success) {
           // 감사 로그 적재
           await api.writeKioskLog('BAY_MOVE', `타석 이동 성공 (${bayNo}번 타석으로 이동)`, authMember.member_no);
-          
+          await loadBays();
           showToast(res.message);
           handleLogout();
         } else {
@@ -433,7 +454,9 @@ export default function KioskApp() {
 
   // 2.5 선택한 이용권으로 타석 배정 최종 승인 처리
   const handleAssetSelected = async (memberItemId: number) => {
+    if (isAllocatingRef.current) return;
     if (selectedBayNo !== null && authMember) {
+      isAllocatingRef.current = true;
       try {
         // [BUG-3 FIX] payment_method='TICKET' 명시 전달 — 통합 API에서 이용권 차감 보장
         const res = await api.allocateBay(
@@ -443,17 +466,26 @@ export default function KioskApp() {
         );
         if (res.success) {
           await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId})`, authMember.member_no);
+          await loadBays();
           if (res.hardware_success === false) {
             showErrorModal(`${selectedBayNo}번 타석 배정은 완료되었으나, 센서/타석 기기 시작에 실패했습니다. 직원을 호출해 주세요.`, '타석 기기 가동 미완료', true);
           }
           const updated = await api.getMember(authMember.member_no);
           if (updated) setAuthMember(updated);
-          setStep('PAYMENT');
+          
+          setCompletedAllocationInfo({
+            bayNo: selectedBayNo,
+            durationMin: 60,
+            startTime: (res as any).start_time || (res as any).startTime,
+            endTime: (res as any).end_time || (res as any).endTime
+          });
         } else {
           showErrorModal(res.message || '회원 이용권 타석 배정에 실패했습니다.');
         }
       } catch (err: any) {
         showErrorModal(err?.message || (lang === 'KO' ? '타석 배정 처리 중 시스템 오류가 발생했습니다.' : 'Failed to allocate teebox.'));
+      } finally {
+        isAllocatingRef.current = false;
       }
     }
   };
@@ -524,33 +556,8 @@ export default function KioskApp() {
 
   // 3. 상품 매대에서 구매 상품 선택 완료
   const handleProductSelected = async (prod: Product) => {
-    if (purpose === 'ALLOCATE_DAILY' && selectedBayNo) {
-      showToast(lang === 'KO' ? '결제 대기 예약을 생성 중입니다...' : 'Creating hold reservation...');
-      try {
-        const targetDuration = prod.duration_min ?? (prod as any).durationMin ?? 60;
-        const res = await api.createHoldReservation(
-          selectedBayNo,
-          targetDuration,
-          authMember?.member_no,
-          authMember?.member_name || '비회원',
-          authMember?.hp || '010-0000-0000'
-        );
-        if (res.success && res.res_id) {
-          setCurrentHoldResId(res.res_id);
-          setSelectedProduct(prod);
-          setStep('PAYMENT');
-        } else {
-          showErrorModal(res.message || '결제 대기 예약 생성에 실패했습니다.');
-        }
-      } catch (err: any) {
-        showErrorModal(err?.message || (lang === 'KO' ? '결제 대기 예약 생성 중 오류가 발생했습니다.' : 'Failed to create hold reservation.'));
-      }
-    } else {
-      setSelectedProduct(prod);
-      if (purpose === 'PURCHASE_PRODUCT' || purpose === 'ALLOCATE_DAILY') {
-        setStep('PAYMENT');
-      }
-    }
+    setSelectedProduct(prod);
+    setStep('PAYMENT');
   };
 
   // 4. 라카 연장/대여 상품 선택 및 결제 트리거
@@ -562,56 +569,70 @@ export default function KioskApp() {
 
   // 5. 결제 및 배정 완전 성공 (영수증 출력 후 메인 복귀)
   const handlePaymentCompleted = async () => {
+    if (isAllocatingRef.current) return;
+    isAllocatingRef.current = true;
     showToast('모든 처리가 안전하게 완료되었습니다. 이용권을 챙겨주세요!');
     
-    // [BUG-1 FIX] 일일권 배정: allocateBay + processPaymentWebhook 이중 호출 제거
-    // 통합 API(POST /api/v1/kiosk/allocate-bay)로 단일 처리 (CoreEngine 2회 호출 방지)
-    if (purpose === 'ALLOCATE_DAILY' && selectedBayNo && selectedProduct) {
-      try {
-        const finalDuration = selectedProduct.duration_min ?? (selectedProduct as any).durationMin ?? 60;
-        const allocResult = await api.allocateBay(
-          selectedBayNo,
-          finalDuration,
-          authMember?.member_no,
-          authMember?.member_name || '비회원',
-          authMember?.hp || '010-0000-0000',
-          undefined,       // member_item_id — 일일권은 null
-          'CARD',          // [BUG-3 FIX] payment_method 명시
-          selectedProduct.standard_price  // [BUG-3 FIX] 매출 금액 전달
-        );
-        if (allocResult) {
-          if (!allocResult.success) {
-            showErrorModal(allocResult.message || '일일권 타석 배정에 실패했습니다. 카운터 직원을 호출해 주세요.');
-          } else if (allocResult.hardware_success === false) {
-            setHwFailAlert({ bayNo: selectedBayNo, resId: allocResult.res_id || '' });
-            showErrorModal(`${selectedBayNo}번 타석 결제는 완료되었으나 센서 기기 가동에 실패했습니다. 직원을 호출해주세요.`, '타석 기기 시작 확인 필요', true);
+    try {
+      // [BUG-1 FIX] 일일권 배정: allocateBay + processPaymentWebhook 이중 호출 제거
+      // 통합 API(POST /api/v1/kiosk/allocate-bay)로 단일 처리 (CoreEngine 2회 호출 방지)
+      if (purpose === 'ALLOCATE_DAILY' && selectedBayNo && selectedProduct) {
+        try {
+          const finalDuration = selectedProduct.duration_min ?? (selectedProduct as any).durationMin ?? 60;
+          const allocResult = await api.allocateBay(
+            selectedBayNo,
+            finalDuration,
+            authMember?.member_no,
+            authMember?.member_name || '비회원',
+            authMember?.hp || '010-0000-0000',
+            undefined,       // member_item_id — 일일권은 null
+            'CARD',          // [BUG-3 FIX] payment_method 명시
+            selectedProduct.standard_price  // [BUG-3 FIX] 매출 금액 전달
+          );
+          if (allocResult) {
+            if (!allocResult.success) {
+              showErrorModal(allocResult.message || '일일권 타석 배정에 실패했습니다. 카운터 직원을 호출해 주세요.');
+            } else {
+              if (allocResult.hardware_success === false) {
+                setHwFailAlert({ bayNo: selectedBayNo, resId: allocResult.res_id || '' });
+                showErrorModal(`${selectedBayNo}번 타석 결제는 완료되었으나 센서 기기 가동에 실패했습니다. 직원을 호출해주세요.`, '타석 기기 시작 확인 필요', true);
+              }
+              setCompletedAllocationInfo({
+                bayNo: selectedBayNo,
+                durationMin: finalDuration,
+                startTime: (allocResult as any).start_time || (allocResult as any).startTime,
+                endTime: (allocResult as any).end_time || (allocResult as any).endTime
+              });
+            }
           }
+        } catch (err: any) {
+          console.error('[BUG-1 FIX] 일일권 타석 배정 실패:', err);
+          showErrorModal(err?.message || '타석 배정 중 오류가 발생했습니다. 직원에게 문의해주세요.');
         }
-      } catch (err: any) {
-        console.error('[BUG-1 FIX] 일일권 타석 배정 실패:', err);
-        showErrorModal(err?.message || '타석 배정 중 오류가 발생했습니다. 직원에게 문의해주세요.');
       }
+
+      // 일반 회원권 구매 성공인 경우
+      if (purpose === 'PURCHASE_PRODUCT' && authMember && selectedProduct) {
+        await api.purchaseProduct(authMember.member_no, selectedProduct.prod_cd, selectedProduct.standard_price);
+      }
+
+      // 라카 연장/대여 결제 완료 시점에 반영
+      if (purpose === 'EXTEND_LOCKER' && selectedLockerNo && selectedProduct) {
+        await api.extendLocker(selectedLockerNo, selectedProduct.days || 30, selectedProduct.standard_price);
+      }
+
+      // 성공적으로 배정된 타석 변수 초기화 (중복 release 락 해제 방지)
+      setSelectedBayNo(null);
+      setSelectedBayNos([]);
+
+      // 최신 타석 상태 재조회
+      await loadBays();
+
+      setCurrentHoldResId(null);
+      handleLogoutToHome();
+    } finally {
+      isAllocatingRef.current = false;
     }
-
-    // 일반 회원권 구매 성공인 경우
-    if (purpose === 'PURCHASE_PRODUCT' && authMember && selectedProduct) {
-      await api.purchaseProduct(authMember.member_no, selectedProduct.prod_cd, selectedProduct.standard_price);
-    }
-
-    // 라카 연장/대여 결제 완료 시점에 반영
-    if (purpose === 'EXTEND_LOCKER' && selectedLockerNo && selectedProduct) {
-      await api.extendLocker(selectedLockerNo, selectedProduct.days || 30, selectedProduct.standard_price);
-    }
-
-    // 성공적으로 배정된 타석 변수 초기화 (중복 release 락 해제 방지)
-    setSelectedBayNo(null);
-    setSelectedBayNos([]);
-
-    // 최신 타석 상태 재조회
-    await loadBays();
-
-    setCurrentHoldResId(null);
-    handleLogoutToHome();
   };
 
   return (
@@ -657,7 +678,7 @@ export default function KioskApp() {
 
       {/* A. 인트로 광고 화면 단계 */}
       {step === 'INTRO' && (
-        <IntroScreen onStart={handleStartKiosk} storeName={storeName} />
+        <IntroScreen onStart={handleStartKiosk} storeName={storeName} bays={bays} />
       )}
 
       {/* B. 본격 조작 화면 템플릿 */}
@@ -1315,6 +1336,20 @@ export default function KioskApp() {
             </div>
           </div>
         </div>
+      )}
+      {/* 🟢 타석 배정 완료 안내 팝업 (5초 자동 카운트다운 & 닫기) */}
+      {completedAllocationInfo && (
+        <AllocationCompleteModal
+          bayNo={completedAllocationInfo.bayNo}
+          durationMin={completedAllocationInfo.durationMin}
+          startTime={completedAllocationInfo.startTime}
+          endTime={completedAllocationInfo.endTime}
+          lang={lang}
+          onClose={() => {
+            setCompletedAllocationInfo(null);
+            handleLogoutToHome();
+          }}
+        />
       )}
     </div>
   );
