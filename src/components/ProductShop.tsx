@@ -65,17 +65,25 @@ export const ProductShop: React.FC<ProductShopProps> = ({
     loadKioskShopData();
   }, [memberNo, purposeType]);
 
-  // 일일 타석 배정권 여부 판별 헬퍼
+  // 일일 타석 배정권 여부 판별 헬퍼 (아메리카노/음료/용품/라카/장기 정기권 명시적 필터 차단)
   const checkIfDaily = (prod: Product) => {
-    return (prod.logic_type as string) === 'DAILY' && (prod.prod_cd.startsWith('D') || prod.prod_nm.includes('일일타석'));
+    // 1차 제외 가드: F&B, 일반 용품, 라카, 장기 정기권 제외
+    const name = prod.prod_nm || '';
+    if (name.includes('아메리카노') || name.includes('장갑') || name.includes('볼') || name.includes('라카') || name.includes('회원권') || name.includes('이용권(1개월)') || name.includes('이용권 1개월')) {
+      return false;
+    }
+    const isDailyLogic = (prod.logic_type as string) === 'DAILY';
+    const isDailyName = name.includes('일일타석') || name.includes('일일 타석') || name.includes('일일');
+    const isDailyCd = prod.prod_cd.startsWith('D0') || prod.prod_cd.startsWith('DLY');
+    return isDailyLogic || isDailyName || isDailyCd;
   };
 
-  // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB의 duration_min이 None/null인 케이스 대응)
+  // 일일 타석 배정권 시간(분) 추출 헬퍼 (3단계 파이프라인: DB 물리 컬럼 ➔ JSON access_rules/rules_detail ➔ 상품명)
   const getDurationMin = (prod: Product) => {
     if (prod.duration_min != null && prod.duration_min > 0) return prod.duration_min;
-    if (prod.prod_cd === 'D001') return 60;
-    if (prod.prod_cd === 'D002') return 90;
-    const match = prod.prod_nm.match(/(\d+)분/);
+    const jsonDuration = (prod as any).access_rules?.duration_min || (prod as any).rules_detail?.duration_min;
+    if (jsonDuration != null && jsonDuration > 0) return jsonDuration;
+    const match = (prod.prod_nm || '').match(/(\d+)분/);
     return match ? parseInt(match[1]) : 60;
   };
 

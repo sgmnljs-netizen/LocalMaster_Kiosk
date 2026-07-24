@@ -1011,7 +1011,11 @@ class HybridAPIClient {
       try {
         const res = await fetch(`${BASE_URL}/v1/kiosk/products?store_cd=${STORE_CODE}`);
         if (res.ok) {
-          return await res.json();
+          const prods = await res.json();
+          if (Array.isArray(prods) && prods.length > 0) {
+            localStorage.setItem('LM_PRODUCTS', JSON.stringify(prods));
+            return prods;
+          }
         }
       } catch (err) {
         console.error('Failed to fetch kiosk products catalog:', err);
@@ -1458,6 +1462,17 @@ class HybridAPIClient {
         
         if (createRes.ok) {
           const createData = await createRes.json();
+          // [Edge DB Mirroring] 온라인 HOLD 성공 시에도 Edge DB 캐시에 저장하여 백엔드 장애 폴백 보장
+          const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+          holds.push({
+            res_id: createData.res_id,
+            bay_no: bayNo,
+            duration_min: durationMin,
+            member_no: memberNo || null,
+            guest_nm: guestName || null,
+            hp_no: hpNo || null
+          });
+          localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(holds));
           return { success: true, res_id: createData.res_id, message: 'HOLD 예약이 생성되었습니다.' };
         }
       } catch (err) {
@@ -1498,10 +1513,13 @@ class HybridAPIClient {
     if (isConnected && !resId.startsWith('R-HOLD-')) {
       try {
         const res = await fetch(`${BASE_URL}/reservations/${resId}/cancel`, {
-          method: 'POST',
+          method: 'PATCH',
           headers: { 'x-store-cd': STORE_CODE }
         });
         if (res.ok) {
+          const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+          const filtered = holds.filter((h: any) => h.res_id !== resId);
+          localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
           return { success: true, message: '보류 예약이 취소되었습니다.' };
         }
       } catch (err) {
@@ -1535,11 +1553,16 @@ class HybridAPIClient {
           body: JSON.stringify({
             res_id: resId,
             amount: amount,
-            payment_method: paymentMethod
+            payment_method: paymentMethod,
+            terminal_id: this.terminalId
           })
         });
         if (res.ok) {
           const data = await res.json();
+          // 백엔드 처리 성공 시 Edge DB HOLD 캐시 정제
+          const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+          const filtered = holds.filter((h: any) => h.res_id !== resId);
+          localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
           return { success: data.success, message: data.message };
         }
       } catch (err) {

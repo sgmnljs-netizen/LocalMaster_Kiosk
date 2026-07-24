@@ -527,9 +527,10 @@ export default function KioskApp() {
     if (purpose === 'ALLOCATE_DAILY' && selectedBayNo) {
       showToast(lang === 'KO' ? '결제 대기 예약을 생성 중입니다...' : 'Creating hold reservation...');
       try {
+        const targetDuration = prod.duration_min ?? (prod as any).durationMin ?? 60;
         const res = await api.createHoldReservation(
           selectedBayNo,
-          prod.duration_min || 60,
+          targetDuration,
           authMember?.member_no,
           authMember?.member_name || '비회원',
           authMember?.hp || '010-0000-0000'
@@ -567,9 +568,10 @@ export default function KioskApp() {
     // 통합 API(POST /api/v1/kiosk/allocate-bay)로 단일 처리 (CoreEngine 2회 호출 방지)
     if (purpose === 'ALLOCATE_DAILY' && selectedBayNo && selectedProduct) {
       try {
+        const finalDuration = selectedProduct.duration_min ?? (selectedProduct as any).durationMin ?? 60;
         const allocResult = await api.allocateBay(
           selectedBayNo,
-          selectedProduct.duration_min || 60,
+          finalDuration,
           authMember?.member_no,
           authMember?.member_name || '비회원',
           authMember?.hp || '010-0000-0000',
@@ -976,6 +978,7 @@ export default function KioskApp() {
                 bays={bays}
                 leaderMember={authMember}
                 lang={lang}
+                selectedDurationMin={selectedProduct?.duration_min || (selectedProduct ? ((selectedProduct as any).access_rules?.duration_min || (selectedProduct as any).rules_detail?.duration_min) : 0)}
                 onConfirm={handleCompanionConfirm}
                 onCancel={() => {
                   setShowCompanionModal(false);

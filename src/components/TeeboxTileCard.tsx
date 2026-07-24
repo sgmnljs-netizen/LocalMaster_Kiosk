@@ -40,7 +40,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
     // 🔄 [체크인 대기 보완] CHK/PREPARE/REQ 대기 상태이고 미들웨어 작동 전일 때 기본 배정 시간(60분) 적용
     const isPending = ['CHK', 'PREPARE', 'REQ', 'RSV', 'HOLD'].includes((bay as any).status_cd || bay.status);
     if (currentRemMin === 0 && isPending) {
-      currentRemMin = (bay as any).duration_min || 60;
+      currentRemMin = (bay as any).duration_min || 0;
     }
 
     // 2. POS/Admin 서비스 연장분
@@ -48,7 +48,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
 
     // 3. 후속 대기 세션 수 및 총 이용분 (waiting_res_count)
     const waitingCount = (bay as any).waiting_res_count || 0;
-    const waitingMin = (bay as any).waiting_res_total_min || (waitingCount * 60);
+    const waitingMin = (bay as any).waiting_res_total_min || 0;
 
     // 4. 세션 전환 갭 (세션 당 1분 정비/대기 타임)
     const bufferGapMin = waitingCount > 0 ? (waitingCount * 1) : 0;
@@ -57,8 +57,37 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
     const holdSec = (bay as any).preoccupy_hold_sec || 0;
     const holdMin = Math.ceil(holdSec / 60);
 
+    // 6. [대기시간(Prepare Time) 정밀 합산] PREPARE 상태이거나 대기시간 속성이 전달된 경우 반영
+    let prepareMin = (bay as any).prepare_min || (bay as any).prepare_time || 0;
+    if (((bay.status as string) === 'PREPARE' || (bay as any).status_cd === 'PREPARE') && prepareMin === 0) {
+      prepareMin = 1; // 기본 대기시간 1분
+    }
+
     // ➔ 5대 변수 누적 총 합산 잔여시간 (분)
-    const totalRemainingMin = currentRemMin + extendMin + waitingMin + bufferGapMin + holdMin;
+    let totalRemainingMin = currentRemMin + extendMin + waitingMin + bufferGapMin + holdMin + prepareMin;
+
+    // ➔ 백엔드 end_time(예: "09:44" 또는 "0944") 전달 시 현재 시각 기준 실제 남은 분(Minute) 정밀 동기화
+    if (bay.end_time) {
+      try {
+        const cleanEndTime = bay.end_time.replace(':', '').trim();
+        if (cleanEndTime.length === 4) {
+          const endH = parseInt(cleanEndTime.substring(0, 2), 10);
+          const endM = parseInt(cleanEndTime.substring(2, 4), 10);
+          const now = new Date();
+          const targetDate = new Date(now);
+          targetDate.setHours(endH, endM, 0, 0);
+
+          if (targetDate > now) {
+            const diffMs = targetDate.getTime() - now.getTime();
+            const diffMin = Math.ceil(diffMs / (60 * 1000));
+            // end_time 기반 남은 분이 대기시간 미합산 분보다 크면 실제 end_time 남은 분(61분 등)을 최우선 반영
+            if (diffMin > totalRemainingMin) {
+              totalRemainingMin = diffMin;
+            }
+          }
+        }
+      } catch (e) {}
+    }
 
     // ➔ 최종 빈 타석 예정 시각 도출 (현재 시각 KST 기준 + totalRemainingMin)
     const now = new Date();

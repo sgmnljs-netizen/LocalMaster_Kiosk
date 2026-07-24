@@ -21,6 +21,7 @@ interface CompanionSetupModalProps {
   bays: Bay[];
   leaderMember: Member;
   lang: 'KO' | 'EN';
+  selectedDurationMin?: number;
   onConfirm: (targets: CompanionTargetItem[]) => void;
   onCancel: () => void;
 }
@@ -29,6 +30,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   selectedBayNos,
   leaderMember,
   lang,
+  selectedDurationMin = 60,
   onConfirm,
   onCancel
 }) => {
@@ -44,6 +46,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       if (idx === 0) {
         // 대표자 타석
         const validAsset = (leaderMember.assets || [])[0];
+        const durMin = (validAsset as any)?.duration_min || selectedDurationMin;
         return {
           bayNo,
           isLeader: true,
@@ -53,12 +56,12 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           isGuest: false,
           ticketType: validAsset ? 'MEMBERSHIP' : 'DAILY',
           memberItemId: validAsset ? parseInt(validAsset.member_item_id) : undefined,
-          ticketName: validAsset ? validAsset.item_name : '일일 타석권 60분',
-          durationMin: 60,
-          price: validAsset ? 0 : 15000
+          ticketName: validAsset ? validAsset.item_name : `일일 타석권 ${durMin}분`,
+          durationMin: durMin,
+          price: validAsset ? 0 : (durMin === 90 ? 20000 : 15000)
         };
       } else {
-        // 동반자 타석 (디폴트: 비회원 일일권)
+        // 동반자 타석 (디폴트: 비회원 일일권, 대표자와 동일 시간 상속)
         return {
           bayNo,
           isLeader: false,
@@ -66,9 +69,9 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           hp: '',
           isGuest: true,
           ticketType: 'DAILY',
-          ticketName: '일일 타석권 60분',
-          durationMin: 60,
-          price: 15000
+          ticketName: `일일 타석권 ${selectedDurationMin}분`,
+          durationMin: selectedDurationMin,
+          price: selectedDurationMin === 90 ? 20000 : 15000
         };
       }
     });

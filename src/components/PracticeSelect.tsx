@@ -132,7 +132,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       const currentRemMin = mwMin > 0 ? mwMin : (bay.minutes_left || 0);
       const extendMin = (bay as any).extend_min || 0;
       const waitingCount = (bay as any).waiting_res_count || 0;
-      const waitingMin = (bay as any).waiting_res_total_min || (waitingCount * 60);
+      const waitingMin = (bay as any).waiting_res_total_min || 0;
       const bufferGapMin = waitingCount > 0 ? (waitingCount * 1) : 1; // 1분 정비 갭
 
       const totalWaitMin = currentRemMin + extendMin + waitingMin + bufferGapMin;
@@ -712,13 +712,21 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       <span style={{ fontSize: '22px', fontWeight: 800, color: 'var(--system-orange)', letterSpacing: '-0.5px' }}>
-                        {selectedBay.end_time 
-                          ? (lang === 'KO' ? `약 ${selectedBay.end_time.slice(0, 2)}:${selectedBay.end_time.slice(2, 4)} 예상` : `Around ${selectedBay.end_time.slice(0, 2)}:${selectedBay.end_time.slice(2, 4)}`)
-                          : (lang === 'KO' ? '대기 시간 발생' : 'Wait Required')}
+                        {chainedInfo?.startTimeStr 
+                          ? (lang === 'KO' ? `약 ${chainedInfo.startTimeStr} 예상` : `Around ${chainedInfo.startTimeStr}`)
+                          : (selectedBay.end_time 
+                              ? (lang === 'KO' 
+                                  ? `약 ${selectedBay.end_time.includes(':') 
+                                      ? (selectedBay.end_time.split(' ')[1] || selectedBay.end_time).slice(0, 5) 
+                                      : `${selectedBay.end_time.slice(0, 2)}:${selectedBay.end_time.slice(2, 4)}`} 예상` 
+                                  : `Around ${selectedBay.end_time}`)
+                              : (lang === 'KO' ? '대기 시간 발생' : 'Wait Required'))}
                       </span>
-                      {selectedBay.minutes_left !== undefined && (
+                      {(chainedInfo?.minutesWait !== undefined || selectedBay.minutes_left !== undefined) && (
                         <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--system-orange)', marginTop: '2px', opacity: 0.8 }}>
-                          {lang === 'KO' ? `(약 ${selectedBay.minutes_left}분 대기)` : `(Approx. ${selectedBay.minutes_left}m wait)`}
+                          {lang === 'KO' 
+                            ? `(약 ${chainedInfo?.minutesWait ?? selectedBay.minutes_left}분 대기)` 
+                            : `(Approx. ${chainedInfo?.minutesWait ?? selectedBay.minutes_left}m wait)`}
                         </span>
                       )}
                     </div>
