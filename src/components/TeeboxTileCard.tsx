@@ -126,15 +126,10 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   const isPreOccupied = bay.status === 'PRE_OCCUPIED';
   const isMaintenance = bay.status === 'UNDER_MAINTENANCE' || (bay.status as any) === 'REPAIR' || (bay.status as any) === 'ERROR';
 
-  // 🔄 [동적 총 기준시간 산출] 초기 부여시간 + 연장시간 기반 하드코딩 120분 제거
-  const initialDuration = (bay as any).initial_duration || (bay as any).duration_min || (bay as any).initial_min || 60;
-  const extendMin = (bay as any).extend_min || (bay as any).bonus_min || 0;
-  const waitingMin = ((bay as any).waiting_res_count || 0) > 0 ? ((bay as any).waiting_res_total_min || 0) : 0;
-  const totalBaseDuration = Math.max(initialDuration + extendMin + waitingMin, totalRemainingMin);
-
-  const progressPercent = totalBaseDuration > 0
-    ? Math.max(0, Math.min(100, (totalRemainingMin / totalBaseDuration) * 100))
-    : 0;
+  // 🔄 [60분 스케일 잔여시간 게이지] 60분 이상 = 100% 꽉 참, 0~59분 = 잔여시간 비례 줄어듦
+  const progressPercent = totalRemainingMin >= 60
+    ? 100
+    : Math.max(0, Math.min(100, (totalRemainingMin / 60) * 100));
 
   // 스펙 텍스트 라벨 (좌타/장비)
   const handed = bay.handedness || (bay.type === 'LEFT' ? 'LEFT' : 'RIGHT');
@@ -338,7 +333,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
                 style={{
                   width: `${progressPercent}%`,
                   height: '100%',
-                  backgroundColor: '#059669',
+                  backgroundColor: totalRemainingMin <= 15 ? '#d97706' : '#059669',
                   borderRadius: '3px',
                   transition: 'width 0.5s ease',
                 }}
