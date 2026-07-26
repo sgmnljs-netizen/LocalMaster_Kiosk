@@ -52,6 +52,11 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
         return `${hours}:${mins}`;
       }
     }
+    // "1455" 또는 "900" 포맷 처리
+    const cleanStr = timeStr.trim().padStart(4, '0');
+    if (cleanStr.length === 4 && !isNaN(Number(cleanStr))) {
+      return `${cleanStr.slice(0, 2)}:${cleanStr.slice(2, 4)}`;
+    }
     return timeStr;
   };
 
@@ -59,11 +64,25 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   let endDisplay = formatTime(endTime);
 
   if (!endTime && startTime) {
-    const d = new Date(startTime.includes('T') ? startTime : `2026-07-24T${startTime}:00`);
-    if (!isNaN(d.getTime())) {
-      d.setMinutes(d.getMinutes() + durationMin);
-      const hours = String(d.getHours()).padStart(2, '0');
-      const mins = String(d.getMinutes()).padStart(2, '0');
+    let baseDt: Date | null = null;
+    const cleanSt = startTime.trim();
+    if (cleanSt.includes('T')) {
+      baseDt = new Date(cleanSt);
+    } else if (cleanSt.length === 4 && !isNaN(Number(cleanSt))) {
+      const now = new Date();
+      const hh = parseInt(cleanSt.slice(0, 2), 10);
+      const mm = parseInt(cleanSt.slice(2, 4), 10);
+      baseDt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm);
+    } else if (cleanSt.includes(':')) {
+      const parts = cleanSt.split(':');
+      const now = new Date();
+      baseDt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(parts[0], 10), parseInt(parts[1], 10));
+    }
+
+    if (baseDt && !isNaN(baseDt.getTime())) {
+      baseDt.setMinutes(baseDt.getMinutes() + durationMin);
+      const hours = String(baseDt.getHours()).padStart(2, '0');
+      const mins = String(baseDt.getMinutes()).padStart(2, '0');
       endDisplay = `${hours}:${mins}`;
     }
   }

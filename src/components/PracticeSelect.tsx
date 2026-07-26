@@ -167,8 +167,15 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       const waitingCount = (bay as any).waiting_res_count || 0;
       const waitingMin = (bay as any).waiting_res_total_min || 0;
       const bufferGapMin = waitingCount > 0 ? (waitingCount * 1) : 1; // 1분 정비 갭
+      
+      const holdSec = (bay as any).preoccupy_hold_sec || 0;
+      const holdMin = Math.ceil(holdSec / 60);
+      let prepareMin = (bay as any).prepare_min || (bay as any).prepare_time || 0;
+      if (((bay.status as string) === 'PREPARE' || (bay as any).status_cd === 'PREPARE') && prepareMin === 0) {
+        prepareMin = 1;
+      }
 
-      const totalWaitMin = Math.max(1, currentRemMin + extendMin + waitingMin + bufferGapMin);
+      const totalWaitMin = Math.max(1, currentRemMin + extendMin + waitingMin + bufferGapMin + holdMin + prepareMin);
 
       const now = new Date();
       const startDate = new Date(now.getTime() + totalWaitMin * 60 * 1000);

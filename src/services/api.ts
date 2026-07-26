@@ -21,6 +21,8 @@ export interface MemberAsset {
   item_name: string;
   rem_count: number;
   allowed_categories?: string[];
+  is_assignable?: boolean;
+  unassignable_reason?: string;
 }
 
 export interface KioskCompanionItem {
@@ -812,7 +814,7 @@ class HybridAPIClient {
     memberItemId?: number | string,
     paymentMethod: 'TICKET' | 'CARD' = 'TICKET',
     amount: number = 0
-  ): Promise<{ success: boolean; res_id?: string; message: string; hardware_success?: boolean }> {
+  ): Promise<{ success: boolean; res_id?: string; message: string; hardware_success?: boolean; start_time?: string; end_time?: string; is_chained?: boolean }> {
     const isConnected = await this.checkConnection();
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
@@ -860,7 +862,10 @@ class HybridAPIClient {
             success: true, 
             res_id: data.res_id, 
             message: data.message || '타석 배정이 완료되었습니다.',
-            hardware_success: data.hardware_success
+            hardware_success: data.hardware_success,
+            start_time: data.start_time,
+            end_time: data.end_time,
+            is_chained: data.is_chained
           };
         } else {
           const errData = await res.json().catch(() => ({ detail: `HTTP ${res.status} 오류가 발생했습니다.` }));

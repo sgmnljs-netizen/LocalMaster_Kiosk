@@ -186,8 +186,11 @@ export default function KioskApp() {
         if (data.type === 'middleware_offline') {
           console.warn('[WS-Kiosk] 미들웨어 오프라인 신호 수신');
         }
-        if (['bay_release', 'bay_update', 'bay_updated', 'checkin_complete', 'checkin_status'].includes(data.type as string)) {
+        if (['bay_release', 'bay_update', 'bay_updated', 'checkin_complete', 'checkin_status', 'settings_updated'].includes(data.type as string)) {
           loadBays();
+          if (data.type === 'settings_updated') {
+            fetchStoreInfo();
+          }
         }
       }
     );
@@ -1134,6 +1137,7 @@ export default function KioskApp() {
                     
                     // 2. 보유 자산 중 해당 구역을 허용하는 것만 필터링 (레슨권 등 빈 배열은 무조건 제외)
                     const validAssets = (authMember.assets || []).filter(asset => {
+                      if (asset.is_assignable === false) return false;
                       if (!asset.allowed_categories || asset.allowed_categories.length === 0) return false;
                       return asset.allowed_categories.map(c => c.toUpperCase()).includes(targetZoneCode);
                     });
