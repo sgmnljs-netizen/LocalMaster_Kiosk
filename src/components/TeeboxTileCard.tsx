@@ -8,6 +8,7 @@ interface TeeboxTileCardProps {
   onSelect: (bayNo: number) => void;
   lang?: 'KO' | 'EN';
   selectionIndex?: number | null;
+  isJustAllocated?: boolean;
 }
 
 export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
@@ -16,6 +17,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   onSelect,
   lang = 'KO',
   selectionIndex = null,
+  isJustAllocated = false,
 }) => {
   // 🧮 5대 시간 변수 누적 합산 정밀 계산 함수 (Master Total Availability Calculation)
   const calculateTotalFreeTime = () => {
@@ -148,10 +150,12 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         height: '170px',
         cursor: (isAvailable || isOccupied) ? 'pointer' : 'not-allowed',
         transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-        transform: isSelected ? 'scale(1.03) translateY(-4px)' : 'scale(1)',
+        transform: isJustAllocated ? 'scale(1.05) translateY(-4px)' : isSelected ? 'scale(1.03) translateY(-4px)' : 'scale(1)',
         
         // 애플 스타일 미니멀 패널
-        backgroundColor: isSelected
+        backgroundColor: isJustAllocated
+          ? 'linear-gradient(135deg, #064e3b 0%, #047857 100%)'
+          : isSelected
           ? '#047857'
           : isAvailable
           ? '#ffffff'
@@ -161,7 +165,9 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
           ? '#fafafa'
           : '#fef2f2',
         
-        border: isSelected
+        border: isJustAllocated
+          ? '3px solid #10b981'
+          : isSelected
           ? '2px solid #10b981'
           : isAvailable
           ? '1px solid rgba(229, 229, 234, 0.8)'
@@ -171,7 +177,9 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
           ? '1.5px dashed #a1a1aa'
           : '1px solid #fecdd3',
         
-        boxShadow: isSelected
+        boxShadow: isJustAllocated
+          ? '0 0 24px rgba(16, 185, 129, 0.6), 0 16px 36px rgba(4, 120, 87, 0.4)'
+          : isSelected
           ? '0 16px 36px rgba(4, 120, 87, 0.3), 0 2px 8px rgba(0, 0, 0, 0.08)'
           : isAvailable
           ? '0 4px 16px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 1)'
@@ -181,8 +189,29 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         WebkitTapHighlightColor: 'transparent',
       }}
     >
+      {/* ✨ 방금 배정 완료된 타석인 경우 내 타석 배지 표시 */}
+      {isJustAllocated && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '12px',
+            right: '12px',
+            background: '#10b981',
+            color: '#ffffff',
+            fontSize: '11px',
+            fontWeight: 900,
+            padding: '4px 10px',
+            borderRadius: '12px',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+            zIndex: 10
+          }}
+        >
+          ✨ 내 타석
+        </div>
+      )}
+
       {/* 동반자 다중 선택 순서 배지 */}
-      {selectionIndex && (
+      {selectionIndex && !isJustAllocated && (
         <div
           style={{
             position: 'absolute',
@@ -239,7 +268,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
                 letterSpacing: '-0.2px',
               }}
             >
-              {bay.simulator_type === 'GDR_PLUS' ? 'GDR+' : bay.simulator_type === 'QED' ? 'QED' : bay.simulator_type === 'SG_GOLF' ? 'SG' : bay.simulator_type}
+              {bay.simulator_type === 'GDR_PLUS' ? 'GDR+' : bay.simulator_type === 'QED' ? 'QED' : bay.simulator_type === 'SG_GOLF' ? 'SG' : bay.simulator_type === 'LM' ? 'LM' : bay.simulator_type === 'STR' ? 'STR' : bay.simulator_type === 'VIP' ? 'VIP' : bay.simulator_type}
             </span>
           )}
 

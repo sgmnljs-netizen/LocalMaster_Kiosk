@@ -8,6 +8,9 @@ interface TeeboxMapProps {
   memberName?: string;
   isMoveMode?: boolean; // 타석 이동 모드 여부
   lang?: 'KO' | 'EN';
+  justAllocatedBayNo?: number | null;
+  feedbackCountdown?: number | null;
+  onCancelCountdown?: () => void;
   onBaySelected: (bayNo: number) => void;
   onCancel: () => void;
   bays: Bay[];
@@ -19,6 +22,9 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   memberName,
   isMoveMode = false,
   lang = 'KO',
+  justAllocatedBayNo = null,
+  feedbackCountdown = null,
+  onCancelCountdown,
   onBaySelected,
   onCancel,
   bays,
@@ -149,6 +155,11 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   return (
     <div 
       className="glass-panel" 
+      onClickCapture={() => {
+        if (feedbackCountdown !== null && onCancelCountdown) {
+          onCancelCountdown();
+        }
+      }}
       style={{
         width: '1000px',
         margin: '15px auto',
@@ -339,6 +350,55 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             </div>
           )}
         </>
+      )}
+
+      {/* ⏱ 5초 배정 완료 확인 안내 피드백 바 */}
+      {feedbackCountdown !== undefined && feedbackCountdown !== null && (
+        <div style={{
+          width: '100%',
+          background: 'linear-gradient(135deg, #064e3b 0%, #022c22 100%)',
+          borderRadius: '16px',
+          padding: '16px 24px',
+          border: '2px solid #10b981',
+          boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          color: '#ffffff'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '20px' }}>✨</span>
+            <div>
+              <span style={{ fontSize: '18px', fontWeight: 900, color: '#ffffff', display: 'block' }}>
+                {lang === 'KO' ? `${justAllocatedBayNo}번 타석 배정이 성공적으로 완료되었습니다!` : `Bay ${justAllocatedBayNo} Allocation Confirmed!`}
+              </span>
+              <span style={{ fontSize: '13px', color: '#a7f3d0' }}>
+                {lang === 'KO' ? '타석 타일에서 이용 중 상태를 확인하세요.' : 'Check active status on the tile below.'}
+              </span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <span style={{ fontSize: '18px', fontWeight: 900, color: '#34d399' }}>
+              ⏱ {feedbackCountdown}초 후 메인으로
+            </span>
+            <button
+              onClick={onCancel}
+              style={{
+                padding: '8px 18px',
+                borderRadius: '12px',
+                background: '#ffffff',
+                color: '#064e3b',
+                border: 'none',
+                fontWeight: 900,
+                fontSize: '14px',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+              }}
+            >
+              {lang === 'KO' ? '지금 메인으로' : 'Go Home Now'}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* 에러 또는 주의 알림 */}
@@ -666,7 +726,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', justifyContent: 'center', marginTop: '2px' }}>
                         {simType && simType !== 'NONE' && (
                           <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe' }}>
-                            {simType === 'GDR_PLUS' ? 'GDR+' : simType === 'KAKAO_VX' ? 'VX' : simType === 'QED' ? 'QED' : simType === 'SDR' ? 'SDR' : simType}
+                            {simType === 'GDR_PLUS' ? 'GDR+' : simType === 'KAKAO_VX' ? 'VX' : simType === 'QED' ? 'QED' : simType === 'SDR' ? 'SDR' : simType === 'LM' ? 'LM' : simType === 'STR' ? 'STR' : simType === 'VIP' ? 'VIP' : simType}
                           </span>
                         )}
                         {handed && (handed === 'LEFT' || handed === 'BOTH') && (

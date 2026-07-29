@@ -8,6 +8,9 @@ interface PracticeSelectProps {
   bays: Bay[];
   lang: 'KO' | 'EN';
   initialSelectedBayNo?: number | null;
+  justAllocatedBayNo?: number | null;
+  feedbackCountdown?: number | null;
+  onCancelCountdown?: () => void;
   onBaySelected: (bayNo: number, purposeType: 'ALLOCATE_MEMBERSHIP' | 'ALLOCATE_DAILY') => void;
   onGroupBaySelected?: (bayNos: number[]) => void;
   onCancel: () => void;
@@ -18,6 +21,9 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   bays,
   lang,
   initialSelectedBayNo,
+  justAllocatedBayNo = null,
+  feedbackCountdown = null,
+  onCancelCountdown,
   onBaySelected,
   onGroupBaySelected,
   onCancel,
@@ -333,6 +339,11 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   return (
     <div 
+      onClickCapture={() => {
+        if (feedbackCountdown !== null && onCancelCountdown) {
+          onCancelCountdown();
+        }
+      }}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -540,6 +551,55 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           </div>
         </div>
 
+        {/* ⏱ 5초 배정 완료 확인 안내 피드백 바 */}
+        {feedbackCountdown !== undefined && feedbackCountdown !== null && (
+          <div style={{
+            width: '100%',
+            background: 'linear-gradient(135deg, #064e3b 0%, #022c22 100%)',
+            borderRadius: '16px',
+            padding: '16px 24px',
+            border: '2px solid #10b981',
+            boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            color: '#ffffff'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '20px' }}>✨</span>
+              <div>
+                <span style={{ fontSize: '18px', fontWeight: 900, color: '#ffffff', display: 'block' }}>
+                  {lang === 'KO' ? `${justAllocatedBayNo}번 타석 배정이 성공적으로 완료되었습니다!` : `Bay ${justAllocatedBayNo} Allocation Confirmed!`}
+                </span>
+                <span style={{ fontSize: '13px', color: '#a7f3d0' }}>
+                  {lang === 'KO' ? '타석 타일에서 이용 중 상태를 확인하세요.' : 'Check active status on the tile below.'}
+                </span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <span style={{ fontSize: '18px', fontWeight: 900, color: '#34d399' }}>
+                ⏱ {feedbackCountdown}초 후 메인으로 <span style={{ fontSize: '14px', fontWeight: 700, color: '#a7f3d0', marginLeft: '6px' }}>(화면 터치 시 화면 유지)</span>
+              </span>
+              <button
+                onClick={onCancel}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '12px',
+                  background: '#ffffff',
+                  color: '#064e3b',
+                  border: 'none',
+                  fontWeight: 900,
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                }}
+              >
+                {lang === 'KO' ? '지금 메인으로' : 'Go Home Now'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* 에러 피드백 메세지 */}
         {errorMsg && (
           <div style={{ background: '#fef2f2', border: '1px solid #fecdd3', padding: '12px 18px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -577,6 +637,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                   key={bay.bay_no}
                   bay={bay}
                   isSelected={isSelected}
+                  isJustAllocated={bay.bay_no === justAllocatedBayNo}
                   selectionIndex={allocMode === 'GROUP' ? selectedIdx : null}
                   lang={lang}
                   onSelect={(bayNo) => handleBayTouch(bayNo)}
@@ -632,41 +693,6 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                 {lang === 'KO' ? '배정받으실 빈 타석 타일을 클릭해 주세요.' : 'Please tap an available teebox tile.'}
               </span>
             )}
-          </div>
-
-          {/* Main Action Buttons */}
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <button 
-              className="kiosk-btn" 
-              style={{ width: '130px', height: '56px', borderRadius: '10px', fontSize: '16px', fontWeight: 800 }}
-              onClick={async () => {
-                await handleReleaseAll();
-                onCancel();
-              }}
-            >
-              {lang === 'KO' ? '돌아가기' : 'Back'}
-            </button>
-            
-            <button
-              onClick={handleConfirmClick}
-              disabled={selectedBayNo === null || preoccupyLoading}
-              className="kiosk-btn"
-              style={{ 
-                background: 'linear-gradient(135deg, #031510 0%, #022c22 100%)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(255,255,255,0.05)',
-                color: '#ffffff',
-                width: '180px', 
-                height: '56px', 
-                borderRadius: '10px', 
-                fontSize: '18px', 
-                fontWeight: 800 
-              }}
-            >
-              {preoccupyLoading 
-                ? (lang === 'KO' ? '선점 중...' : 'Securing...') 
-                : (lang === 'KO' ? '선택 완료' : 'Select Complete')}
-            </button>
           </div>
         </div>
       </div>

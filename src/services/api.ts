@@ -524,7 +524,7 @@ class HybridAPIClient {
   }
 
   // 가맹점 상호명 및 동적 체크인 정책 종합 정보 조회 (Local Fallback 포함)
-  async getStoreInfo(): Promise<{ store_nm: string; checkin_policy: string }> {
+  async getStoreInfo(): Promise<{ store_nm: string; checkin_policy: string; address: string; tel: string }> {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
@@ -534,7 +534,9 @@ class HybridAPIClient {
           localStorage.setItem('LM_STORE_INFO', JSON.stringify(data));
           return {
             store_nm: data.store_nm || 'SGM Golf Academy',
-            checkin_policy: data.checkin_policy || 'CHECKIN_REQUIRED'
+            checkin_policy: data.checkin_policy || 'CHECKIN_REQUIRED',
+            address: data.address || '서울특별시 광진구 워커힐로 177',
+            tel: data.tel || '02-450-4500'
           };
         }
       } catch (err) {
@@ -545,7 +547,9 @@ class HybridAPIClient {
     const cached = JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}');
     return {
       store_nm: cached.store_nm || 'SGM Golf Academy',
-      checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED'
+      checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED',
+      address: cached.address || '서울특별시 광진구 워커힐로 177',
+      tel: cached.tel || '02-450-4500'
     };
   }
 
@@ -1426,6 +1430,41 @@ class HybridAPIClient {
     }
 
     return { success: false, message: '이미 예약되었거나 선택할 수 없는 시간대입니다.' };
+  }
+
+  // 결제 승인 후 웹훅 (결제 완료 통보 및 예약 확정 처리)
+  async confirmKioskPaymentWebhook(resId: string, amount: number, paymentMethod: string): Promise<boolean> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/payment-webhook`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-store-cd': STORE_CODE
+          },
+          body: JSON.stringify({
+            status: 'success',
+            payment_method: paymentMethod,
+            amount: amount,
+            res_id: resId
+          })
+        });
+        return res.ok;
+      } catch (err) {
+        console.warn('Backend payment webhook failed:', err);
+      }
+    }
+    // Offline / Fallback
+    const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+    const idx = holds.findIndex(r => r.res_id === resId);
+    if (idx !== -1) {
+      holds[idx].status_cd = 'RSV';
+      localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(holds));
+      await this.writeKioskLog('PAYMENT_OFFLINE', `오프라인 파3 결제 모의 승인 (${resId}, ₩${amount})`, undefined);
+      return true;
+    }
+    return false;
   }
 
   // 17. 결제용 대기 상태(HOLD) 예약 생성 API

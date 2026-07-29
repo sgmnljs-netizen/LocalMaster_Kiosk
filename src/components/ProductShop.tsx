@@ -116,31 +116,48 @@ export const ProductShop: React.FC<ProductShopProps> = ({
 
   return (
     <div 
-      className="glass-panel" 
       style={{
-        width: '1000px',
-        margin: '15px auto',
-        padding: '40px',
+        width: '100%',
+        maxWidth: '1000px',
+        margin: '0 auto',
+        padding: '40px 48px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '30px',
-        border: '1px solid rgba(255,255,255,0.1)'
+        gap: '28px',
+        background: 'rgba(255, 255, 255, 0.94)',
+        backdropFilter: 'blur(30px)',
+        WebkitBackdropFilter: 'blur(30px)',
+        borderRadius: '32px',
+        border: '1px solid rgba(255, 255, 255, 0.6)',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05)',
+        fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
       }}
     >
       {/* 상품 매대 헤더 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <ShoppingBag size={34} style={{ color: 'var(--neon-indigo)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{
+            background: '#0071e3',
+            borderRadius: '50%',
+            width: '52px',
+            height: '52px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(0, 113, 227, 0.3)'
+          }}>
+            <ShoppingBag size={26} color="#ffffff" strokeWidth={2.5} />
+          </div>
           <div>
-            <h2 style={{ fontSize: '30px', fontWeight: 900 }}>
+            <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.5px' }}>
               {purposeType === 'ALLOCATE_DAILY' ? '일일 타석권 선택 및 결제' : '회원권 및 일일타석권 구매'}
             </h2>
             {memberName ? (
-              <p style={{ fontSize: '15px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                회원번호: <strong style={{ color: '#fff' }}>{memberNo} ({memberName})</strong> 님 전용 구매
+              <p style={{ fontSize: '15px', color: '#86868b', marginTop: '4px', margin: 0 }}>
+                회원번호: <strong style={{ color: '#1d1d1f' }}>{memberNo} ({memberName})</strong> 님 전용 구매
               </p>
             ) : (
-              <p style={{ fontSize: '15px', color: 'var(--neon-amber)', fontWeight: 700, marginTop: '2px' }}>
+              <p style={{ fontSize: '15px', color: '#d97706', fontWeight: 700, marginTop: '4px', margin: 0 }}>
                 {purposeType === 'ALLOCATE_DAILY' 
                   ? '※ 원하시는 이용 시간(N분)을 선택하여 결제를 진행해 주세요.'
                   : '※ 비회원 신규 구매 시 타석 자동 연동 배정'}
@@ -152,18 +169,22 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         <button 
           onClick={onCancel}
           style={{
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid var(--glass-border)',
-            color: 'var(--text-secondary)',
-            padding: '10px 20px',
-            borderRadius: '10px',
+            background: '#f5f5f7',
+            border: '1px solid #e5e5ea',
+            color: '#1d1d1f',
+            padding: '12px 24px',
+            borderRadius: '16px',
             cursor: 'pointer',
             fontSize: '16px',
-            fontWeight: 700,
+            fontWeight: 800,
             display: 'flex',
             alignItems: 'center',
-            gap: '6px'
+            gap: '8px',
+            boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+            transition: 'all 0.2s ease'
           }}
+          onMouseOver={(e) => e.currentTarget.style.background = '#e8e8ed'}
+          onMouseOut={(e) => e.currentTarget.style.background = '#f5f5f7'}
         >
           <X size={18} />
           돌아가기
@@ -381,16 +402,16 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       {/* 하단 구매 안내 문구 */}
       <div 
         style={{
-          background: 'rgba(255, 255, 255, 0.02)',
-          border: '1px solid rgba(255, 255, 255, 0.05)',
-          borderRadius: '16px',
+          background: 'rgba(0, 113, 227, 0.04)',
+          border: '1px solid rgba(0, 113, 227, 0.12)',
+          borderRadius: '20px',
           padding: '20px 24px',
           fontSize: '14px',
-          color: 'var(--text-secondary)',
+          color: '#515154',
           lineHeight: '1.6'
         }}
       >
-        <strong style={{ color: 'var(--neon-indigo)', display: 'block', marginBottom: '6px' }}>[무인 키오스크 구매 안내]</strong>
+        <strong style={{ color: '#0071e3', display: 'block', marginBottom: '6px', fontSize: '15px', fontWeight: 800 }}>[무인 키오스크 구매 안내]</strong>
         • 일일 타석권은 결제 즉시 타석 선택창으로 전환되며, 10분 내로 타석에 입장하여 주셔야 이용이 개시됩니다.<br />
         • 모든 결제는 신용카드만 가능하며, 현금 결제나 환불은 파트너센터 및 주간 관리 데스크로 문의해 주세요.
       </div>

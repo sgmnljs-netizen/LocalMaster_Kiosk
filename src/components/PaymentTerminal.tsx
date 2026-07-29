@@ -87,59 +87,65 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
 
   return (
     <div 
-      className="glass-panel" 
       style={{
-        width: '800px',
-        margin: '30px auto',
-        padding: '50px',
+        width: '100%',
+        maxWidth: '720px',
+        margin: '0 auto',
+        padding: '40px 48px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '40px',
-        border: '1px solid rgba(255,255,255,0.1)'
+        gap: '32px',
+        background: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(30px)',
+        WebkitBackdropFilter: 'blur(30px)',
+        borderRadius: '32px',
+        border: '1px solid rgba(255, 255, 255, 0.6)',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05)',
+        fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
       }}
     >
       {/* 1단계: 카드 삽입 대기 */}
       {payStep === 'INSERT_CARD' && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '30px', width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '28px', width: '100%' }}>
           {errorMsg && (
             <div 
-              className="neon-border-red"
               style={{ 
-                background: 'rgba(239, 68, 68, 0.08)', 
+                background: '#fff0f0', 
+                border: '1px solid #ffc2c2',
                 padding: '16px', 
-                borderRadius: '12px', 
+                borderRadius: '16px', 
                 textAlign: 'center',
-                color: '#fca5a5',
-                fontSize: '18px',
+                color: '#ff3b30',
+                fontSize: '16px',
                 fontWeight: 700,
-                width: '480px'
+                width: '100%'
               }}
             >
               {errorMsg}
             </div>
           )}
           <div style={{ textAlign: 'center' }}>
-            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginBottom: '10px' }}>신용카드 결제 진행</h2>
-            <p style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>IC 카드를 아래의 단말기 투입구에 깊숙이 꽂아 주세요.</p>
+            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', marginBottom: '8px', letterSpacing: '-0.5px' }}>신용카드 결제 진행</h2>
+            <p style={{ fontSize: '17px', color: '#86868b', margin: 0, fontWeight: 500 }}>IC 카드를 아래의 단말기 투입구에 깊숙이 꽂아 주세요.</p>
           </div>
 
           {/* 결제 요약 금액 명세서 */}
-          <div className="glass-panel" style={{ width: '480px', padding: '24px', background: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>구매 상품</span>
-              <strong style={{ color: '#fff' }}>{productName}</strong>
+          <div style={{ width: '100%', padding: '24px 28px', background: '#f5f5f7', borderRadius: '20px', border: '1px solid #e5e5ea', display: 'flex', flexDirection: 'column', gap: '14px', boxSizing: 'border-box' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '17px' }}>
+              <span style={{ color: '#86868b', fontWeight: 600 }}>구매 상품</span>
+              <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>{productName}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', borderTop: '1px solid var(--bg-tertiary)', paddingTop: '12px' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>결제 금액</span>
-              <strong style={{ color: 'var(--neon-green)', fontSize: '26px' }}>{amount.toLocaleString()} 원</strong>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '17px', borderTop: '1px solid #e5e5ea', paddingTop: '14px' }}>
+              <span style={{ color: '#86868b', fontWeight: 600 }}>결제 금액</span>
+              <strong style={{ color: '#0071e3', fontSize: '26px', fontWeight: 900, letterSpacing: '-0.5px' }}>{amount.toLocaleString()} 원</strong>
             </div>
           </div>
 
           {/* 단말기 투입구 모사 애니메이션 */}
-          <div className="card-terminal-wrap" style={{ width: '480px', gap: '20px' }}>
+          <div className="card-terminal-wrap" style={{ width: '100%', background: '#1d1d1f', padding: '28px 20px', borderRadius: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', boxSizing: 'border-box', boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.3)' }}>
             {/* 단말기 투입구 */}
-            <div style={{ width: '220px', height: '20px', background: '#000', borderRadius: '4px', border: '1px solid var(--glass-border)', boxShadow: '0 0 10px rgba(0,0,0,1)' }} />
+            <div style={{ width: '220px', height: '20px', background: '#000000', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 0 10px rgba(0,0,0,0.8)' }} />
             
             {/* 카드 투입 모션 */}
             <div className="animate-card-slide" style={{ position: 'relative' }}>
@@ -147,7 +153,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 style={{
                   width: '140px',
                   height: '220px',
-                  borderRadius: '12px',
+                  borderRadius: '14px',
                   background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)',
                   border: '1.5px solid rgba(99, 102, 241, 0.4)',
                   padding: '16px',
@@ -162,14 +168,47 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               </div>
             </div>
 
-            <span className="animate-blink" style={{ fontSize: '16px', color: 'var(--neon-indigo)', fontWeight: 700, marginTop: '10px' }}>
+            <span className="animate-blink" style={{ fontSize: '15px', color: '#60a5fa', fontWeight: 700, marginTop: '4px' }}>
               카드 자동 삽입을 대기하고 있습니다...
             </span>
           </div>
 
-          <div style={{ display: 'flex', gap: '20px', width: '480px' }}>
-            <button className="kiosk-btn" style={{ flex: 1, height: '60px' }} onClick={onCancel}>결제 취소</button>
-            <button className="kiosk-btn kiosk-btn-primary" style={{ flex: 1, height: '60px' }} onClick={triggerSimulation}>즉시 결제 테스트</button>
+          <div style={{ display: 'flex', gap: '16px', width: '100%' }}>
+            <button 
+              onClick={onCancel}
+              style={{
+                flex: 1,
+                height: '60px',
+                borderRadius: '16px',
+                background: '#f5f5f7',
+                border: '1px solid #e5e5ea',
+                color: '#1d1d1f',
+                fontSize: '18px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              결제 취소
+            </button>
+            <button 
+              onClick={triggerSimulation}
+              style={{
+                flex: 1,
+                height: '60px',
+                borderRadius: '16px',
+                background: '#0071e3',
+                border: 'none',
+                color: '#ffffff',
+                fontSize: '18px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(0, 113, 227, 0.3)',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              즉시 결제 테스트
+            </button>
           </div>
         </div>
       )}
@@ -181,15 +220,15 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             style={{
               width: '120px',
               height: '120px',
-              border: '6px solid var(--bg-tertiary)',
-              borderTopColor: 'var(--neon-indigo)',
+              border: '6px solid #e5e5ea',
+              borderTopColor: '#0071e3',
               borderRadius: '50%',
               animation: 'spin 1s linear infinite'
             }}
           />
           <div style={{ textAlign: 'center' }}>
-            <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#fff', marginBottom: '8px' }}>신용카드 결제 승인 중</h2>
-            <p style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>
+            <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', marginBottom: '8px' }}>신용카드 결제 승인 중</h2>
+            <p style={{ fontSize: '18px', color: '#86868b' }}>
               금융사 네트워크 승인을 요청하고 있습니다. 카드를 빼지 마세요.
             </p>
           </div>
@@ -198,12 +237,12 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
 
       {/* 3단계: 영수증 출력 완료 */}
       {payStep === 'PRINT_RECEIPT' && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '30px', width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '28px', width: '100%' }}>
           <div style={{ textAlign: 'center' }}>
-            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff' }}>
+            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.5px' }}>
               {amount > 0 ? '결제 완료 & 영수증 발행' : '타석 배정 완료 & 배정표 발행'}
             </h2>
-            <p style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>
+            <p style={{ fontSize: '17px', color: '#86868b', marginTop: '6px', margin: '6px 0 0 0', fontWeight: 500 }}>
               {amount > 0 
                 ? '아래 출구에서 영수증을 반드시 챙겨서 이용해 주시기 바랍니다.'
                 : '아래 출구에서 타석 배정표를 반드시 챙겨서 입장해 주시기 바랍니다.'}
@@ -211,7 +250,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           </div>
 
           {/* 지지직 인쇄되는 영수증 또는 배정표 종이 */}
-          <div className="receipt-paper">
+          <div className="receipt-paper" style={{ boxShadow: '0 15px 35px rgba(0, 0, 0, 0.12)' }}>
             {amount > 0 ? (
               // 일일이용권 결제 영수증
               <>
@@ -316,7 +355,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                     <strong style={{ fontSize: '32px', color: '#000', fontWeight: 900 }}>
                       {assignedBayNo}번 타석
                     </strong>
-                    <span style={{ fontSize: '13px', color: 'var(--neon-green)', fontWeight: 800, background: '#e6f4ea', padding: '2px 8px', borderRadius: '12px', alignSelf: 'center', marginTop: '4px' }}>
+                    <span style={{ fontSize: '13px', color: '#059669', fontWeight: 800, background: '#e6f4ea', padding: '2px 8px', borderRadius: '12px', alignSelf: 'center', marginTop: '4px' }}>
                       즉시 입실 (60분 이용)
                     </span>
                   </div>
@@ -380,11 +419,26 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           </div>
 
           <button 
-            className="kiosk-btn kiosk-btn-success" 
-            style={{ width: '380px', height: '64px', borderRadius: '12px', fontSize: '20px', fontWeight: 800, display: 'flex', gap: '8px' }}
             onClick={onPaymentSuccess}
+            style={{
+              width: '100%',
+              height: '60px',
+              borderRadius: '16px',
+              background: '#34c759',
+              border: 'none',
+              color: '#ffffff',
+              fontSize: '20px',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              boxShadow: '0 4px 14px rgba(52, 199, 89, 0.3)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
           >
-            <Sparkles size={20} />
+            <Sparkles size={22} />
             이용 완료 (메인으로)
           </button>
         </div>

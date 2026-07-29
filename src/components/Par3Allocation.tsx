@@ -33,6 +33,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   const [course, setCourse] = useState<string>(''); // zone_code 매핑
   const [slots, setSlots] = useState<Par3Slot[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<Par3Slot | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string } | null>(null);
 
   // 배정 인원 동적 목록 (최대 4인)
   const [players, setPlayers] = useState<PlayerSlot[]>([]);
@@ -56,34 +58,44 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   // 스크롤 컨테이너 참조용 Ref
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // 0. 활성화된 구역(Zone) 목록 로드
+  // 0. 활성화된 구역(Zone) 목록 및 상품, 상점 정보 로드
   const [categoryUuid, setCategoryUuid] = useState<string>(''); // 실제 백엔드 카테고리 UUID 저장
 
   useEffect(() => {
-    const fetchZones = async () => {
+    const initData = async () => {
       try {
-        // 1. 백엔드에서 PAR3 카테고리 UUID 조회
-        const kioskZones = await api.getKioskZones();
-        const par3Zone = kioskZones.find(z => z.zone_name.includes('PAR3') || z.zone_code === 'PAR3') || kioskZones[0];
-        const uuid = par3Zone ? par3Zone.zone_code : '';
-        setCategoryUuid(uuid);
-
-        // 2. 화면에 표시할 5개 파3 코스 명시 선언
-        const mappedZones = [
-          { zone_code: 'PAR3-1', zone_name: 'PAR3-1' },
-          { zone_code: 'PAR3-2', zone_name: 'PAR3-2' },
-          { zone_code: 'PAR3-3', zone_name: 'PAR3-3' },
-          { zone_code: 'PAR3-4', zone_name: 'PAR3-4' },
-          { zone_code: 'PAR3-5', zone_name: 'PAR3-5' },
-        ];
+        const [kioskZones, kioskProducts, info] = await Promise.all([
+          api.getKioskZones(),
+          api.getProducts(),
+          api.getStoreInfo()
+        ]);
         
-        setZones(mappedZones);
-        setCourse(mappedZones[0].zone_code); // 첫 번째 파3 코스 기본 선택
+        setProducts(kioskProducts);
+        setStoreInfo(info);
+
+        // 1. 파3 전용 코스 구역 필터링
+        const par3Zones = kioskZones.filter(z => 
+          z.zone_name.includes('Par3') || 
+          z.zone_name.includes('PAR3') || 
+          z.zone_code.includes('PAR3') ||
+          z.zone_code === 'EAST' || 
+          z.zone_code === 'WEST' || 
+          z.zone_code === 'COMPLEX'
+        );
+        const displayZones = par3Zones.length > 0 ? par3Zones : kioskZones;
+        
+        const mainCategory = kioskZones.find(z => z.zone_code === 'PAR3') || displayZones[0];
+        setCategoryUuid(mainCategory ? mainCategory.zone_code : '');
+        
+        setZones(displayZones);
+        if (displayZones.length > 0) {
+          setCourse(displayZones[0].zone_code);
+        }
       } catch {
-        setErrorMsg('코스 구역 정보를 불러오는 데 실패했습니다.');
+        setErrorMsg('초기 설정 정보를 불러오는 데 실패했습니다.');
       }
     };
-    fetchZones();
+    initData();
   }, []);
 
   const getTodayStr = () => {
@@ -284,6 +296,29 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
   // 인당 코스 일반 요금 산출
   const getCoursePriceLabel = () => {
+    const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
+    
+    // 파3 전체 상품 필터링
+    const par3Products = products.filter(p => 
+      p.prod_nm.includes('Par3') || p.prod_nm.includes('파3') || p.prod_nm.includes('PAR3')
+    );
+
+    // 1순위: 선택한 코스명/코드가 명시적으로 포함된 상품 검색
+    const matchedCourseProducts = par3Products.filter(p => 
+      p.prod_nm.includes(selectedZoneName) || p.prod_nm.includes(course)
+    );
+
+    if (matchedCourseProducts.length > 0) {
+      // 중복 상품 존재 시 최근 등록된 상품 (배열의 마지막 항목) 선택 방어막 적용
+      return matchedCourseProducts[matchedCourseProducts.length - 1].standard_price;
+    }
+
+    // 2순위: 특정 코스명이 없는 일반 파3 등록 상품이 있는 경우
+    if (par3Products.length > 0) {
+      return par3Products[par3Products.length - 1].standard_price;
+    }
+
+    // 3순위: 백엔드 상품 미등록 시 폴백 로직
     const isComplex = course.toLowerCase().includes('complex') || (selectedSlot?.course_nm || '').includes('복합') || (selectedSlot?.course_nm || '').includes('18');
     return isComplex ? 45000 : 25000;
   };
@@ -396,30 +431,18 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
   const executeConfirmWebhook = async (resId: string, amount: number) => {
     try {
-      const webhookRes = await fetch(`/api/v1/kiosk/payment-webhook?store_cd=${STORE_CODE}`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-store-cd': STORE_CODE
-        },
-        body: JSON.stringify({
-          status: 'success',
-          payment_method: amount === 0 ? 'TICKET' : 'OFFLINE_CARD',
-          amount: amount,
-          res_id: resId
-        })
-      });
+      const isSuccess = await api.confirmKioskPaymentWebhook(resId, amount, amount === 0 ? 'TICKET' : 'OFFLINE_CARD');
 
-      if (webhookRes.ok) {
+      if (isSuccess) {
         const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
         const formattedDate = new Date().toLocaleString('ko-KR', { hour12: false });
         const mockApprNo = amount === 0 ? 'MEMBERSHIP_TICKET' : `APPR_${Math.floor(10000000 + Math.random() * 90000000)}`;
 
-        // 영수증 DTO 주입
+        // 영수증 DTO 주입 (api.getStoreInfo 동적 데이터 사용)
         setCreatedReceipt({
-          branchNm: 'JNGK 워커힐점 Golf Academy',
-          address: '서울특별시 광진구 워커힐로 177',
-          tel: '02-450-4500',
+          branchNm: storeInfo?.store_nm || 'SGM Golf Academy',
+          address: storeInfo?.address || '서울특별시 광진구 워커힐로 177',
+          tel: storeInfo?.tel || '02-450-4500',
           tradeDate: formattedDate,
           apprNo: mockApprNo,
           prodNm: `Par3 ${selectedZoneName} 코스 [${selectedSlot?.time}]`,
