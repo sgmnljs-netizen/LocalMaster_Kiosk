@@ -116,7 +116,7 @@ export default function KioskApp() {
 
   const handleZoomOut = () => {
     setZoomScale(prev => {
-      const next = Math.max(0.6, Math.round((prev - 0.05) * 100) / 100);
+      const next = Math.max(0.4, Math.round((prev - 0.05) * 100) / 100);
       localStorage.setItem('kiosk_zoom_scale', String(next));
       return next;
     });
@@ -388,9 +388,9 @@ export default function KioskApp() {
   // 직전 화면 단계로 복귀 핸들러
   const handleGoBack = () => {
     if (step === 'PRACTICE_SELECT' || step === 'PAR3_ALLOCATION' || step === 'PRODUCT_SHOP' || step === 'LOCKER_EXTEND' || step === 'TEEBOX_MAP' || step === 'CHECKIN_SELECT') {
-      setStep('MAIN_DASHBOARD');
+      handleGoHome();
     } else if (step === 'MEMBER_AUTH') {
-      setStep('MAIN_DASHBOARD');
+      handleGoHome();
     } else if (step === 'ASSET_SELECT') {
       setStep('PRACTICE_SELECT');
     } else if (step === 'PAYMENT') {
@@ -400,7 +400,7 @@ export default function KioskApp() {
         setStep('PRACTICE_SELECT');
       }
     } else {
-      setStep('MAIN_DASHBOARD');
+      handleGoHome();
     }
   };
 
@@ -436,6 +436,7 @@ export default function KioskApp() {
             : 'Your membership pass has expired or you do not have any valid teebox tickets.',
           traceId: trace
         });
+        setAuthMember(null); // [Security Patch] 에러 발생 시 강제 세션 파기
         setStep('MAIN_DASHBOARD');
       } else {
         if (selectedBayNos.length > 0) {

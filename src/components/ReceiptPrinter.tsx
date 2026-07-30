@@ -41,10 +41,7 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
     <div 
       style={{
         position: 'fixed',
-        top: 0,
-        left: 0,
-        width: '1080px', // 키오스크 영역 가로 락킹
-        height: '100vh',
+        inset: 0,
         background: 'rgba(0, 0, 0, 0.7)',
         backdropFilter: 'blur(10px)',
         zIndex: 999999,

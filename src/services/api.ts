@@ -102,7 +102,8 @@ export interface Product {
   prod_cd: string;
   prod_nm: string;
   standard_price: number;
-  logic_type: 'MEMBERSHIP' | 'LESSON' | 'RETAIL' | 'FACILITY' | 'RENTAL';
+  sale_price?: number;
+  logic_type: 'MEMBERSHIP' | 'LESSON' | 'RETAIL' | 'FACILITY' | 'RENTAL' | string;
   duration_min?: number;
   days?: number;
   res_id?: string;
@@ -1305,13 +1306,24 @@ class HybridAPIClient {
       try {
         const res = await fetch(`${BASE_URL}/v1/kiosk/zones?store_cd=${STORE_CODE}`);
         if (res.ok) {
-          return await res.json() as KioskZone[];
+          const zones = await res.json() as KioskZone[];
+          if (zones && zones.length > 0) {
+            localStorage.setItem('LM_KIOSK_ZONES', JSON.stringify(zones));
+            return zones;
+          }
         }
       } catch (err) {
         console.error('Backend getKioskZones failed. Falling back to default:', err);
       }
     }
-    // 오프라인 폴백: 기본 EAST/WEST 구역 리턴
+    // 오프라인 폴백: 캐시 또는 기본 EAST/WEST 구역 리턴
+    const cached = localStorage.getItem('LM_KIOSK_ZONES');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as KioskZone[];
+        if (parsed && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
     return [
       { zone_code: 'EAST', zone_name: '동코스 Par3 (9홀)' },
       { zone_code: 'WEST', zone_name: '서코스 Par3 (9홀)' },

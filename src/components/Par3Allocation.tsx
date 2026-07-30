@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Calendar, User, Users, Clock, ArrowLeft, CreditCard, Check, HelpCircle, CreditCard as CardIcon, Loader2, RefreshCw, X, Plus, Ticket } from 'lucide-react';
+import { Calendar, User, Users, Clock, ArrowLeft, CreditCard, Check, HelpCircle, CreditCard as CardIcon, Loader2, RefreshCw, X, Plus, Ticket, UserCheck, UserPlus } from 'lucide-react';
 import { api, Par3Slot, Product, KioskZone, Member, MemberAsset, KioskCompanionItem, STORE_CODE } from '../services/api';
 import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
+import { MemberAuth } from './MemberAuth';
 
 interface Par3AllocationProps {
   memberNo?: string;
@@ -11,7 +12,7 @@ interface Par3AllocationProps {
 }
 
 type PaymentState = 'IDLE' | 'INSERT_WAIT' | 'READING' | 'DISPATCHING' | 'DONE';
-type ModalState = 'NONE' | 'ADD_MEMBER_PHONE' | 'ADD_GUEST_PHONE' | 'TICKET_SELECT';
+type ModalState = 'NONE' | 'MEMBER_AUTH_MODAL' | 'ADD_MEMBER_PHONE' | 'ADD_GUEST_PHONE' | 'TICKET_SELECT';
 
 interface PlayerSlot {
   id: string; // unique key
@@ -260,6 +261,28 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }
   };
 
+  // 4-3. 3종 통합 회원 인증(MemberAuth) 성공 처리 핸들러
+  const handleMemberAuthSuccess = useCallback((member: Member) => {
+    const memberHp = member.hp || '';
+    if (players.some(p => (memberHp && p.hp_no === memberHp) || (p.member_no && p.member_no === member.member_no))) {
+      setErrorMsg('이미 배정 목록에 등록된 회원입니다.');
+      setModalState('NONE');
+      return;
+    }
+
+    const isLeaderSlot = players.length === 0;
+
+    if (member.assets && member.assets.length > 0) {
+      // 사용 가능한 이용권이 있는 경우 ➔ 이용권 선택 팝업 오픈
+      setSelectedMemberForTicket({ member, isLeader: isLeaderSlot });
+      setModalState('TICKET_SELECT');
+    } else {
+      // 이용권이 없으면 ➔ 바로 추가
+      addMemberSlot(member, isLeaderSlot);
+      setModalState('NONE');
+    }
+  }, [players]);
+
   const addMemberSlot = (member: Member, isLeader: boolean, ticket?: MemberAsset) => {
     const slotId = isLeader ? 'LEADER' : `PLAYER_${Date.now()}`;
     const displayName = member.member_name;
@@ -303,24 +326,28 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       p.prod_nm.includes('Par3') || p.prod_nm.includes('파3') || p.prod_nm.includes('PAR3')
     );
 
+    const getValidPrice = (p: Product) => {
+      const price = (p.sale_price && p.sale_price > 0) ? p.sale_price : (p.standard_price || 0);
+      return price > 0 ? price : 30000;
+    };
+
     // 1순위: 선택한 코스명/코드가 명시적으로 포함된 상품 검색
     const matchedCourseProducts = par3Products.filter(p => 
       p.prod_nm.includes(selectedZoneName) || p.prod_nm.includes(course)
     );
 
     if (matchedCourseProducts.length > 0) {
-      // 중복 상품 존재 시 최근 등록된 상품 (배열의 마지막 항목) 선택 방어막 적용
-      return matchedCourseProducts[matchedCourseProducts.length - 1].standard_price;
+      return getValidPrice(matchedCourseProducts[matchedCourseProducts.length - 1]);
     }
 
     // 2순위: 특정 코스명이 없는 일반 파3 등록 상품이 있는 경우
     if (par3Products.length > 0) {
-      return par3Products[par3Products.length - 1].standard_price;
+      return getValidPrice(par3Products[par3Products.length - 1]);
     }
 
     // 3순위: 백엔드 상품 미등록 시 폴백 로직
     const isComplex = course.toLowerCase().includes('complex') || (selectedSlot?.course_nm || '').includes('복합') || (selectedSlot?.course_nm || '').includes('18');
-    return isComplex ? 45000 : 25000;
+    return isComplex ? 45000 : 30000;
   };
 
   // 최종 결제 금액 연산 (이용권 사용자는 요금 ₩0)
@@ -494,13 +521,14 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       data-layout="fixed"
       style={{
         width: '100%',
-        height: '100vh', 
+        flex: 1,
+        minHeight: 0,
         maxHeight: '1920px', 
         boxSizing: 'border-box',
-        padding: '40px 48px 120px 48px',
+        padding: '30px 48px 140px 48px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '24px',
+        gap: '20px',
         background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
         color: '#1d1d1f',
         overflow: 'hidden', 
@@ -571,7 +599,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           display: 'grid', 
           gridTemplateColumns: '1.2fr 1fr', 
           gap: '30px', 
-          height: 'calc(100% - 380px)', 
+          flex: 1, 
           minHeight: '0',
           overflow: 'hidden',
           flexShrink: 1
@@ -579,12 +607,16 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       >
         {/* 좌측 Column: 1. 예약 시간대 선택 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', minHeight: '0' }}>
-          <span style={{ fontSize: '18px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '0.5px' }}>1. 예약 시간대 선택</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '18px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '0.5px' }}>1. 예약 시간대 선택</span>
+            <span style={{ fontSize: '13px', color: '#86868b', fontWeight: 700 }}>※ 이동 준비시간(10분) 이내 마감</span>
+          </div>
           <div 
             ref={scrollContainerRef}
             className="kiosk-ultra-scrollbar"
             style={{ 
-              height: 'calc(100% - 40px)', 
+              flex: 1, 
+              minHeight: '0',
               overflowY: 'auto', 
               border: '1.5px solid #e5e5ea', 
               borderRadius: '24px', 
@@ -593,13 +625,18 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               display: 'grid',
               gridTemplateColumns: 'repeat(2, 1fr)',
               gap: '12px',
-              alignContent: 'start',
-              minHeight: '0'
+              alignContent: 'start'
             }}
           >
             {(() => {
               const now = new Date();
               const curHourMin = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+              
+              // 준비시간 Cutoff (10분 이내) 계산 (프론트 2중 방어)
+              const cutoffNow = new Date(now.getTime() + 10 * 60 * 1000);
+              const cutoffHourMin = `${String(cutoffNow.getHours()).padStart(2, '0')}${String(cutoffNow.getMinutes()).padStart(2, '0')}`;
+
+              // 현재시각 이전 과거 시각만 필터링하고, 준비시간(10분 이내) 슬롯은 목록에 표시하되 마감 처리
               const displayedSlots = slots.filter(s => {
                 const slotTimeClean = s.time.replace(':', '');
                 return slotTimeClean >= curHourMin;
@@ -615,7 +652,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
               return displayedSlots.map(s => {
                 const isSelected = selectedSlot?.slot_id === s.slot_id;
-                const isReserved = s.status !== 'AVAILABLE';
+                const slotTimeClean = s.time.replace(':', '');
+                const isImminentClosed = slotTimeClean < cutoffHourMin;
+                const isReserved = s.status !== 'AVAILABLE' || isImminentClosed;
                 
                 const btnBg = isSelected 
                   ? '#2e7559' 
@@ -724,11 +763,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               className="kiosk-ultra-scrollbar"
             >
               {players.length === 0 ? (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '40px 0' }}>
-                  <HelpCircle size={28} style={{ color: '#86868b' }} />
-                  <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 700 }}>배정 목록이 비어 있습니다.</span>
-                  <p style={{ fontSize: '13px', color: '#aeaeb2', margin: 0, textAlign: 'center', lineHeight: 1.4 }}>
-                    하단의 회원/비회원 추가 단추를 눌러<br />대표자 및 동반자를 추가해 주십시오.
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '30px 0' }}>
+                  <HelpCircle size={28} style={{ color: '#2e7559' }} />
+                  <span style={{ fontSize: '15px', color: '#1d1d1f', fontWeight: 800 }}>배정 목록이 비어 있습니다.</span>
+                  <p style={{ fontSize: '13px', color: '#86868b', margin: 0, textAlign: 'center', lineHeight: 1.4, fontWeight: 600 }}>
+                    하단의 단추를 누르면 대표자 및 동반자가 추가됩니다.
                   </p>
                 </div>
               ) : (
@@ -802,55 +841,89 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               )}
             </div>
 
-            {/* 인원 추가 버튼 (4명 미만일 때만 활성화) */}
+            {/* 인원 추가 버튼 (4명 미만일 때만 활성화 - 럭셔리 입체 센터링 CTA 디자인) */}
             {players.length < 4 && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', flexShrink: 0 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', flexShrink: 0 }}>
+                {/* 1. 대표/동반 회원 인증 CTA (Primary) */}
                 <button
+                  className={`kiosk-shimmer-button ${selectedSlot !== null && players.length === 0 ? 'kiosk-attention-bounce breathing-glow' : ''}`}
                   onClick={() => {
-                    setModalState(players.length === 0 ? 'ADD_MEMBER_PHONE' : 'ADD_MEMBER_PHONE');
+                    setModalState('MEMBER_AUTH_MODAL');
                     setModalPhone('');
                   }}
+                  onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
+                  onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; }}
+                  onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
+                  onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; }}
                   style={{
-                    height: '56px',
-                    borderRadius: '12px',
-                    border: '1.5px solid #2e7559',
-                    background: '#ffffff',
-                    color: '#2e7559',
-                    fontSize: '16px',
-                    fontWeight: 800,
+                    height: '76px',
+                    borderRadius: '16px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #2e7559 0%, #1d523e 100%)',
+                    color: '#ffffff',
                     cursor: 'pointer',
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '6px'
+                    gap: '4px',
+                    padding: '8px 12px',
+                    boxShadow: selectedSlot !== null && players.length === 0 
+                      ? '0 8px 24px rgba(46, 117, 89, 0.4)' 
+                      : '0 4px 16px rgba(46, 117, 89, 0.22)',
+                    transition: 'all 0.15s ease'
                   }}
                 >
-                  <Plus size={16} />
-                  {players.length === 0 ? '대표 회원 인증' : '회원 동반자 추가'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <UserCheck size={18} style={{ color: '#ffffff' }} />
+                    <span style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.3px', color: '#ffffff', whiteSpace: 'nowrap' }}>
+                      {players.length === 0 ? '대표 회원 인증' : '회원 동반자 추가'}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.85)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    회원 혜택 · 이용권 사용
+                  </span>
                 </button>
                 
+                {/* 2. 대표/동반 비회원 추가 CTA (Secondary) */}
                 <button
+                  className={`kiosk-shimmer-button ${selectedSlot !== null && players.length === 0 ? 'kiosk-attention-bounce' : ''}`}
                   onClick={() => {
                     setModalState('ADD_GUEST_PHONE');
                     setModalPhone('');
                   }}
+                  onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
+                  onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; }}
+                  onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
+                  onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; }}
                   style={{
-                    height: '56px',
-                    borderRadius: '12px',
-                    border: '1.5px solid #8e8e93',
-                    background: '#ffffff',
-                    color: '#8e8e93',
-                    fontSize: '16px',
-                    fontWeight: 800,
+                    height: '76px',
+                    borderRadius: '16px',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'linear-gradient(135deg, #1d1d1f 0%, #2c2c2e 100%)',
+                    color: '#ffffff',
                     cursor: 'pointer',
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '6px'
+                    gap: '4px',
+                    padding: '8px 12px',
+                    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
+                    transition: 'all 0.15s ease'
                   }}
                 >
-                  <Plus size={16} />
-                  {players.length === 0 ? '대표 비회원 추가' : '비회원 동반자 추가'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <UserPlus size={18} style={{ color: '#ffffff' }} />
+                    <span style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.3px', color: '#ffffff', whiteSpace: 'nowrap' }}>
+                      {players.length === 0 ? '대표 비회원 추가' : '비회원 동반자 추가'}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    일일권 · 현장 즉시 결제
+                  </span>
                 </button>
               </div>
             )}
@@ -874,56 +947,94 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           boxSizing: 'border-box'
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 800, letterSpacing: '0.5px' }}>최종 선택 내역 및 금액</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            <span style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f' }}>
-              {selectedSlot ? `${selectedSlot.time} 티오프` : '시간대 미선택'} | 총 {players.length}명
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: '0' }}>
+          <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 800, letterSpacing: '0.5px' }}>최종 선택 내역</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', whiteSpace: 'nowrap' }}>
+              {selectedSlot ? `${selectedSlot.time} 티오프` : '시간대 미선택'} <span style={{ color: '#d2d2d7', margin: '0 6px' }}>|</span> 총 {players.length}명
             </span>
+            {selectedSlot && players.length === 0 && (
+              <span style={{ fontSize: '14px', color: '#ff3b30', background: '#fff2f2', padding: '4px 10px', borderRadius: '8px', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                안내: 이용자 추가 필요
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+            <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>총 결제 금액</span>
             <span style={{ 
               fontSize: '32px', 
               fontWeight: 900, 
-              color: '#2e7559'
+              color: '#2e7559',
+              letterSpacing: '-0.5px'
             }}>
               ₩{calculateTotalAmount().toLocaleString()}
             </span>
           </div>
-        </div>
 
-        <button
-          onClick={handleConfirmBooking}
-          disabled={loading || !selectedSlot || players.length === 0}
-          style={{
-            height: '68px',
-            fontSize: '20px',
-            fontWeight: 900,
-            padding: '0 48px',
-            borderRadius: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            background: loading || !selectedSlot || players.length === 0 ? '#d2d2d7' : '#2e7559',
-            color: '#ffffff',
-            border: 'none',
-            cursor: loading || !selectedSlot || players.length === 0 ? 'not-allowed' : 'pointer',
-            boxShadow: loading || !selectedSlot || players.length === 0 ? 'none' : '0 8px 24px rgba(46, 117, 89, 0.18)',
-            transition: 'all 0.15s ease'
-          }}
-        >
-          <CreditCard size={24} />
-          {loading ? '예약 중...' : '선점 및 결제'}
-        </button>
+          <button
+            onClick={handleConfirmBooking}
+            disabled={loading || !selectedSlot || players.length === 0}
+            style={{
+              height: '68px',
+              fontSize: '20px',
+              fontWeight: 900,
+              padding: '0 48px',
+              borderRadius: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              background: loading || !selectedSlot || players.length === 0 ? '#d2d2d7' : '#2e7559',
+              color: '#ffffff',
+              border: 'none',
+              cursor: loading || !selectedSlot || players.length === 0 ? 'not-allowed' : 'pointer',
+              boxShadow: loading || !selectedSlot || players.length === 0 ? 'none' : '0 8px 24px rgba(46, 117, 89, 0.18)',
+              transition: 'all 0.15s ease',
+              flexShrink: 0
+            }}
+          >
+            <CreditCard size={24} />
+            {loading ? '예약 중...' : '선점 및 결제'}
+          </button>
+        </div>
       </div>
 
-      {/* 회원/비회원 추가 텐키패드 오버레이 모달 */}
+      {/* 3종 통합 회원 인증 (안면 인식 / QR / 전화번호) 오버레이 모달 */}
+      {modalState === 'MEMBER_AUTH_MODAL' && (
+        <div 
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(8px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            boxSizing: 'border-box'
+          }}
+          onClick={closeModal}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <MemberAuth
+              isSubModal={true}
+              initialAuthMode="PHONE"
+              onAuthSuccess={handleMemberAuthSuccess}
+              onCancel={closeModal}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 비회원 추가 텐키패드 오버레이 모달 */}
       {(modalState === 'ADD_MEMBER_PHONE' || modalState === 'ADD_GUEST_PHONE') && (
         <div 
           style={{
             position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '1080px',
-            height: '100vh',
+            inset: 0,
             background: 'rgba(0, 0, 0, 0.75)',
             backdropFilter: 'blur(8px)',
             zIndex: 99999,
@@ -1091,10 +1202,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         <div 
           style={{
             position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '1080px',
-            height: '100vh',
+            inset: 0,
             background: 'rgba(0, 0, 0, 0.75)',
             backdropFilter: 'blur(8px)',
             zIndex: 99999,
@@ -1186,10 +1294,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         <div 
           style={{
             position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '1080px',
-            height: '100vh',
+            inset: 0,
             background: 'rgba(7, 9, 14, 0.85)',
             backdropFilter: 'blur(8px)',
             zIndex: 999999,

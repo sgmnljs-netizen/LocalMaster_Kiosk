@@ -4,6 +4,7 @@ import { api, Member } from '../services/api';
 
 interface MemberAuthProps {
   initialAuthMode?: 'PHONE' | 'QR' | 'FACE';
+  isSubModal?: boolean;
   onAuthSuccess: (member: Member) => void;
   onCancel: () => void;
   onSignUpClick?: () => void;
@@ -12,6 +13,7 @@ interface MemberAuthProps {
 
 export const MemberAuth: React.FC<MemberAuthProps> = ({ 
   initialAuthMode = 'PHONE', 
+  isSubModal = false,
   onAuthSuccess, 
   onCancel, 
   onSignUpClick,
@@ -175,19 +177,22 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     <div 
       className="premium-glass-card" 
       style={{
-        width: '940px',
-        margin: '20px auto',
-        padding: '60px',
+        width: isSubModal ? '720px' : '940px',
+        height: isSubModal ? '900px' : '1120px',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        margin: '0 auto',
+        padding: isSubModal ? '32px' : '40px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '40px',
+        gap: isSubModal ? '24px' : '30px',
       }}
     >
       {/* 타이틀 바 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <User size={40} style={{ color: 'var(--neon-green)' }} />
-          <h2 style={{ fontSize: '36px', fontWeight: 900, color: 'var(--text-primary)' }}>회원 인증 (안면/휴대폰/QR)</h2>
+          <User size={isSubModal ? 32 : 40} style={{ color: 'var(--neon-green)' }} />
+          <h2 style={{ fontSize: isSubModal ? '28px' : '36px', fontWeight: 900, color: 'var(--text-primary)' }}>회원 인증 (안면/휴대폰/QR)</h2>
         </div>
         <button 
           onClick={onCancel}
@@ -226,8 +231,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         <button
           onClick={() => { setAuthMode('FACE'); setErrorMsg(''); }}
           style={{
-            padding: '24px',
-            fontSize: '22px',
+            padding: isSubModal ? '16px' : '24px',
+            fontSize: isSubModal ? '18px' : '22px',
             fontWeight: 800,
             borderRadius: '14px',
             display: 'flex',
@@ -250,8 +255,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         <button
           onClick={() => { setAuthMode('PHONE'); setErrorMsg(''); }}
           style={{
-            padding: '24px',
-            fontSize: '22px',
+            padding: isSubModal ? '16px' : '24px',
+            fontSize: isSubModal ? '18px' : '22px',
             fontWeight: 800,
             borderRadius: '14px',
             display: 'flex',
@@ -274,8 +279,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         <button
           onClick={() => { setAuthMode('QR'); setErrorMsg(''); }}
           style={{
-            padding: '24px',
-            fontSize: '22px',
+            padding: isSubModal ? '16px' : '24px',
+            fontSize: isSubModal ? '18px' : '22px',
             fontWeight: 800,
             borderRadius: '14px',
             display: 'flex',
@@ -314,16 +319,18 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         </div>
       )}
 
-      {/* 0. 안면 인식 가상 카메라 패널 (프리미엄 리뉴얼) */}
-      {authMode === 'FACE' && (
+      {/* 탭 콘텐츠 영역 (고정 높이 적용으로 탭 전환 시 높낮이/헤더 흔들림 완벽 방지) */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', width: '100%' }}>
+        {/* 0. 안면 인식 가상 카메라 패널 (프리미엄 리뉴얼) */}
+        {authMode === 'FACE' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', alignItems: 'center' }}>
           
           {/* 거대 스캐너 메인 뷰 (640x640 정방형, Apple Face ID + Sci-Fi 무드) */}
           <div 
             className="premium-glass-card"
             style={{
-              width: '640px',
-              height: '640px',
+              width: isSubModal ? '440px' : '640px',
+              height: isSubModal ? '440px' : '640px',
               background: 'radial-gradient(circle, rgba(20, 20, 24, 0.95) 0%, rgba(4, 5, 7, 0.98) 100%)',
               borderRadius: '40px',
               border: `2px solid ${faceMatchResult ? 'var(--neon-green)' : 'rgba(255, 255, 255, 0.05)'}`,
@@ -365,8 +372,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             {/* 정중앙 스캔 가이드 & 카메라 아이콘 */}
             <div 
               style={{
-                width: '320px',
-                height: '320px',
+                width: isSubModal ? '240px' : '320px',
+                height: isSubModal ? '240px' : '320px',
                 border: `2px dashed ${faceMatchResult ? 'transparent' : 'rgba(255,255,255,0.1)'}`,
                 borderRadius: '50%',
                 position: 'relative',
@@ -406,8 +413,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             </div>
             
             <p style={{ 
-              marginTop: '40px', 
-              fontSize: '24px', 
+              marginTop: isSubModal ? '30px' : '40px', 
+              fontSize: isSubModal ? '20px' : '24px', 
               color: faceMatchResult ? 'var(--neon-green)' : 'var(--text-secondary)', 
               fontWeight: 800,
               letterSpacing: '1px',
@@ -464,10 +471,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               onClick={triggerFaceScan}
               className="kiosk-btn kiosk-btn-primary"
               style={{
-                width: '640px',
-                height: '80px',
+                width: isSubModal ? '440px' : '640px',
+                height: isSubModal ? '70px' : '80px',
                 borderRadius: '20px',
-                fontSize: '24px',
+                fontSize: isSubModal ? '20px' : '24px',
                 fontWeight: 800,
                 display: 'flex',
                 gap: '12px',
@@ -484,7 +491,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
 
           {/* 시뮬레이터 테스트용 가상 회원 매칭 패널 (개발자 모드용 정돈된 UI) */}
           <div style={{ 
-            width: '640px', 
+            width: isSubModal ? '440px' : '640px', 
             padding: '24px', 
             borderRadius: '24px', 
             background: 'rgba(0, 0, 0, 0.02)',
@@ -562,15 +569,15 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           {/* 번호 표시창 */}
           <div 
             style={{
-              width: '640px',
-              height: '100px',
+              width: isSubModal ? '480px' : '640px',
+              height: isSubModal ? '80px' : '100px',
               background: 'rgba(255, 255, 255, 0.6)',
               border: '1px solid rgba(0, 0, 0, 0.05)',
               borderRadius: '24px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '52px',
+              fontSize: isSubModal ? '42px' : '52px',
               fontWeight: 800,
               color: phoneNumber ? 'var(--text-primary)' : 'var(--text-muted)',
               letterSpacing: '3px',
@@ -581,13 +588,13 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           </div>
 
           {/* 가상 키패드 그리드 (kiosk_design_system.css 의 .virtual-keypad, .keypad-btn 베이스 사용) */}
-          <div className="virtual-keypad" style={{ width: '640px', maxWidth: 'none', gap: '16px' }}>
+          <div className="virtual-keypad" style={{ width: isSubModal ? '480px' : '640px', maxWidth: 'none', gap: '16px' }}>
             {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(n => (
               <button 
                 key={n} 
                 onClick={() => handleNumClick(n)} 
                 className="keypad-btn"
-                style={{ height: '100px', fontSize: '40px', borderRadius: '20px' }}
+                style={{ height: isSubModal ? '80px' : '100px', fontSize: isSubModal ? '32px' : '40px', borderRadius: '20px' }}
               >
                 {n}
               </button>
@@ -595,23 +602,23 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             <button 
               onClick={handleClear} 
               className="keypad-btn" 
-              style={{ height: '100px', fontSize: '22px', color: 'var(--neon-red)', borderRadius: '20px' }}
+              style={{ height: isSubModal ? '80px' : '100px', fontSize: isSubModal ? '20px' : '22px', color: 'var(--neon-red)', borderRadius: '20px' }}
             >
               전체지움
             </button>
             <button 
               onClick={() => handleNumClick('0')} 
               className="keypad-btn"
-              style={{ height: '100px', fontSize: '40px', borderRadius: '20px' }}
+              style={{ height: isSubModal ? '80px' : '100px', fontSize: isSubModal ? '32px' : '40px', borderRadius: '20px' }}
             >
               0
             </button>
             <button 
               onClick={handleBackspace} 
               className="keypad-btn" 
-              style={{ height: '100px', borderRadius: '20px', color: 'var(--text-secondary)' }}
+              style={{ height: isSubModal ? '80px' : '100px', borderRadius: '20px', color: 'var(--text-secondary)' }}
             >
-              <Delete size={36} />
+              <Delete size={isSubModal ? 28 : 36} />
             </button>
           </div>
 
@@ -621,10 +628,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             disabled={isSearching}
             className="kiosk-btn kiosk-btn-primary"
             style={{
-              width: '640px',
-              height: '90px',
+              width: isSubModal ? '480px' : '640px',
+              height: isSubModal ? '80px' : '90px',
               borderRadius: '24px',
-              fontSize: '28px',
+              fontSize: isSubModal ? '24px' : '28px',
               fontWeight: 800,
               display: 'flex',
               gap: '12px',
@@ -751,6 +758,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           </div>
         </div>
       )}
+      </div>
 
       {/* 신규 즉석 회원가입 유도 영역 */}
       {onSignUpClick && (
