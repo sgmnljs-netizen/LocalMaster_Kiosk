@@ -28,9 +28,11 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   // 안면 인식 관련 추가 상태
   const [faceScanning, setFaceScanning] = useState(false);
   const [faceMatchResult, setFaceMatchResult] = useState<Member | null>(null);
+  const [faceCountdown, setFaceCountdown] = useState<number>(15);
 
   // 🛡️ 비동기 타이머 메모리 누수 방지용 refs
   const faceScanTimeoutRef = useRef<any>(null);
+  const faceTimerRef = useRef<any>(null);
   const qrScanTimeoutRef = useRef<any>(null);
   const authTimeoutRef = useRef<any>(null);
 
@@ -124,19 +126,40 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     }, 1200); // 1.2초간 가상 스캔 딜레이 바디
   }, [onAuthSuccess, onAuthError]);
 
-  // 안면 인식 트리거
+  // 안면 인식 트리거 (15초 대기 타이머 & 백엔드 안면 식별 API 동기 연동)
   const triggerFaceScan = useCallback(async () => {
     setFaceScanning(true);
     setFaceMatchResult(null);
     setErrorMsg('');
+    setFaceCountdown(15);
 
     if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
+    if (faceTimerRef.current) clearInterval(faceTimerRef.current);
+
+    // 15초 카운트다운 타이머 구동
+    faceTimerRef.current = setInterval(() => {
+      setFaceCountdown(prev => {
+        if (prev <= 1) {
+          if (faceTimerRef.current) {
+            clearInterval(faceTimerRef.current);
+            faceTimerRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
 
     try {
       const member = await api.scanFace();
+      if (faceTimerRef.current) {
+        clearInterval(faceTimerRef.current);
+        faceTimerRef.current = null;
+      }
+
       if (member) {
         setFaceMatchResult(member);
-        // 1초 후 로그인 처리 완료 통과
+        // 1.2초 후 회원 로그인 통과 완료
         authTimeoutRef.current = setTimeout(() => {
           onAuthSuccess(member);
         }, 1200);
@@ -145,6 +168,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         setFaceScanning(false);
       }
     } catch {
+      if (faceTimerRef.current) {
+        clearInterval(faceTimerRef.current);
+        faceTimerRef.current = null;
+      }
       setErrorMsg('안면인식 장치 응답 지연이 발생했습니다.');
       setFaceScanning(false);
       if (onAuthError) {
@@ -156,6 +183,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   // 🛡️ 컴포넌트 언마운트 시 또는 authMode 전환 시 타이머 전면 클린업
   useEffect(() => {
     if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
+    if (faceTimerRef.current) clearInterval(faceTimerRef.current);
     if (qrScanTimeoutRef.current) clearTimeout(qrScanTimeoutRef.current);
     if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
 
@@ -168,6 +196,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
 
     return () => {
       if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
+      if (faceTimerRef.current) clearInterval(faceTimerRef.current);
       if (qrScanTimeoutRef.current) clearTimeout(qrScanTimeoutRef.current);
       if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
     };
@@ -420,7 +449,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               letterSpacing: '1px',
               zIndex: 2
             }}>
-              {faceScanning && !faceMatchResult ? '얼굴 스캔 진행 중...' : '정면을 응시해 주세요'}
+              {faceScanning && !faceMatchResult ? `단말기 정면을 응시해 주세요 (${faceCountdown}초)` : '정면을 응시해 주세요'}
             </p>
 
             {/* 매칭 결과 축하(Pop-up) 햅틱 레이어 */}

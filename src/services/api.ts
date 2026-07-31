@@ -19,7 +19,14 @@ export const WS_BASE_URL = _baseHost;
 export interface MemberAsset {
   member_item_id: string;
   item_name: string;
-  rem_count: number;
+  rem_count?: number;
+  remain_cnt?: number;
+  expiry_date?: string;
+  end_date?: string;
+  end_dt?: string;
+  days?: number;
+  logic_type?: string;
+  pass_type?: string;
   allowed_categories?: string[];
   is_assignable?: boolean;
   unassignable_reason?: string;
@@ -128,7 +135,27 @@ const SEED_MEMBERS: Member[] = [
     locker_expiry_date: '2026-06-25',
     face_registered: true,
     face_vector_id: 'FACE_KIMGOLF',
-    store_cd: 'H01-SE-001'
+    store_cd: 'H01-SE-001',
+    assets: [
+      {
+        member_item_id: '101',
+        item_name: '타석이용권 1개월',
+        rem_count: 0,
+        logic_type: 'PERIOD',
+        expiry_date: '2026-06-25',
+        allowed_categories: ['BAY', 'PAR3'],
+        is_assignable: true
+      },
+      {
+        member_item_id: '102',
+        item_name: '일일타석 60분 (10회 쿠폰)',
+        rem_count: 10,
+        logic_type: 'COUNT',
+        expiry_date: '2026-12-31',
+        allowed_categories: ['BAY'],
+        is_assignable: true
+      }
+    ]
   },
   {
     member_no: 'M260502',
@@ -143,7 +170,18 @@ const SEED_MEMBERS: Member[] = [
     locker_no: null,
     face_registered: true,
     face_vector_id: 'FACE_LEETRAN',
-    store_cd: 'H01-SE-001'
+    store_cd: 'H01-SE-001',
+    assets: [
+      {
+        member_item_id: '201',
+        item_name: 'VIP 횟수 타석권 (20회)',
+        rem_count: 20,
+        logic_type: 'COUNT',
+        expiry_date: '2026-12-31',
+        allowed_categories: ['BAY', 'PAR3'],
+        is_assignable: true
+      }
+    ]
   },
   {
     member_no: 'M260503',
@@ -158,7 +196,19 @@ const SEED_MEMBERS: Member[] = [
     locker_no: null,
     face_registered: false,
     face_vector_id: null,
-    store_cd: 'H01-SE-001'
+    store_cd: 'H01-SE-001',
+    assets: [
+      {
+        member_item_id: '301',
+        item_name: '1개월 주간 회원권',
+        rem_count: 0,
+        logic_type: 'PERIOD',
+        expiry_date: '2026-05-15',
+        allowed_categories: ['BAY'],
+        is_assignable: false,
+        unassignable_reason: '만료된 이용권입니다.'
+      }
+    ]
   }
 ];
 
@@ -1275,10 +1325,34 @@ class HybridAPIClient {
     };
   }
 
-  // 13. 안면인식 스캔 API (자동 로그인 차단: 스캔 시도 상태만 유지)
-  async scanFace(): Promise<Member | null> {
-    // 1.5초간 카메라 스캔 처리만 수행 후 자동 로그인 차단 (수동 인증 또는 카메라 모듈 연동 대기)
-    await new Promise(resolve => setTimeout(resolve, 1500));
+  // 13. 안면인식 스캔 API (실시간 백엔드 단말기 API GET /v1/face-terminal/scan-identity 연동)
+  async scanFace(deviceIp?: string): Promise<Member | null> {
+    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    const storeCd = this.getStoreCd() || STORE_CODE;
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15초 타임아웃
+
+      const res = await fetch(`http://127.0.0.1:8000/api/v1/face-terminal/scan-identity?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.member_id && data.member_id !== 'UNREGISTERED_FACE') {
+          console.log(`[Kiosk Face Auth] 안면 식별 성공: member_id=${data.member_id}`);
+          const member = await this.getMember(data.member_id);
+          return member;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Kiosk Face Auth] 백엔드 안면 단말기 통신 지연/오류:', err);
+    }
     return null;
   }
 

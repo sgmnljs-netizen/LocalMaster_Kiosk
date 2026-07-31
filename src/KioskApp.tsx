@@ -367,8 +367,8 @@ export default function KioskApp() {
       api.cancelHoldReservation(currentHoldResId).catch(console.error);
       setCurrentHoldResId(null);
     }
-    // [BugFix] 배정이 진행 중(중도 취소)일 때만 선점 락을 해제하도록 가딩
-    if (selectedBayNo !== null && purpose !== 'ALLOCATE_DAILY' && purpose !== 'ALLOCATE_MEMBERSHIP') {
+    // [BugFix] 고객이 중도 취소/처음으로 복귀 시 선점 락 100% 해제 (결제 진행 중 상주 현상 방지)
+    if (selectedBayNo !== null) {
       api.releaseBay(selectedBayNo).catch(console.error);
     }
     if (selectedBayNos.length > 0) {
@@ -382,6 +382,11 @@ export default function KioskApp() {
     setSelectedProduct(null);
     setPurpose(null);
     setErrorMasterCard(null);
+    
+    // 🔒 [4차 방어막] 이탈/타임아웃 시 잔존 배정 상태 100% 클리어
+    setSelectedAssetId(null);
+    setCompletedAllocationInfo(null);
+    
     setStep('MAIN_DASHBOARD');
   };
 
@@ -536,6 +541,10 @@ export default function KioskApp() {
           const updated = await api.getMember(authMember.member_no);
           if (updated) setAuthMember(updated);
           
+          // 🔒 [1차 방어막] 배정 성공 직후 로그인 세션 즉시 완전 파기 (뒷사람 무단 사용 원천 차단)
+          setAuthMember(null);
+          setSelectedAssetId(null);
+          
           setStep('PRACTICE_SELECT');
           setCompletedAllocationInfo({
             bayNo: selectedBayNo,
@@ -561,12 +570,11 @@ export default function KioskApp() {
 
     if (purposeType === 'ALLOCATE_MEMBERSHIP') {
       setInitialAuthMode('FACE');
-      if (authMember) {
-        await handleBaySelected(bayNo);
-      } else {
-        setStep('MEMBER_AUTH');
-      }
+      // 🔒 [2차 방어막] 단일 타석 선택 시 이전 비정상 잔존 세션이 있더라도 100% 강제 파기 후 신규 안면인식 유도
+      setAuthMember(null);
+      setStep('MEMBER_AUTH');
     } else if (purposeType === 'ALLOCATE_DAILY') {
+      setAuthMember(null);
       setStep('PRODUCT_SHOP');
     }
   };
@@ -661,6 +669,11 @@ export default function KioskApp() {
                 setHwFailAlert({ bayNo: selectedBayNo, resId: allocResult.res_id || '' });
                 showErrorModal(`${selectedBayNo}번 타석 결제는 완료되었으나 센서 기기 가동에 실패했습니다. 직원을 호출해주세요.`, '타석 기기 시작 확인 필요', true);
               }
+              
+              // 🔒 [1차 방어막] 카드 결제 배정 성공 직후 세션 즉시 완전 파기
+              setAuthMember(null);
+              setSelectedAssetId(null);
+              
               setStep('PRACTICE_SELECT');
               setCompletedAllocationInfo({
                 bayNo: selectedBayNo,
@@ -1063,13 +1076,7 @@ export default function KioskApp() {
                  <MemberAuth
                    initialAuthMode={initialAuthMode}
                    onAuthSuccess={handleAuthSuccess}
-                   onCancel={() => {
-                     if (purpose === 'ALLOCATE_MEMBERSHIP') {
-                       setStep('PRACTICE_SELECT');
-                     } else {
-                       handleGoHome();
-                     }
-                   }}
+                   onCancel={handleGoHome}
                    onSignUpClick={() => setStep('MEMBER_REGISTER')}
                    onAuthError={(code, detail) => {
                      const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -1089,13 +1096,7 @@ export default function KioskApp() {
               <MemberAuth
                 initialAuthMode={initialAuthMode}
                 onAuthSuccess={handleAuthSuccess}
-                onCancel={() => {
-                  if (purpose === 'ALLOCATE_MEMBERSHIP') {
-                    setStep('PRACTICE_SELECT');
-                  } else {
-                    handleGoHome();
-                  }
-                }}
+                onCancel={handleGoHome}
                 onSignUpClick={() => setStep('MEMBER_REGISTER')}
                 onAuthError={(code, detail) => {
                   const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -1324,14 +1325,46 @@ export default function KioskApp() {
                   }}
                 >
                   {/* Header */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
-                      {lang === 'KO' ? '보유 이용권 선택' : 'Select Active Pass'}
-                    </h2>
-                    <p style={{ fontSize: '18px', color: '#86868b', fontWeight: 600 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                      <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
+                        {lang === 'KO' ? '보유 이용권 선택' : 'Select Active Pass'}
+                      </h2>
+                    </div>
+
+                    {/* 🌟 회원이름 시각적 강화를 위한 대형 프로필 뱃지 */}
+                    <div style={{
+                      background: 'linear-gradient(135deg, rgba(52, 199, 89, 0.12) 0%, rgba(5, 150, 105, 0.06) 100%)',
+                      border: '1.5px solid rgba(52, 199, 89, 0.35)',
+                      padding: '16px 20px',
+                      borderRadius: '20px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      boxShadow: '0 4px 15px rgba(52, 199, 89, 0.08)'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                        <div style={{ background: '#059669', padding: '10px', borderRadius: '50%', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(5, 150, 105, 0.3)' }}>
+                          <UserCheck size={26} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '24px', fontWeight: 900, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ color: '#059669', textDecoration: 'underline', textUnderlineOffset: '4px' }}>{authMember.member_name}</span> 님
+                            <span style={{ fontSize: '13px', background: '#059669', color: '#ffffff', padding: '3px 10px', borderRadius: '10px', fontWeight: 800, letterSpacing: '0.5px' }}>
+                              인증 성공
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '14px', color: '#6b7280', fontWeight: 600, marginTop: '2px' }}>
+                            회원번호: {authMember.member_no} {authMember.member_grade ? `| 등급: ${authMember.member_grade}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p style={{ fontSize: '16px', color: '#4b5563', fontWeight: 700, margin: 0 }}>
                       {lang === 'KO' 
-                        ? `${authMember.member_name} 님, 배정에 사용할 유효 이용권을 터치해 주세요.`
-                        : `${authMember.member_name}, please select the pass to allocate.`}
+                        ? `배정에 사용할 유효 이용권을 터치해 주세요.`
+                        : `Please select the pass to allocate.`}
                     </p>
                   </div>
 
@@ -1372,6 +1405,35 @@ export default function KioskApp() {
                           </div>
                         );
                       }
+
+                      // 이용권 서브 텍스트 정밀 파서 (Zero-Hardcoding: 오직 백엔드 logic_type 의존)
+                      const getAssetSubtext = (asset: any) => {
+                        const logicType = (asset.logic_type || 'PERIOD').toUpperCase();
+                        
+                        // 유효기간 만료일자 획득 (asset 우선 -> authMember.expiry_date 폴백)
+                        const rawExpDate = asset.expiry_date || asset.end_date || asset.end_dt || authMember.expiry_date;
+                        const expDateText = rawExpDate ? `~${rawExpDate}` : '상시 유효';
+
+                        // 1. 기간제 회원권 (백엔드 마스터 플래그 PERIOD / MEMBERSHIP 의존)
+                        if (logicType === 'PERIOD' || logicType === 'MEMBERSHIP') {
+                          return lang === 'KO' 
+                            ? `유효기간: ${expDateText}` 
+                            : `Valid until: ${expDateText}`;
+                        }
+
+                        // 2. 쿠폰권 / 횟수권 (백엔드 마스터 플래그 COUNT / COUPON 의존)
+                        const count = asset.remain_cnt ?? asset.rem_count;
+                        if ((logicType === 'COUNT' || logicType === 'COUPON') && count > 0) {
+                          return lang === 'KO' 
+                            ? `남은 횟수: ${count}회 | 유효기간: ${expDateText}` 
+                            : `Remaining: ${count} count(s) | Exp: ${expDateText}`;
+                        }
+
+                        // 3. 기타(일일권 등)
+                        return lang === 'KO' 
+                          ? `유효기간: ${expDateText}` 
+                          : `Valid until: ${expDateText}`;
+                      };
 
                       return validAssets.map((asset) => {
                         const isAssetSelected = selectedAssetId === parseInt(asset.member_item_id);
@@ -1426,13 +1488,11 @@ export default function KioskApp() {
                                   {(asset as any).prod_nm || (asset as any).item_name}
                                 </span>
                                 <span style={{ 
-                                  fontSize: '14px', 
-                                  color: isAssetSelected ? '#1d4e33' : '#86868b',
-                                  fontWeight: 600
+                                  fontSize: '15px', 
+                                  color: isAssetSelected ? '#059669' : '#6b7280',
+                                  fontWeight: 700
                                 }}>
-                                  {((asset as any).remain_cnt ?? (asset as any).rem_count ?? 0) > 0 
-                                    ? `${lang === 'KO' ? '남은 횟수' : 'Remaining'}: ${((asset as any).remain_cnt ?? (asset as any).rem_count)}회` 
-                                    : (lang === 'KO' ? '기간제 무제한 이용권' : 'Unlimited Period Pass')}
+                                  {getAssetSubtext(asset)}
                                 </span>
                               </div>
                             </div>
@@ -1560,38 +1620,15 @@ export default function KioskApp() {
           endTime={completedAllocationInfo.endTime}
           lang={lang}
           onClose={() => {
-            const cBayNo = Number(completedAllocationInfo.bayNo);
-            setCompletedAllocationInfo(null);
-            setJustAllocatedBayNo(cBayNo);
-            setFeedbackCountdown(5);
-
-            // 배정표가 닫혔을 때 타석 선택 배치도 화면이 아닌 결제 단계 등에 있었다면 타석 맵 화면으로 복귀
-            if (step !== 'PRACTICE_SELECT' && step !== 'TEEBOX_MAP') {
-              setStep('PRACTICE_SELECT');
-            }
-
-            // 최신 타석 상태(OCCUPIED / 남은시간) 실시간 동기화
-            loadBays();
-
-            // 5초간 제자리 타석 맵 화면에서 [이용 중 / XX분] 활성화 타일을 보여준 뒤 메인으로 복귀
+            // 🔒 [3차 방어막] 배정 완료 모달이 닫히면 (외부 클릭 등 강제 종료 시도 포함) 즉시 키오스크 세션 완전 파기 (Race Condition 차단)
             if (feedbackTimerRef.current) {
               clearInterval(feedbackTimerRef.current);
+              feedbackTimerRef.current = null;
             }
-            let sec = 5;
-            feedbackTimerRef.current = setInterval(() => {
-              sec -= 1;
-              if (sec <= 0) {
-                if (feedbackTimerRef.current) {
-                  clearInterval(feedbackTimerRef.current);
-                  feedbackTimerRef.current = null;
-                }
-                setFeedbackCountdown(null);
-                setJustAllocatedBayNo(null);
-                handleLogoutToHome();
-              } else {
-                setFeedbackCountdown(sec);
-              }
-            }, 1000);
+            setCompletedAllocationInfo(null);
+            setFeedbackCountdown(null);
+            setJustAllocatedBayNo(null);
+            handleLogoutToHome();
           }}
         />
       )}
