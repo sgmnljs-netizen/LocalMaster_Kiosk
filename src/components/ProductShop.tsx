@@ -24,8 +24,10 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   onProductSelected,
   onCancel
 }) => {
-  // activeTab: number(동적 카테고리 ID) 또는 'DAILY_PASS'(일일 타석 배정권 고정 탭)
-  const [activeTab, setActiveTab] = useState<number | 'DAILY_PASS'>('DAILY_PASS');
+  // activeTab: number(동적 카테고리 ID) 또는 'DAILY_PASS'(일일 타석 배정 모드 전용 탭)
+  const [activeTab, setActiveTab] = useState<number | 'DAILY_PASS'>(
+    purposeType === 'ALLOCATE_DAILY' ? 'DAILY_PASS' : 0
+  );
   const [displayCategories, setDisplayCategories] = useState<DisplayCategoryItem[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,7 +40,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         const categories = await api.getKioskDisplayCategories();
         setDisplayCategories(categories);
 
-        // 2. 전체 상품 로드 (일일 타석권 추출용)
+        // 2. 전체 상품 로드
         const products = await api.getProducts();
         setAllProducts(products);
 
@@ -46,13 +48,8 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         if (purposeType === 'ALLOCATE_DAILY') {
           setActiveTab('DAILY_PASS');
         } else if (categories.length > 0) {
-          if (memberNo) {
-            // 회원 로그인 상태 ➔ 첫 번째 동적 카테고리 탭 (예: 회원권) 기본 선택
-            setActiveTab(categories[0].category_id);
-          } else {
-            // 비로그인 상태 ➔ 일일 타석 배정권 탭 기본 선택 (비회원은 장기 회원권 구매 불가)
-            setActiveTab('DAILY_PASS');
-          }
+          // 회원권 구매 모드: 무조건 첫 번째 전시 카테고리(예: 회원권) 기본 선택
+          setActiveTab(categories[0].category_id);
         } else {
           setActiveTab('DAILY_PASS');
         }
@@ -150,7 +147,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           </div>
           <div>
             <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.5px' }}>
-              {purposeType === 'ALLOCATE_DAILY' ? '일일 타석권 선택 및 결제' : '회원권 및 일일타석권 구매'}
+              {purposeType === 'ALLOCATE_DAILY' ? '일일 타석권 선택 및 결제' : '회원권 및 정기 서비스 구매'}
             </h2>
             {memberName ? (
               <p style={{ fontSize: '15px', color: '#86868b', marginTop: '4px', margin: 0 }}>
@@ -160,7 +157,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
               <p style={{ fontSize: '15px', color: '#d97706', fontWeight: 700, marginTop: '4px', margin: 0 }}>
                 {purposeType === 'ALLOCATE_DAILY' 
                   ? '※ 원하시는 이용 시간(N분)을 선택하여 결제를 진행해 주세요.'
-                  : '※ 비회원 신규 구매 시 타석 자동 연동 배정'}
+                  : '※ 회원 전용 상품으로 정기 회원권 및 부가 서비스를 구매하실 수 있습니다.'}
               </p>
             )}
           </div>
@@ -191,16 +188,16 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         </button>
       </div>
 
-      {/* 동적 카테고리 & 고정 일일권 탭 목록 (일일권 배정 모드일 때는 숨김 처리) */}
+      {/* 동적 카테고리 탭 목록 (회원권 구매 전용 매대) */}
       {purposeType !== 'ALLOCATE_DAILY' && (
         <div 
           style={{ 
             display: 'grid', 
-            gridTemplateColumns: `repeat(${displayCategories.length + 1}, 1fr)`, 
+            gridTemplateColumns: `repeat(${displayCategories.length}, 1fr)`, 
             gap: '12px' 
           }}
         >
-          {/* 1. 스샷1 어드민에서 설정한 동적 카테고리 탭 렌더링 */}
+          {/* 어드민에서 설정한 동적 카테고리 탭 렌더링 (회원권, 쿠폰, 라카, 파3 등) */}
           {displayCategories.map(cat => {
             const isActive = activeTab === cat.category_id;
             const isLocked = !memberNo && (cat.name.includes('회원') || cat.name.includes('라카'));
@@ -233,31 +230,6 @@ export const ProductShop: React.FC<ProductShopProps> = ({
               </button>
             );
           })}
-
-          {/* 2. 가장 마지막에 고정 노출되는 일일 타석 배정권 탭 */}
-          <button
-            onClick={() => setActiveTab('DAILY_PASS')}
-            style={{
-              padding: '20px 10px',
-              fontSize: '18px',
-              fontWeight: 800,
-              borderRadius: '14px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              border: '1px solid',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              color: activeTab === 'DAILY_PASS' ? '#fff' : 'var(--text-secondary)',
-              background: activeTab === 'DAILY_PASS' ? 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)' : 'var(--bg-secondary)',
-              borderColor: activeTab === 'DAILY_PASS' ? 'var(--neon-indigo)' : 'var(--glass-border)',
-              boxShadow: activeTab === 'DAILY_PASS' ? '0 0 15px var(--neon-indigo-glow)' : 'none'
-            }}
-          >
-            <CreditCard size={18} />
-            일일 타석 배정권 (즉시 입장)
-          </button>
         </div>
       )}
 

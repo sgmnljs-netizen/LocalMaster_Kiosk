@@ -6,6 +6,8 @@ import { VirtualKeyboard } from './VirtualKeyboard';
 interface MemberRegisterProps {
   onRegisterSuccess: (member: Member) => void;
   onCancel: () => void;
+  faceTerminalEnabled?: boolean;
+  lang?: 'KO' | 'EN' | 'ko' | 'en';
 }
 
 // 🌐 Pure Utility Helper (컴포넌트 외부 배치하여 불필요한 재생성 방지)
@@ -16,11 +18,17 @@ const formatPhoneNumber = (num: string) => {
   return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7, 11)}`;
 };
 
-export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSuccess, onCancel }) => {
+export const MemberRegister: React.FC<MemberRegisterProps> = ({ 
+  onRegisterSuccess, 
+  onCancel, 
+  faceTerminalEnabled = true,
+  lang = 'KO' 
+}) => {
   const [name, setName] = useState('');
   const [hp, setHp] = useState('');
 
   const [agree, setAgree] = useState(false);
+  const [gender, setGender] = useState<'M' | 'F'>('M');
 
   // 입력 활성화 포커스 제어
   const [activeField, setActiveField] = useState<'NAME' | 'HP' | null>(null);
@@ -28,22 +36,93 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // 안면 등록 관련 단계 상태
+  // 안면 등록 관련 단계 상태 및 카운트다운
   const [isFaceEnrollStep, setIsFaceEnrollStep] = useState(false);
   const [faceCapturing, setFaceCapturing] = useState(false);
   const [faceCaptured, setFaceCaptured] = useState(false);
+  const [faceCountdown, setFaceCountdown] = useState(25);
+  const [faceImageBase64, setFaceImageBase64] = useState('');
 
-  // 🛡️ 비동기 타이머 해제를 위한 Refs
-  const captureTimeoutRef = useRef<any>(null);
+  // 🛡️ 비동기 타이머 & 폴링 해제를 위한 Refs
+  const captureCountdownRef = useRef<any>(null);
 
-  // 🛡️ 컴포넌트 언마운트 시점에 촬영 타이머 강제 클린업
+  const isFetchingRef = useRef<boolean>(false);
+  const isFaceEnrollStepRef = useRef<boolean>(isFaceEnrollStep);
+
   useEffect(() => {
-    return () => {
-      if (captureTimeoutRef.current) {
-        clearTimeout(captureTimeoutRef.current);
+    isFaceEnrollStepRef.current = isFaceEnrollStep;
+  }, [isFaceEnrollStep]);
+
+  // 안면 등록 캡처 수행 (Front POS 표준: 자동 캡처 모드 및 실시간 감지 연동)
+  const triggerFaceCapture = useCallback(async () => {
+    if (isFetchingRef.current || faceCaptured) return;
+    isFetchingRef.current = true;
+    setFaceCapturing(true);
+    setFaceCaptured(false);
+    setFaceCountdown(25);
+    setErrorMsg('');
+
+    // 1. 25초 카운트다운 타이머 시작 (UI 업데이트 전용)
+    if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
+    captureCountdownRef.current = setInterval(() => {
+      setFaceCountdown(prev => {
+        if (prev <= 1) {
+          if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // 3. 1회성 Long-polling 대기 수신 (최대 25초)
+    try {
+      const result = await api.detectFaceCamera();
+      
+      if (!isFaceEnrollStepRef.current) return; // 사용자가 '이전' 버튼 등으로 해당 단계를 벗어난 경우 무시
+
+      // 실제 단말기 카메라에서 안면 감지 성공 시
+      if (result.detected) {
+        if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
+        setFaceCapturing(false);
+        setFaceCaptured(true);
+        setFaceImageBase64(result.imageBase64);
+        setErrorMsg('');
+        api.cancelFaceCaptureMode().catch(console.warn);
+      } else {
+        // Timeout 또는 실패 시
+        if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
+        setFaceCapturing(false);
+        setErrorMsg('단말기 정면에 안면이 감지되지 않았습니다. 카메라를 정면으로 바라보신 후 다시 시도해 주세요.');
+        api.cancelFaceCaptureMode().catch(console.warn);
       }
-    };
+    } catch (err: any) {
+      console.warn('Face capture exception:', err);
+      if (!isFaceEnrollStepRef.current) return;
+      if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
+      setFaceCapturing(false);
+      setErrorMsg('단말기 안면 캡처 통신 예외가 발생했습니다.');
+      api.cancelFaceCaptureMode().catch(console.warn);
+    } finally {
+      isFetchingRef.current = false;
+    }
   }, []);
+
+  // 🛡️ 2단계 진입 시 수동 클릭 없이 자동 스캔 진입 & 모달 이탈 시 단말기 모드 안전 원복
+  useEffect(() => {
+    if (isFaceEnrollStep) {
+      triggerFaceCapture();
+    } else {
+      if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
+      setFaceCapturing(false);
+      setFaceCaptured(false);
+      isFetchingRef.current = false;
+    }
+
+    return () => {
+      if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
+      api.cancelFaceCaptureMode().catch(console.warn);
+    };
+  }, [isFaceEnrollStep, triggerFaceCapture]);
 
   // 휴대폰 번호 입력을 위한 텐키 콤팩트 키패드 클릭 핸들러
   const handleNumClick = (num: string) => {
@@ -75,23 +154,14 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
       return;
     }
 
-    // 안면 등록 단계 활성화
-    setIsFaceEnrollStep(true);
+    // 안면인식 사용 여부에 따라 분기
+    if (faceTerminalEnabled) {
+      setIsFaceEnrollStep(true);
+    } else {
+      // 안면인식 미사용 시 2단계를 건너뛰고 바로 가입 완료 처리
+      handleFinalRegister(false);
+    }
   };
-
-  // 안면 등록 캡처 수행 (useCallback & Ref 결합)
-  const triggerFaceCapture = useCallback(() => {
-    setFaceCapturing(true);
-    setFaceCaptured(false);
-    
-    if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
-
-    // 2초 가상 카메라 촬영 모사
-    captureTimeoutRef.current = setTimeout(() => {
-      setFaceCapturing(false);
-      setFaceCaptured(true);
-    }, 2000);
-  }, []);
 
   // 최종 회원 가입 완료 (useCallback)
   const handleFinalRegister = useCallback(async (faceReg: boolean) => {
@@ -101,8 +171,15 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
       const formattedHp = formatPhoneNumber(hp);
       const faceVectorId = faceReg ? `FACE_${hp.replace(/[^0-9]/g, '')}` : null;
       
-      const res = await api.registerMember(name, formattedHp, '', faceReg, faceVectorId);
+      const res = await api.registerMember(name, formattedHp, '', faceReg, faceVectorId, gender);
       if (res.success && res.member) {
+        if (faceReg) {
+          // 프런트포스 표준: 실물 안면 단말기 푸시 동기화 등록 (실제 카메라 캐처 이미지 전달)
+          const enrollResult = await api.enrollMemberFace(res.member.member_no, name, faceImageBase64 || undefined);
+          if (!enrollResult?.success) {
+            console.warn('[Kiosk] 안면 단말기 동기화 실패 (가입은 정상 완료):', enrollResult?.message);
+          }
+        }
         onRegisterSuccess(res.member);
       } else {
         setErrorMsg(res.message);
@@ -114,13 +191,13 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
     } finally {
       setLoading(false);
     }
-  }, [name, hp, onRegisterSuccess]);
+  }, [name, hp, gender, faceImageBase64, onRegisterSuccess]);
 
   return (
     <div 
       style={{
         width: '900px',
-        margin: '30px auto',
+        margin: '0 auto',
         padding: '48px 56px',
         display: 'flex',
         flexDirection: 'column',
@@ -253,8 +330,10 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
 
             <p style={{ marginTop: '20px', fontSize: '16px', color: faceCaptured ? '#34c759' : '#1d1d1f', fontWeight: 600 }}>
               {faceCaptured 
-                ? '안면 정보 캡처 성공! 가입을 완료해 주세요.' 
-                : (faceCapturing ? '얼굴 스캔 중... 움직이지 마세요.' : '얼굴을 가이드라인 영역에 맞춰주세요')}
+                ? (lang === 'EN' ? 'Face capture successful! Please complete registration.' : '안면 정보 캡처 성공! 가입을 완료해 주세요.') 
+                : (faceCapturing 
+                  ? (lang === 'EN' ? `Scanning face... Please hold still (${faceCountdown}s)` : `단말기 정면을 응시해 주세요 (${faceCountdown}초)`) 
+                  : (lang === 'EN' ? 'Please face the terminal camera' : '단말기 카메라 정면을 응시해 주세요'))}
             </p>
 
             {faceCaptured && (
@@ -277,13 +356,15 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
                 <div style={{ background: '#34c759', borderRadius: '50%', padding: '12px' }}>
                   <Check size={48} color="#ffffff" strokeWidth={3} />
                 </div>
-                <span style={{ fontSize: '20px', fontWeight: 700, color: '#1d1d1f' }}>안면 캡처 완료</span>
+                <span style={{ fontSize: '20px', fontWeight: 700, color: '#1d1d1f' }}>
+                  {lang === 'EN' ? 'Face Capture Completed' : '안면 캡처 완료'}
+                </span>
               </div>
             )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '480px' }}>
-            {/* 촬영 트리거 버튼 */}
+            {/* 촬영/재시도 트리거 버튼 */}
             {!faceCaptured && (
               <button
                 type="button"
@@ -302,7 +383,9 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
                   boxShadow: '0 4px 16px rgba(0, 113, 227, 0.3)'
                 }}
               >
-                {faceCapturing ? '안면 데이터 추출 중...' : '안면 촬영 (페이스 ID 등록)'}
+                {faceCapturing 
+                  ? (lang === 'EN' ? `Scanning Face (${faceCountdown}s)...` : `안면 자동 스캔 중 (${faceCountdown}초)...`) 
+                  : (lang === 'EN' ? 'Retry Face Scan' : '다시 안면 촬영 시도')}
               </button>
             )}
 
@@ -398,7 +481,33 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
               />
             </div>
 
-            {/* 개인정보 이용 동의 */}
+            {/* 성별 선택 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <label style={{ fontSize: '17px', fontWeight: 600, color: '#1d1d1f' }}>성별</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                {([['M', '남성 ♂'], ['F', '여성 ♀']] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setGender(val)}
+                    style={{
+                      height: '60px',
+                      fontSize: '18px',
+                      fontWeight: 700,
+                      borderRadius: '16px',
+                      border: `2px solid ${gender === val ? '#0071e3' : '#e5e5ea'}`,
+                      background: gender === val ? '#0071e3' : '#f5f5f7',
+                      color: gender === val ? '#ffffff' : '#1d1d1f',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      boxShadow: gender === val ? '0 4px 12px rgba(0, 113, 227, 0.25)' : 'none'
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div 
               onClick={() => setAgree(!agree)}
               style={{ 
@@ -595,7 +704,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({ onRegisterSucces
               onMouseOut={(e) => !loading && (e.currentTarget.style.transform = 'translateY(0)')}
             >
               <Sparkles size={24} />
-              {loading ? '가입 처리 중...' : '다음 단계 (안면 등록)'}
+              {loading ? '가입 처리 중...' : (faceTerminalEnabled ? '다음 단계 (안면 등록)' : '즉석 회원가입 완료')}
             </button>
           </div>
 

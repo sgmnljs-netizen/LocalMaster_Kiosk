@@ -13,7 +13,7 @@ interface PaymentTerminalProps {
   resId?: string | null;
   memberName?: string;
   memberNo?: string;
-  onPaymentSuccess: () => void;
+  onPaymentSuccess: (payResult?: { apprNo: string; tradeDate: string; amount: number }) => void;
   onCancel: () => void;
 }
 
@@ -40,12 +40,12 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     setErrorMsg('');
     
     // 승인번호 및 영수증 날짜 선제 생성
-    setAppNo(Math.floor(10000000 + Math.random() * 90000000).toString());
+    const generatedAppNo = Math.floor(10000000 + Math.random() * 90000000).toString();
+    setAppNo(generatedAppNo);
     const now = new Date();
-    setReceiptDate(
-      `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
-      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-    );
+    const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
+      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    setReceiptDate(generatedTradeDate);
 
     try {
       // 2-Phase Commit: 백엔드 결제 완료 웹훅 API 호출
@@ -59,8 +59,8 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
       setPayStep('PRINT_RECEIPT');
-      // 승인 완료 즉시 실제 백엔드/로컬스토리지 타석 배정 실행
-      onPaymentSuccess();
+      // 승인 완료 즉시 실제 백엔드/로컬스토리지 타석 배정 및 결제 완료 처리
+      onPaymentSuccess({ apprNo: generatedAppNo, tradeDate: generatedTradeDate, amount });
     } catch (err: any) {
       setPayStep('INSERT_CARD');
       setErrorMsg(err.message || '결제 처리 중 서버 승인 오류가 발생했습니다.');
@@ -73,12 +73,12 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       // 회원권/이용권 차감 배정인 경우 결제 단계를 즉시 통과하여 영수증 출력으로 이동
       setPayStep('PRINT_RECEIPT');
       const now = new Date();
-      setReceiptDate(
-        `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
-        `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-      );
-      setAppNo(Math.floor(10000000 + Math.random() * 90000000).toString());
-      onPaymentSuccess();
+      const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
+        `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      const generatedAppNo = Math.floor(10000000 + Math.random() * 90000000).toString();
+      setReceiptDate(generatedTradeDate);
+      setAppNo(generatedAppNo);
+      onPaymentSuccess({ apprNo: generatedAppNo, tradeDate: generatedTradeDate, amount: 0 });
       return;
     }
     const timer = setTimeout(triggerSimulation, 4500); // 4.5초 뒤 알아서 시뮬레이션 작동
@@ -419,7 +419,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           </div>
 
           <button 
-            onClick={onPaymentSuccess}
+            onClick={() => onPaymentSuccess({ apprNo: appNo, tradeDate: receiptDate, amount })}
             style={{
               width: '100%',
               height: '60px',

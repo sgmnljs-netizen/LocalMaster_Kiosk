@@ -7,6 +7,7 @@ import { MemberAuth } from './MemberAuth';
 interface Par3AllocationProps {
   memberNo?: string;
   memberName?: string;
+  faceTerminalEnabled?: boolean;
   onBookingSelected: (prod: Product) => void;
   onCancel: () => void;
 }
@@ -27,6 +28,7 @@ interface PlayerSlot {
 export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   memberNo,
   memberName,
+  faceTerminalEnabled = true,
   onBookingSelected,
   onCancel
 }) => {
@@ -1022,6 +1024,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             <MemberAuth
               isSubModal={true}
               initialAuthMode="PHONE"
+              faceTerminalEnabled={faceTerminalEnabled}
               onAuthSuccess={handleMemberAuthSuccess}
               onCancel={closeModal}
             />

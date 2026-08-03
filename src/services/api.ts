@@ -47,6 +47,7 @@ export interface Member {
   email: string;
   member_grade: string;
   status_cd: string;
+  gender?: string;
   recent_product_nm?: string | null;
   expiry_date?: string | null;
   remain_days?: number;
@@ -575,7 +576,7 @@ class HybridAPIClient {
   }
 
   // 가맹점 상호명 및 동적 체크인 정책 종합 정보 조회 (Local Fallback 포함)
-  async getStoreInfo(): Promise<{ store_nm: string; checkin_policy: string; address: string; tel: string }> {
+  async getStoreInfo(): Promise<{ store_nm: string; checkin_policy: string; address: string; tel: string; meta_data?: any }> {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
@@ -587,7 +588,8 @@ class HybridAPIClient {
             store_nm: data.store_nm || 'SGM Golf Academy',
             checkin_policy: data.checkin_policy || 'CHECKIN_REQUIRED',
             address: data.address || '서울특별시 광진구 워커힐로 177',
-            tel: data.tel || '02-450-4500'
+            tel: data.tel || '02-450-4500',
+            meta_data: data.meta_data
           };
         }
       } catch (err) {
@@ -600,8 +602,23 @@ class HybridAPIClient {
       store_nm: cached.store_nm || 'SGM Golf Academy',
       checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED',
       address: cached.address || '서울특별시 광진구 워커힐로 177',
-      tel: cached.tel || '02-450-4500'
+      tel: cached.tel || '02-450-4500',
+      meta_data: cached.meta_data
     };
+  }
+
+  // 동적 키오스크 시스템 설정 (메뉴 On/Off 및 구역 매칭) 조회
+  async getKioskSystemSettings(): Promise<any> {
+    try {
+      const res = await fetch(`${BASE_URL}/v1/kiosk/config?store_cd=${this.getStoreCd()}`);
+      if (res.ok) {
+        const data = await res.json();
+        return data || null;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch kiosk system settings:', err);
+    }
+    return null;
   }
 
   async getStoreName(): Promise<string> {
@@ -1250,18 +1267,20 @@ class HybridAPIClient {
     hp: string, 
     email: string,
     faceRegistered: boolean = false,
-    faceVectorId: string | null = null
+    faceVectorId: string | null = null,
+    gender: 'M' | 'F' = 'M'
   ): Promise<{ success: boolean; member?: Member; message: string }> {
     const isConnected = await this.checkConnection();
     const cleanHp = hp.replace(/[^0-9]/g, '');
     const todayStr = new Date().toISOString().slice(0, 10);
-    const newMemberNo = `M2605${Math.floor(10 + Math.random() * 89)}`; // 신규 회원번호 난수 발급
+    const newMemberNo = `M${todayStr.replace(/-/g, '').slice(2)}${Math.floor(1000 + Math.random() * 9000)}`; // 고유 회원번호 난수 발급 (타임스탬프+4자리)
 
     const newMember: Member = {
       member_no: newMemberNo,
       member_name: name,
       hp: hp,
       email: email,
+      gender: gender,
       member_grade: 'GENERAL',
       status_cd: '10',
       recent_product_nm: null,
@@ -1285,7 +1304,9 @@ class HybridAPIClient {
             member_name: name,
             hp: hp,
             email: email,
-            store_cd: STORE_CODE
+            store_cd: STORE_CODE,
+            gender: gender,
+            face_auth_yn: faceRegistered ? 'Y' : 'N'
           })
         });
         if (res.ok) {
@@ -1326,7 +1347,7 @@ class HybridAPIClient {
   }
 
   // 13. 안면인식 스캔 API (실시간 백엔드 단말기 API GET /v1/face-terminal/scan-identity 연동)
-  async scanFace(deviceIp?: string): Promise<Member | null> {
+  async scanFace(deviceIp?: string, externalSignal?: AbortSignal): Promise<Member | null> {
     const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
     const storeCd = this.getStoreCd() || STORE_CODE;
 
@@ -1334,10 +1355,15 @@ class HybridAPIClient {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15초 타임아웃
 
+      // 외부 취소 시그널 이벤트 리스너 바인딩
+      if (externalSignal) {
+        externalSignal.addEventListener('abort', () => controller.abort());
+      }
+
       const res = await fetch(`http://127.0.0.1:8000/api/v1/face-terminal/scan-identity?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal
+        signal: externalSignal || controller.signal
       });
 
       clearTimeout(timeoutId);
@@ -1351,9 +1377,90 @@ class HybridAPIClient {
         }
       }
     } catch (err: any) {
-      console.warn('[Kiosk Face Auth] 백엔드 안면 단말기 통신 지연/오류:', err);
+      if (err.name === 'AbortError') {
+        console.log('[Kiosk Face Auth] 안면 스캔 비동기 작업이 취소되었습니다.');
+      } else {
+        console.warn('[Kiosk Face Auth] 백엔드 안면 단말기 통신 지연/오류:', err);
+      }
     }
     return null;
+  }
+
+  // 13.1. 프런트포스 표준: 안면 단말기 원격 캡처 수집 모드 시작 (출입 멘트 일시정지)
+  async startFaceCaptureMode(deviceIp?: string): Promise<boolean> {
+    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/v1/face-terminal/start-capture?ip=${encodeURIComponent(ip)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn('[Kiosk Face Auth] start-capture 통신 오류 (모사 폴백 가능):', err);
+      return false;
+    }
+  }
+
+  // 13.2. 프런트포스 표준: 단말기 카메라 정면 안면 감지 롱폴링 (이미지 base64 포함 반환)
+  async detectFaceCamera(deviceIp?: string): Promise<{ detected: boolean; imageBase64: string }> {
+    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/v1/face-terminal/detect-face?ip=${encodeURIComponent(ip)}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const hasFace = data && (data.has_face === true || data.face_detected === true);
+        return { detected: hasFace, imageBase64: data?.image_base64 || '' };
+      }
+    } catch (err) {
+      console.warn('[Kiosk Face Auth] detect-face 통신 오류:', err);
+    }
+    return { detected: false, imageBase64: '' };
+  }
+
+  // 13.3. 프런트포스 표준: 안면 단말기 출입 인증 모드 즉시 원복
+  async cancelFaceCaptureMode(deviceIp?: string): Promise<boolean> {
+    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/v1/face-terminal/cancel-capture?ip=${encodeURIComponent(ip)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn('[Kiosk Face Auth] cancel-capture 통신 오류:', err);
+      return false;
+    }
+  }
+
+  // 13.4. 프런트포스 표준: 회원 안면 데이터 단말기 동기화 푸시 등록
+  async enrollMemberFace(memberNo: string, memberName: string, faceImageBase64?: string, deviceIp?: string): Promise<{ success: boolean; message: string }> {
+    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    const storeCd = this.getStoreCd() || STORE_CODE;
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/v1/face-terminal/enroll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          member_id: memberNo,
+          member_name: memberName,
+          face_image_base64: faceImageBase64 || 'MOCK_FACE_BASE64_DATA',
+          device_ip: ip,
+          store_cd: storeCd
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        await this.writeKioskLog('FACE_ENROLL', `안면 정보 단말기 동기화 성공: ${memberName} (${memberNo})`, memberNo);
+        return { success: true, message: data.message || '안면 등록 동기화 완료' };
+      }
+    } catch (err) {
+      console.warn('[Kiosk Face Auth] 백엔드 enroll 단말기 동기화 오류 (EdgeDB 진행):', err);
+    }
+    return this.registerFace(memberNo, `FACE_${memberNo}`);
   }
 
   // 14. 안면 정보 등록 API

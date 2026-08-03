@@ -15,6 +15,7 @@ interface PracticeSelectProps {
   onGroupBaySelected?: (bayNos: number[]) => void;
   onCancel: () => void;
   onRefreshBays: () => void;
+  selectedZoneIds?: (string | number)[];
 }
 
 export const PracticeSelect: React.FC<PracticeSelectProps> = ({
@@ -27,7 +28,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   onBaySelected,
   onGroupBaySelected,
   onCancel,
-  onRefreshBays
+  onRefreshBays,
+  selectedZoneIds = []
 }) => {
   // 연쇄 배정 정밀 시각 안내 정보 상태
   const [chainedInfo, setChainedInfo] = useState<{ startTimeStr: string; minutesWait: number } | null>(null);
@@ -79,7 +81,17 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   // 🔄 [구역 카테고리 동적 격리] 파3(PAR3) 및 룸(ROOM) 구역 타석은 연습타석배정 메뉴에서 전면 동적 제외
   const practiceBays = bays.filter(bay => {
     const zCode = (bay as any).zone_code || (bay as any).zoneCode || '';
-    return zCode !== 'PAR3' && zCode !== 'ROOM';
+    if (zCode === 'PAR3' || zCode === 'ROOM') return false;
+
+    if (selectedZoneIds && selectedZoneIds.length > 0) {
+      const match = selectedZoneIds.some(zid => 
+        String(zid).toUpperCase() === zCode.toUpperCase() || 
+        String(zid) === String((bay as any).category_id)
+      );
+      if (!match) return false;
+    }
+
+    return true;
   });
 
   // practiceBays 데이터로부터 동적으로 존재하는 층 목록 추출 (1F, 2F, 3F 등 문자열 기준 정렬)

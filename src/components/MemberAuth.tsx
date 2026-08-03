@@ -4,6 +4,7 @@ import { api, Member } from '../services/api';
 
 interface MemberAuthProps {
   initialAuthMode?: 'PHONE' | 'QR' | 'FACE';
+  faceTerminalEnabled?: boolean;
   isSubModal?: boolean;
   onAuthSuccess: (member: Member) => void;
   onCancel: () => void;
@@ -13,13 +14,15 @@ interface MemberAuthProps {
 
 export const MemberAuth: React.FC<MemberAuthProps> = ({ 
   initialAuthMode = 'PHONE', 
+  faceTerminalEnabled = true,
   isSubModal = false,
   onAuthSuccess, 
   onCancel, 
   onSignUpClick,
   onAuthError
 }) => {
-  const [authMode, setAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>(initialAuthMode);
+  const effectiveInitialMode = (!faceTerminalEnabled && initialAuthMode === 'FACE') ? 'PHONE' : initialAuthMode;
+  const [authMode, setAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>(effectiveInitialMode);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -30,11 +33,12 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   const [faceMatchResult, setFaceMatchResult] = useState<Member | null>(null);
   const [faceCountdown, setFaceCountdown] = useState<number>(15);
 
-  // 🛡️ 비동기 타이머 메모리 누수 방지용 refs
+  // 🛡️ 비동기 타이머 및 네트워크 중단 제어용 refs
   const faceScanTimeoutRef = useRef<any>(null);
   const faceTimerRef = useRef<any>(null);
   const qrScanTimeoutRef = useRef<any>(null);
   const authTimeoutRef = useRef<any>(null);
+  const faceAbortControllerRef = useRef<AbortController | null>(null);
 
   // 휴대폰 번호 키패드 클릭 핸들러
   const handleNumClick = (num: string) => {
@@ -135,6 +139,11 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
 
     if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
     if (faceTimerRef.current) clearInterval(faceTimerRef.current);
+    if (faceAbortControllerRef.current) {
+      faceAbortControllerRef.current.abort();
+    }
+    const newController = new AbortController();
+    faceAbortControllerRef.current = newController;
 
     // 15초 카운트다운 타이머 구동
     faceTimerRef.current = setInterval(() => {
@@ -151,7 +160,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     }, 1000);
 
     try {
-      const member = await api.scanFace();
+      const member = await api.scanFace(undefined, newController.signal);
       if (faceTimerRef.current) {
         clearInterval(faceTimerRef.current);
         faceTimerRef.current = null;
@@ -164,18 +173,22 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           onAuthSuccess(member);
         }, 1200);
       } else {
-        setErrorMsg('등록된 안면 정보가 없습니다. 휴대폰 번호 또는 QR 인증을 진행해 주세요.');
-        setFaceScanning(false);
+        if (!newController.signal.aborted) {
+          setErrorMsg('등록된 안면 정보가 없습니다. 휴대폰 번호 또는 QR 인증을 진행해 주세요.');
+          setFaceScanning(false);
+        }
       }
     } catch {
       if (faceTimerRef.current) {
         clearInterval(faceTimerRef.current);
         faceTimerRef.current = null;
       }
-      setErrorMsg('안면인식 장치 응답 지연이 발생했습니다.');
-      setFaceScanning(false);
-      if (onAuthError) {
-        onAuthError('ERR_HARDWARE_TIMEOUT', '안면인식 스캔 모듈로부터 데이터를 수신하는 데 실패했습니다. 응답 타임아웃.');
+      if (!newController.signal.aborted) {
+        setErrorMsg('안면인식 장치 응답 지연이 발생했습니다.');
+        setFaceScanning(false);
+        if (onAuthError) {
+          onAuthError('ERR_HARDWARE_TIMEOUT', '안면인식 스캔 모듈로부터 데이터를 수신하는 데 실패했습니다. 응답 타임아웃.');
+        }
       }
     }
   }, [onAuthSuccess, onAuthError]);
@@ -190,6 +203,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     if (authMode === 'FACE') {
       triggerFaceScan();
     } else {
+      if (faceAbortControllerRef.current) {
+        faceAbortControllerRef.current.abort();
+        faceAbortControllerRef.current = null;
+      }
       setFaceScanning(false);
       setFaceMatchResult(null);
     }
@@ -199,6 +216,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       if (faceTimerRef.current) clearInterval(faceTimerRef.current);
       if (qrScanTimeoutRef.current) clearTimeout(qrScanTimeoutRef.current);
       if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+      if (faceAbortControllerRef.current) {
+        faceAbortControllerRef.current.abort();
+        faceAbortControllerRef.current = null;
+      }
     };
   }, [authMode, triggerFaceScan]);
 
@@ -221,7 +242,9 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <User size={isSubModal ? 32 : 40} style={{ color: 'var(--neon-green)' }} />
-          <h2 style={{ fontSize: isSubModal ? '28px' : '36px', fontWeight: 900, color: 'var(--text-primary)' }}>회원 인증 (안면/휴대폰/QR)</h2>
+          <h2 style={{ fontSize: isSubModal ? '28px' : '36px', fontWeight: 900, color: 'var(--text-primary)' }}>
+            {faceTerminalEnabled ? '회원 인증 (안면/휴대폰/QR)' : '회원 인증 (휴대폰/QR)'}
+          </h2>
         </div>
         <button 
           onClick={onCancel}
@@ -251,35 +274,37 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       {/* 인증 모드 전환 탭 */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: 'repeat(3, 1fr)', 
+        gridTemplateColumns: faceTerminalEnabled ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)', 
         gap: '8px',
         background: 'rgba(0, 0, 0, 0.04)',
         padding: '8px',
         borderRadius: '20px'
       }}>
-        <button
-          onClick={() => { setAuthMode('FACE'); setErrorMsg(''); }}
-          style={{
-            padding: isSubModal ? '16px' : '24px',
-            fontSize: isSubModal ? '18px' : '22px',
-            fontWeight: 800,
-            borderRadius: '14px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '12px',
-            border: '0.5px solid',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            color: authMode === 'FACE' ? 'var(--text-primary)' : 'var(--text-secondary)',
-            background: authMode === 'FACE' ? '#ffffff' : 'transparent',
-            borderColor: authMode === 'FACE' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-            boxShadow: authMode === 'FACE' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
-          }}
-        >
-          <Camera size={26} style={{ color: authMode === 'FACE' ? 'var(--neon-green)' : 'inherit' }} />
-          안면 인식 인증
-        </button>
+        {faceTerminalEnabled && (
+          <button
+            onClick={() => { setAuthMode('FACE'); setErrorMsg(''); }}
+            style={{
+              padding: isSubModal ? '16px' : '24px',
+              fontSize: isSubModal ? '18px' : '22px',
+              fontWeight: 800,
+              borderRadius: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '12px',
+              border: '0.5px solid',
+              cursor: 'pointer',
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+              color: authMode === 'FACE' ? 'var(--text-primary)' : 'var(--text-secondary)',
+              background: authMode === 'FACE' ? '#ffffff' : 'transparent',
+              borderColor: authMode === 'FACE' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+              boxShadow: authMode === 'FACE' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
+            }}
+          >
+            <Camera size={26} style={{ color: authMode === 'FACE' ? 'var(--neon-green)' : 'inherit' }} />
+            안면 인식 인증
+          </button>
+        )}
 
         <button
           onClick={() => { setAuthMode('PHONE'); setErrorMsg(''); }}
@@ -517,78 +542,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               다시 안면인식 시도
             </button>
           )}
-
-          {/* 시뮬레이터 테스트용 가상 회원 매칭 패널 (개발자 모드용 정돈된 UI) */}
-          <div style={{ 
-            width: isSubModal ? '440px' : '640px', 
-            padding: '24px', 
-            borderRadius: '24px', 
-            background: 'rgba(0, 0, 0, 0.02)',
-            border: '1px dashed rgba(0, 0, 0, 0.1)',
-            marginTop: '10px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#818cf8', display: 'inline-block' }} />
-              <h4 style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1px' }}>
-                DEVELOPER SIMULATION CONTROLS
-              </h4>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#818cf8', display: 'inline-block' }} />
-            </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <button 
-                onClick={async () => {
-                  setFaceScanning(true);
-                  setErrorMsg('');
-                  setFaceMatchResult(null);
-                  setTimeout(async () => {
-                    const member = await api.getMember('M260501');
-                    if (member) {
-                      setFaceMatchResult(member);
-                      setTimeout(() => onAuthSuccess(member), 1500);
-                    }
-                  }, 2000);
-                }}
-                className="kiosk-btn" 
-                style={{ width: '100%', fontSize: '18px', padding: '16px', background: '#ffffff', border: '1px solid rgba(0,0,0,0.05)', borderRadius: '16px', color: 'var(--text-primary)', fontWeight: 700 }}
-              >
-                [모사] '김골프' 얼굴 인식 (정상 회원)
-              </button>
-              <button 
-                onClick={async () => {
-                  setFaceScanning(true);
-                  setErrorMsg('');
-                  setFaceMatchResult(null);
-                  setTimeout(async () => {
-                    const member = await api.getMember('M260502');
-                    if (member) {
-                      setFaceMatchResult(member);
-                      setTimeout(() => onAuthSuccess(member), 1500);
-                    }
-                  }, 2000);
-                }}
-                className="kiosk-btn" 
-                style={{ width: '100%', fontSize: '18px', padding: '16px', background: '#ffffff', border: '1px solid rgba(0,0,0,0.05)', borderRadius: '16px', color: 'var(--text-primary)', fontWeight: 700 }}
-              >
-                [모사] '이프로' 얼굴 인식 (VIP 회원)
-              </button>
-              <button 
-                onClick={async () => {
-                  setFaceScanning(true);
-                  setErrorMsg('');
-                  setFaceMatchResult(null);
-                  setTimeout(() => {
-                    setFaceScanning(false);
-                    setErrorMsg('미등록 안면 정보입니다. 회원가입 또는 휴대폰 번호 입력을 사용해주세요.');
-                  }, 1500);
-                }}
-                className="kiosk-btn" 
-                style={{ width: '100%', fontSize: '15px', padding: '10px', background: 'rgba(255,255,255,0.02)' }}
-              >
-                카메라에 '미등록' 얼굴 인식 모사 (인식 실패)
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

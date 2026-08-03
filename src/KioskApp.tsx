@@ -17,6 +17,7 @@ import { CompanionSetupModal, CompanionTargetItem } from './components/Companion
 import { ErrorMessageModal, ErrorModalData } from './components/ErrorMessageModal';
 import { CheckinSelect } from './components/CheckinSelect';
 import { AllocationCompleteModal } from './components/AllocationCompleteModal';
+import { PurchaseCompleteModal, CompletedPurchaseInfo } from './components/PurchaseCompleteModal';
 import { api, Member, Product, Bay } from './services/api';
 import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
 import { KioskBottomBar } from './components/KioskBottomBar';
@@ -99,6 +100,7 @@ export default function KioskApp() {
   const [purpose, setPurpose] = useState<KioskPurpose | null>(null);
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
   const [initialAuthMode, setInitialAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>('PHONE');
+  const [faceTerminalEnabled, setFaceTerminalEnabled] = useState<boolean>(true);
 
   // 🔍 키오스크 화면 확대/축소 (Zoom Scale) 상태 및 localStorage 연동
   const [zoomScale, setZoomScale] = useState<number>(() => {
@@ -139,6 +141,7 @@ export default function KioskApp() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<number | null>(null);
   const [currentHoldResId, setCurrentHoldResId] = useState<string | null>(null);
+  const [selectedZoneIds, setSelectedZoneIds] = useState<(string | number)[]>([]);
 
   // UI 상태
   const [justAllocatedBayNo, setJustAllocatedBayNo] = useState<number | null>(null);
@@ -165,9 +168,12 @@ export default function KioskApp() {
     startTime?: string;
     endTime?: string;
   } | null>(null);
+  const [completedPurchaseInfo, setCompletedPurchaseInfo] = useState<CompletedPurchaseInfo | null>(null);
 
-  // 미들웨어 헬스체크 오프라인 감지
+  // 미들웨어 헬스체크 및 키오스크 설정 로드
   const [isMiddlewareOffline, setIsMiddlewareOffline] = useState<boolean>(false);
+  const [kioskMenuConfigs, setKioskMenuConfigs] = useState<any[]>([]);
+  const [customMenuNotice, setCustomMenuNotice] = useState<{ title: string; desc: string } | null>(null);
 
   useEffect(() => {
     const checkMw = async () => {
@@ -175,8 +181,27 @@ export default function KioskApp() {
       setIsMiddlewareOffline(!status.online);
     };
 
+    const loadSettings = async () => {
+      try {
+        const kioskConfig = await api.getKioskSystemSettings();
+        if (kioskConfig?.menu_zone_mappings) {
+          setKioskMenuConfigs(prev => {
+            const nextStr = JSON.stringify(kioskConfig.menu_zone_mappings);
+            const prevStr = JSON.stringify(prev);
+            return nextStr !== prevStr ? kioskConfig.menu_zone_mappings : prev;
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch kiosk menu configs:', err);
+      }
+    };
+
     checkMw();
-    const interval = setInterval(checkMw, 30000); // 30초 주기 Heartbeat Polling
+    loadSettings();
+    const interval = setInterval(() => {
+      checkMw();
+      loadSettings();
+    }, 10000); // 10초 주기 Polling 및 어드민 설정 실시간 동기화
     return () => clearInterval(interval);
   }, []);
 
@@ -209,6 +234,15 @@ export default function KioskApp() {
       const info = await api.getStoreInfo();
       setStoreName(info.store_nm);
       setCheckinPolicy(info.checkin_policy);
+      if (info.meta_data) {
+        try {
+          const meta = typeof info.meta_data === 'string' ? JSON.parse(info.meta_data) : info.meta_data;
+          const faceYn = meta?.integration?.face_terminal_yn ?? true;
+          setFaceTerminalEnabled(faceYn);
+        } catch {
+          setFaceTerminalEnabled(true);
+        }
+      }
     };
     fetchStoreInfo();
     loadBays();
@@ -467,25 +501,16 @@ export default function KioskApp() {
 
   // 6. 즉석 신규 회원가입 성공 시 핸들러
   const handleRegisterSuccess = async (member: Member) => {
-    setAuthMember(member);
-    showToast(lang === 'KO' ? `${member.member_name} 님, 환영합니다! 신규 회원가입이 완료되었습니다.` : `Welcome ${member.member_name}! Registration successful.`);
+    // 🚨 절대 규칙 적용: 공용 단말기이므로 회원가입 성공 시 세션(자동 로그인)을 유지하지 않고 즉시 파기합니다.
+    setAuthMember(null); 
+    setPurpose(null);
+    showToast(lang === 'KO' ? `${member.member_name} 님, 환영합니다! 신규 회원가입이 완료되었습니다. 이용을 원하시면 홈 화면에서 원하시는 서비스를 선택 후 로그인해주세요.` : `Welcome ${member.member_name}! Registration successful. Please login again from home screen.`, false);
 
     // 감사 로그 적재
     await api.writeKioskLog('REGISTER_SUCCESS', `즉석 회원가입 성공 (${member.member_name}, ${member.hp})`, member.member_no);
 
-    // 가입 직후 회원권 구매 또는 다른 본 목적에 맞춤형 지능적 라우팅
-    if (purpose === 'PURCHASE_PRODUCT') {
-      setStep('PRODUCT_SHOP');
-    } else if (purpose === 'ALLOCATE_MEMBERSHIP') {
-      // 신규 가입 직후는 회원권이 없을 확률이 99%이므로, 회원권 구매 매대로 친절하게 안내하여 상용 키오스크의 세일즈 퍼널을 최적화합니다.
-      showToast(lang === 'KO' ? '이용을 위해 먼저 정기 회원권 또는 일일타석권을 구매해주세요.' : 'Please purchase a membership pass or daily ticket to use teebox.', false);
-      setPurpose('PURCHASE_PRODUCT');
-      setStep('PRODUCT_SHOP');
-    } else if (purpose === 'EXTEND_LOCKER') {
-      setStep('LOCKER_EXTEND');
-    } else {
-      setStep('MAIN_DASHBOARD');
-    }
+    // 즉시 홈 화면으로 강제 리다이렉트
+    setStep('MAIN_DASHBOARD');
   };
 
 
@@ -640,15 +665,17 @@ export default function KioskApp() {
   };
 
   // 5. 결제 및 배정 완전 성공 (영수증 출력 후 메인 복귀)
-  const handlePaymentCompleted = async () => {
+  const handlePaymentCompleted = async (payResult?: { apprNo: string; tradeDate: string; amount: number }) => {
     if (isAllocatingRef.current) return;
     isAllocatingRef.current = true;
     showToast('모든 처리가 안전하게 완료되었습니다. 이용권을 챙겨주세요!');
     
+    let hasCustomModal = false;
     try {
       // [BUG-1 FIX] 일일권 배정: allocateBay + processPaymentWebhook 이중 호출 제거
       // 통합 API(POST /api/v1/kiosk/allocate-bay)로 단일 처리 (CoreEngine 2회 호출 방지)
       if (purpose === 'ALLOCATE_DAILY' && selectedBayNo && selectedProduct) {
+        hasCustomModal = true;
         try {
           const finalDuration = selectedProduct.duration_min ?? (selectedProduct as any).durationMin ?? 60;
           const allocResult = await api.allocateBay(
@@ -691,12 +718,32 @@ export default function KioskApp() {
 
       // 일반 회원권 구매 성공인 경우
       if (purpose === 'PURCHASE_PRODUCT' && authMember && selectedProduct) {
+        hasCustomModal = true;
         await api.purchaseProduct(authMember.member_no, selectedProduct.prod_cd, selectedProduct.standard_price);
+        setCompletedPurchaseInfo({
+          memberName: authMember.member_name,
+          memberHp: authMember.hp,
+          productName: selectedProduct.prod_nm,
+          amount: payResult?.amount || selectedProduct.standard_price,
+          apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
+          tradeDate: payResult?.tradeDate || new Date().toLocaleString(),
+          purchaseType: 'MEMBERSHIP'
+        });
       }
 
       // 라카 연장/대여 결제 완료 시점에 반영
-      if (purpose === 'EXTEND_LOCKER' && selectedLockerNo && selectedProduct) {
+      if (purpose === 'EXTEND_LOCKER' && selectedLockerNo && selectedProduct && authMember) {
+        hasCustomModal = true;
         await api.extendLocker(selectedLockerNo, selectedProduct.days || 30, selectedProduct.standard_price);
+        setCompletedPurchaseInfo({
+          memberName: authMember.member_name,
+          memberHp: authMember.hp,
+          productName: `${selectedLockerNo}번 개인 사물함 (라카 ${selectedProduct.days || 30}일 대여)`,
+          amount: payResult?.amount || selectedProduct.standard_price,
+          apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
+          tradeDate: payResult?.tradeDate || new Date().toLocaleString(),
+          purchaseType: 'LOCKER'
+        });
       }
 
       // 성공적으로 배정된 타석 변수 초기화 (중복 release 락 해제 방지)
@@ -707,7 +754,10 @@ export default function KioskApp() {
       await loadBays();
 
       setCurrentHoldResId(null);
-      handleLogoutToHome();
+
+      if (!hasCustomModal) {
+        handleLogoutToHome();
+      }
     } finally {
       isAllocatingRef.current = false;
     }
@@ -1001,6 +1051,7 @@ export default function KioskApp() {
             {step === 'MAIN_DASHBOARD' && completedAllocationInfo === null && feedbackCountdown === null && (
               <KioskMainDashboard 
                 lang={lang}
+                kioskMenuConfigs={kioskMenuConfigs}
                 onPracticeTeebox={() => setStep('PRACTICE_SELECT')}
                 onPar3Allocation={() => {
                   setPurpose('BOOK_PAR3');
@@ -1038,6 +1089,25 @@ export default function KioskApp() {
                   setPurpose('CHECKIN_RESERVATION');
                   setStep('MEMBER_AUTH');
                 } : undefined}
+                onMenuClick={(menuId, zoneIds) => {
+                  const zIds = zoneIds || [];
+                  setSelectedZoneIds(zIds);
+                  const builtinIds = ['ALLOCATE_DAILY', 'PAR3', 'PURCHASE_PRODUCT', 'LOCKER', 'MOVE_BAY', 'SIGNUP'];
+                  if (!builtinIds.includes(menuId)) {
+                    const customMenu = kioskMenuConfigs.find((m: any) => m.menu_id === menuId);
+                    if (customMenu) {
+                      if (zIds.length > 0) {
+                        setPurpose('ALLOCATE_DAILY');
+                        setStep('PRACTICE_SELECT');
+                      } else {
+                        setCustomMenuNotice({
+                          title: customMenu.menu_name || '서비스 안내',
+                          desc: customMenu.description || '선택하신 서비스에 대한 안내입니다.'
+                        });
+                      }
+                    }
+                  }
+                }}
               />
             )}
 
@@ -1075,6 +1145,7 @@ export default function KioskApp() {
                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9000 }}>
                  <MemberAuth
                    initialAuthMode={initialAuthMode}
+                   faceTerminalEnabled={faceTerminalEnabled}
                    onAuthSuccess={handleAuthSuccess}
                    onCancel={handleGoHome}
                    onSignUpClick={() => setStep('MEMBER_REGISTER')}
@@ -1095,6 +1166,7 @@ export default function KioskApp() {
             {step === 'MEMBER_AUTH' && !((purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY') && (
               <MemberAuth
                 initialAuthMode={initialAuthMode}
+                faceTerminalEnabled={faceTerminalEnabled}
                 onAuthSuccess={handleAuthSuccess}
                 onCancel={handleGoHome}
                 onSignUpClick={() => setStep('MEMBER_REGISTER')}
@@ -1115,10 +1187,28 @@ export default function KioskApp() {
                 📥 STEP 2.5: 신규 즉석 회원가입 (한글 오토마타 가상키보드 연동)
                 ---------------------------------------------------------------- */}
             {step === 'MEMBER_REGISTER' && (
-              <MemberRegister
-                onRegisterSuccess={handleRegisterSuccess}
-                onCancel={handleGoHome}
-              />
+              <div style={{ 
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                zIndex: 9000,
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                padding: '40px 20px'
+              }}>
+                <MemberRegister
+                  onRegisterSuccess={handleRegisterSuccess}
+                  onCancel={handleGoHome}
+                  faceTerminalEnabled={faceTerminalEnabled}
+                  lang={lang}
+                />
+              </div>
             )}
 
             {/* ----------------------------------------------------------------
@@ -1141,6 +1231,7 @@ export default function KioskApp() {
                 onGroupBaySelected={handleGroupBaySelected}
                 onCancel={handleGoHome}
                 onRefreshBays={loadBays}
+                selectedZoneIds={selectedZoneIds}
               />
             )}
 
@@ -1179,6 +1270,7 @@ export default function KioskApp() {
                 onCancel={handleGoHome}
                 bays={bays}
                 onRefreshBays={loadBays}
+                selectedZoneIds={selectedZoneIds}
               />
             )}
 
@@ -1238,6 +1330,7 @@ export default function KioskApp() {
               <Par3Allocation
                 memberNo={authMember?.member_no}
                 memberName={authMember?.member_name}
+                faceTerminalEnabled={faceTerminalEnabled}
                 onBookingSelected={(prod) => {
                   setSelectedProduct(prod);
                   setStep('PAYMENT');
@@ -1631,6 +1724,49 @@ export default function KioskApp() {
             handleLogoutToHome();
           }}
         />
+      )}
+
+      {/* 🟢 회원권/라카/상품 구매 완료 안내 팝업 (10초 자동 카운트다운 & 닫기 시 메인 복귀) */}
+      {completedPurchaseInfo && (
+        <PurchaseCompleteModal
+          purchaseInfo={completedPurchaseInfo}
+          lang={lang}
+          onClose={() => {
+            setCompletedPurchaseInfo(null);
+            handleLogoutToHome();
+          }}
+        />
+      )}
+
+      {/* 📢 신규 커스텀 메뉴 서비스 안내 팝업 모달 */}
+      {customMenuNotice && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(12px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
+        }}>
+          <div style={{
+            background: '#ffffff', borderRadius: '24px', padding: '40px', maxWidth: '540px', width: '100%',
+            textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+          }}>
+            <div style={{ fontSize: '56px', marginBottom: '16px' }}>📢</div>
+            <h3 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', marginBottom: '16px', letterSpacing: '-0.5px' }}>
+              {customMenuNotice.title}
+            </h3>
+            <p style={{ fontSize: '18px', color: '#4b5563', lineHeight: 1.6, marginBottom: '32px', fontWeight: 500 }}>
+              {customMenuNotice.desc}
+            </p>
+            <button
+              onClick={() => setCustomMenuNotice(null)}
+              style={{
+                width: '100%', padding: '18px', borderRadius: '16px', background: '#059669', color: '#ffffff',
+                fontSize: '18px', fontWeight: 800, border: 'none', cursor: 'pointer', boxShadow: '0 10px 20px rgba(5, 150, 105, 0.3)'
+              }}
+            >
+              확인 및 닫기
+            </button>
+          </div>
+        </div>
       )}
 
       {/* 🟢 하단 전역 내비게이션 바 (처음으로 / 이전) */}

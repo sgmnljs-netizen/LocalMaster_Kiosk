@@ -15,6 +15,7 @@ interface TeeboxMapProps {
   onCancel: () => void;
   bays: Bay[];
   onRefreshBays: () => void;
+  selectedZoneIds?: (string | number)[];
 }
 
 export const TeeboxMap: React.FC<TeeboxMapProps> = ({
@@ -28,7 +29,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   onBaySelected,
   onCancel,
   bays,
-  onRefreshBays
+  onRefreshBays,
+  selectedZoneIds = []
 }) => {
   const [activeFloor, setActiveFloor] = useState<number>(1);
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(null);
@@ -149,7 +151,17 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const floorBays = bays.filter(b => {
     const zCode = (b as any).zone_code || (b as any).zoneCode || '';
     const isPracticeZone = zCode !== 'PAR3' && zCode !== 'ROOM';
-    return b.floor_no === activeFloor && isPracticeZone;
+    if (!isPracticeZone) return false;
+
+    if (selectedZoneIds && selectedZoneIds.length > 0) {
+      const match = selectedZoneIds.some(zid => 
+        String(zid).toUpperCase() === zCode.toUpperCase() || 
+        String(zid) === String((b as any).category_id)
+      );
+      if (!match) return false;
+    }
+
+    return b.floor_no === activeFloor;
   });
 
   return (
