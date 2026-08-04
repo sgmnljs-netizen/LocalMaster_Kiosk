@@ -1023,7 +1023,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
             <MemberAuth
               isSubModal={true}
-              initialAuthMode="PHONE"
+              initialAuthMode="SMART_TAG"
               faceTerminalEnabled={faceTerminalEnabled}
               onAuthSuccess={handleMemberAuthSuccess}
               onCancel={closeModal}

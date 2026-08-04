@@ -43,6 +43,7 @@ export interface KioskCompanionItem {
 export interface Member {
   member_no: string;
   member_name: string;
+  masked_name?: string;
   hp: string;
   email: string;
   member_grade: string;

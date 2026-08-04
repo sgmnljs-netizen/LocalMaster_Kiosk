@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Camera, Delete, Phone, QrCode, Search, User, X, Sparkles } from 'lucide-react';
-import { api, Member } from '../services/api';
+import { createPortal } from 'react-dom';
+import { Camera, User, X, Sparkles, Smartphone, Radio } from 'lucide-react';
+import { api, Member, WS_BASE_URL, STORE_CODE } from '../services/api';
 
 interface MemberAuthProps {
-  initialAuthMode?: 'PHONE' | 'QR' | 'FACE';
+  initialAuthMode?: 'SMART_TAG' | 'FACE';
   faceTerminalEnabled?: boolean;
   isSubModal?: boolean;
   onAuthSuccess: (member: Member) => void;
@@ -13,7 +14,7 @@ interface MemberAuthProps {
 }
 
 export const MemberAuth: React.FC<MemberAuthProps> = ({ 
-  initialAuthMode = 'PHONE', 
+  initialAuthMode = 'SMART_TAG', 
   faceTerminalEnabled = true,
   isSubModal = false,
   onAuthSuccess, 
@@ -21,12 +22,13 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   onSignUpClick,
   onAuthError
 }) => {
-  const effectiveInitialMode = (!faceTerminalEnabled && initialAuthMode === 'FACE') ? 'PHONE' : initialAuthMode;
-  const [authMode, setAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>(effectiveInitialMode);
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const effectiveInitialMode = (!faceTerminalEnabled && initialAuthMode === 'FACE') ? 'SMART_TAG' : initialAuthMode;
+  const [authMode, setAuthMode] = useState<'SMART_TAG' | 'FACE'>(effectiveInitialMode);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [qrSimulationResult, setQrSimulationResult] = useState<string | null>(null);
+  
+  // 1초 본인 확인 팝업용 회원 감지 상태 (3번 방어책)
+  const [detectedMember, setDetectedMember] = useState<Member | null>(null);
   
   // 안면 인식 관련 추가 상태
   const [faceScanning, setFaceScanning] = useState(false);
@@ -36,99 +38,28 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   // 🛡️ 비동기 타이머 및 네트워크 중단 제어용 refs
   const faceScanTimeoutRef = useRef<any>(null);
   const faceTimerRef = useRef<any>(null);
-  const qrScanTimeoutRef = useRef<any>(null);
   const authTimeoutRef = useRef<any>(null);
   const faceAbortControllerRef = useRef<AbortController | null>(null);
+  // 키오스크 ↔ 백엔드 NFC/BLE WebSocket 연결 ref
+  const nfcBleWsRef = useRef<WebSocket | null>(null);
 
-  // 휴대폰 번호 키패드 클릭 핸들러
-  const handleNumClick = (num: string) => {
-    setErrorMsg('');
-    if (phoneNumber.length >= 11) return;
-    const nextNum = phoneNumber + num;
-    setPhoneNumber(nextNum);
-  };
-
-  const handleBackspace = () => {
-    setErrorMsg('');
-    setPhoneNumber(prev => prev.slice(0, -1));
-  };
-
-  const handleClear = () => {
-    setErrorMsg('');
-    setPhoneNumber('');
-  };
-
-  // 휴대폰 번호 포맷팅 (010-1234-5678)
-  const formatPhoneNumber = (num: string) => {
-    const cleaned = num.replace(/[^0-9]/g, '');
-    if (cleaned.length <= 3) return cleaned;
-    if (cleaned.length <= 7) return `${cleaned.slice(0, 3)}-${cleaned.slice(3)}`;
-    return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7, 11)}`;
-  };
-
-  // 회원 번호 조회 실행
-  const handleSearch = useCallback(async () => {
-    if (phoneNumber.length < 9) {
-      setErrorMsg('휴대폰 번호를 올바르게 입력해주세요.');
-      return;
-    }
-    
+  // 스마트 태그 (NFC/BLE) 감지 시 회원 수신 처리 (3번 본인 확인 팝업 유도)
+  const handleSmartTagDetected = useCallback(async (tokenOrUid: string) => {
     setIsSearching(true);
     setErrorMsg('');
-
     try {
-      const formatted = formatPhoneNumber(phoneNumber);
-      const member = await api.getMember(formatted);
-      
+      const member = await api.getMember(tokenOrUid);
       if (member) {
-        onAuthSuccess(member);
+        setDetectedMember(member);
       } else {
-        setErrorMsg('등록되지 않은 회원 정보입니다. 번호를 확인해주세요.');
-        if (onAuthError) {
-          onAuthError('ERR_MEMBER_NOT_FOUND', `${formatted} 휴대폰 번호로 등록된 회원 정보가 존재하지 않습니다.`);
-        }
+        setErrorMsg('등록되지 않은 모바일 회원 또는 NFC 카드입니다.');
       }
     } catch {
-      setErrorMsg('서버와 통신하는 도중 오류가 발생했습니다.');
-      if (onAuthError) {
-        onAuthError('ERR_NETWORK_DISCONNECTED', '서버와 통신 중 장애가 발생하여 회원 조회를 완료할 수 없습니다.');
-      }
+      setErrorMsg('스마트 인증 처리 중 서버 통신 에러가 발생했습니다.');
     } finally {
       setIsSearching(false);
     }
-  }, [phoneNumber, onAuthSuccess, onAuthError]);
-
-  // QR 스캔 모사 핸들러 (테스트 시뮬레이션용)
-  const simulateQrScan = useCallback(async (sampleQr: string) => {
-    setIsSearching(true);
-    setErrorMsg('');
-    setQrSimulationResult(sampleQr);
-
-    if (qrScanTimeoutRef.current) clearTimeout(qrScanTimeoutRef.current);
-
-    qrScanTimeoutRef.current = setTimeout(async () => {
-      try {
-        const member = await api.getMember(sampleQr);
-        if (member) {
-          onAuthSuccess(member);
-        } else {
-          setErrorMsg('유효하지 않거나 만료된 QR 코드입니다.');
-          setQrSimulationResult(null);
-          if (onAuthError) {
-            onAuthError('ERR_QR_EXPIRED', `QR코드 [${sampleQr}] 가 존재하지 않거나 유효시간이 초과되었습니다.`);
-          }
-        }
-      } catch {
-        setErrorMsg('QR 인증 처리 중 서버 에러가 발생했습니다.');
-        setQrSimulationResult(null);
-        if (onAuthError) {
-          onAuthError('ERR_NETWORK_DISCONNECTED', '네트워크 통신 불안정으로 QR 인증에 실패했습니다.');
-        }
-      } finally {
-        setIsSearching(false);
-      }
-    }, 1200); // 1.2초간 가상 스캔 딜레이 바디
-  }, [onAuthSuccess, onAuthError]);
+  }, []);
 
   // 안면 인식 트리거 (15초 대기 타이머 & 백엔드 안면 식별 API 동기 연동)
   const triggerFaceScan = useCallback(async () => {
@@ -174,7 +105,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         }, 1200);
       } else {
         if (!newController.signal.aborted) {
-          setErrorMsg('등록된 안면 정보가 없습니다. 휴대폰 번호 또는 QR 인증을 진행해 주세요.');
+          setErrorMsg('등록된 안면 정보가 없습니다. 스마트 태그 인증으로 진행해 주세요.');
           setFaceScanning(false);
         }
       }
@@ -197,7 +128,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   useEffect(() => {
     if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
     if (faceTimerRef.current) clearInterval(faceTimerRef.current);
-    if (qrScanTimeoutRef.current) clearTimeout(qrScanTimeoutRef.current);
     if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
 
     if (authMode === 'FACE') {
@@ -214,7 +144,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     return () => {
       if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
       if (faceTimerRef.current) clearInterval(faceTimerRef.current);
-      if (qrScanTimeoutRef.current) clearTimeout(qrScanTimeoutRef.current);
       if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
       if (faceAbortControllerRef.current) {
         faceAbortControllerRef.current.abort();
@@ -222,6 +151,56 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       }
     };
   }, [authMode, triggerFaceScan]);
+
+  // 📡 SMART_TAG 탭 진입 시 백엔드 NFC/BLE WebSocket 연결 (handleSmartTagDetected 연결체)
+  useEffect(() => {
+    if (authMode !== 'SMART_TAG') {
+      // SMART_TAG 탭 이탈 시 WS 즉시 종료 (Cleanup)
+      nfcBleWsRef.current?.close();
+      nfcBleWsRef.current = null;
+      return;
+    }
+
+    const wsUrl = `${WS_BASE_URL}/api/v1/kiosk/ws/nfc-ble?store_cd=${STORE_CODE}`;
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch {
+      setErrorMsg('NFC/BLE 감지 서버 연결에 실패했습니다. 네트워크를 확인해 주세요.');
+      return;
+    }
+
+    // Keep-alive ping 30초마다 전송
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+    }, 25000);
+
+    ws.onmessage = async (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (
+          data.event === 'NFC_MEMBER_TAPPED' ||
+          data.event === 'NEARBY_MEMBER_DETECTED'
+        ) {
+          if (data.member_no) {
+            // handleSmartTagDetected 연결 완료: member_no 전달 → 백엔드 조회 → 확인 팝업
+            await handleSmartTagDetected(data.member_no);
+          }
+        }
+      } catch (e) {
+        console.warn('[Smart Auth WS] 파싱 오류:', e);
+      }
+    };
+
+    ws.onerror = () => setErrorMsg('NFC/BLE 감지 서버 연결 오류가 발생했습니다.');
+    nfcBleWsRef.current = ws;
+
+    return () => {
+      clearInterval(pingInterval);
+      ws.close();
+      nfcBleWsRef.current = null;
+    };
+  }, [authMode, handleSmartTagDetected]);
 
   return (
     <div 
@@ -243,7 +222,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <User size={isSubModal ? 32 : 40} style={{ color: 'var(--neon-green)' }} />
           <h2 style={{ fontSize: isSubModal ? '28px' : '36px', fontWeight: 900, color: 'var(--text-primary)' }}>
-            {faceTerminalEnabled ? '회원 인증 (안면/휴대폰/QR)' : '회원 인증 (휴대폰/QR)'}
+            {faceTerminalEnabled ? '회원 인증 (스마트 태그 / 안면 인식)' : '회원 인증 (스마트 태그)'}
           </h2>
         </div>
         <button 
@@ -271,15 +250,39 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         </button>
       </div>
 
-      {/* 인증 모드 전환 탭 */}
+      {/* 인증 모드 전환 탭 (스마트 태그 vs 안면 인식) */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: faceTerminalEnabled ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)', 
-        gap: '8px',
+        gridTemplateColumns: faceTerminalEnabled ? 'repeat(2, 1fr)' : '1fr', 
+        gap: '12px',
         background: 'rgba(0, 0, 0, 0.04)',
         padding: '8px',
         borderRadius: '20px'
       }}>
+        <button
+          onClick={() => { setAuthMode('SMART_TAG'); setErrorMsg(''); }}
+          style={{
+            padding: isSubModal ? '16px' : '24px',
+            fontSize: isSubModal ? '18px' : '22px',
+            fontWeight: 800,
+            borderRadius: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '12px',
+            border: '0.5px solid',
+            cursor: 'pointer',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            color: authMode === 'SMART_TAG' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            background: authMode === 'SMART_TAG' ? '#ffffff' : 'transparent',
+            borderColor: authMode === 'SMART_TAG' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+            boxShadow: authMode === 'SMART_TAG' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
+          }}
+        >
+          <Sparkles size={26} style={{ color: authMode === 'SMART_TAG' ? 'var(--neon-green)' : 'inherit' }} />
+          📱 스마트폰 태그 (NFC / BLE)
+        </button>
+
         {faceTerminalEnabled && (
           <button
             onClick={() => { setAuthMode('FACE'); setErrorMsg(''); }}
@@ -305,54 +308,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             안면 인식 인증
           </button>
         )}
-
-        <button
-          onClick={() => { setAuthMode('PHONE'); setErrorMsg(''); }}
-          style={{
-            padding: isSubModal ? '16px' : '24px',
-            fontSize: isSubModal ? '18px' : '22px',
-            fontWeight: 800,
-            borderRadius: '14px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '12px',
-            border: '0.5px solid',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            color: authMode === 'PHONE' ? 'var(--text-primary)' : 'var(--text-secondary)',
-            background: authMode === 'PHONE' ? '#ffffff' : 'transparent',
-            borderColor: authMode === 'PHONE' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-            boxShadow: authMode === 'PHONE' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
-          }}
-        >
-          <Phone size={26} style={{ color: authMode === 'PHONE' ? 'var(--neon-green)' : 'inherit' }} />
-          휴대폰 번호 입력
-        </button>
-
-        <button
-          onClick={() => { setAuthMode('QR'); setErrorMsg(''); }}
-          style={{
-            padding: isSubModal ? '16px' : '24px',
-            fontSize: isSubModal ? '18px' : '22px',
-            fontWeight: 800,
-            borderRadius: '14px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '12px',
-            border: '0.5px solid',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            color: authMode === 'QR' ? 'var(--text-primary)' : 'var(--text-secondary)',
-            background: authMode === 'QR' ? '#ffffff' : 'transparent',
-            borderColor: authMode === 'QR' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-            boxShadow: authMode === 'QR' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
-          }}
-        >
-          <QrCode size={26} style={{ color: authMode === 'QR' ? 'var(--neon-green)' : 'inherit' }} />
-          QR 코드 스캔
-        </button>
       </div>
 
       {/* 에러 메세지 */}
@@ -545,202 +500,255 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         </div>
       )}
 
-      {/* 1. 휴대폰 번호 키패드 패널 */}
-      {authMode === 'PHONE' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', alignItems: 'center', padding: '10px 0' }}>
-          {/* 번호 표시창 */}
+      {/* 1. 스마트폰 NFC / BLE 비접촉 태그 패널 (Apple Light Glass Theme) */}
+      {authMode === 'SMART_TAG' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', alignItems: 'center', padding: '10px 0', width: '100%' }}>
+          {/* 비접촉 태그 메인 뷰 카드 (Apple Frosted Light Glass) */}
           <div 
             style={{
-              width: isSubModal ? '480px' : '640px',
-              height: isSubModal ? '80px' : '100px',
-              background: 'rgba(255, 255, 255, 0.6)',
-              border: '1px solid rgba(0, 0, 0, 0.05)',
-              borderRadius: '24px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: isSubModal ? '42px' : '52px',
-              fontWeight: 800,
-              color: phoneNumber ? 'var(--text-primary)' : 'var(--text-muted)',
-              letterSpacing: '3px',
-              boxShadow: 'inset 0 2px 8px rgba(0, 0, 0, 0.02)'
-            }}
-          >
-            {phoneNumber ? formatPhoneNumber(phoneNumber) : '010-0000-0000'}
-          </div>
-
-          {/* 가상 키패드 그리드 (kiosk_design_system.css 의 .virtual-keypad, .keypad-btn 베이스 사용) */}
-          <div className="virtual-keypad" style={{ width: isSubModal ? '480px' : '640px', maxWidth: 'none', gap: '16px' }}>
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(n => (
-              <button 
-                key={n} 
-                onClick={() => handleNumClick(n)} 
-                className="keypad-btn"
-                style={{ height: isSubModal ? '80px' : '100px', fontSize: isSubModal ? '32px' : '40px', borderRadius: '20px' }}
-              >
-                {n}
-              </button>
-            ))}
-            <button 
-              onClick={handleClear} 
-              className="keypad-btn" 
-              style={{ height: isSubModal ? '80px' : '100px', fontSize: isSubModal ? '20px' : '22px', color: 'var(--neon-red)', borderRadius: '20px' }}
-            >
-              전체지움
-            </button>
-            <button 
-              onClick={() => handleNumClick('0')} 
-              className="keypad-btn"
-              style={{ height: isSubModal ? '80px' : '100px', fontSize: isSubModal ? '32px' : '40px', borderRadius: '20px' }}
-            >
-              0
-            </button>
-            <button 
-              onClick={handleBackspace} 
-              className="keypad-btn" 
-              style={{ height: isSubModal ? '80px' : '100px', borderRadius: '20px', color: 'var(--text-secondary)' }}
-            >
-              <Delete size={isSubModal ? 28 : 36} />
-            </button>
-          </div>
-
-          {/* 조회 버튼 */}
-          <button
-            onClick={handleSearch}
-            disabled={isSearching}
-            className="kiosk-btn kiosk-btn-primary"
-            style={{
-              width: isSubModal ? '480px' : '640px',
-              height: isSubModal ? '80px' : '90px',
-              borderRadius: '24px',
-              fontSize: isSubModal ? '24px' : '28px',
-              fontWeight: 800,
-              display: 'flex',
-              gap: '12px',
-              background: 'var(--text-primary)',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)',
-              border: 'none',
-              color: '#fff',
-              transition: 'transform 0.2s, opacity 0.2s',
-              cursor: isSearching ? 'not-allowed' : 'pointer',
-              opacity: isSearching ? 0.7 : 1
-            }}
-            onMouseDown={(e) => !isSearching && (e.currentTarget.style.transform = 'scale(0.97)')}
-            onMouseUp={(e) => !isSearching && (e.currentTarget.style.transform = 'scale(1)')}
-            onMouseLeave={(e) => !isSearching && (e.currentTarget.style.transform = 'scale(1)')}
-          >
-            <Search size={32} />
-            {isSearching ? '조회 중...' : '회원 인증 조회'}
-          </button>
-        </div>
-      )}
-
-      {/* 2. QR 코드 스캔 프레임 패널 */}
-      {authMode === 'QR' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', alignItems: 'center' }}>
-          {/* 가상 카메라 뷰 */}
-          <div 
-            style={{
-              width: '480px',
-              height: '320px',
-              background: '#020305',
-              borderRadius: '24px',
-              border: '2px solid var(--neon-indigo)',
+              width: isSubModal ? '480px' : '680px',
+              height: isSubModal ? '340px' : '400px',
+              background: 'linear-gradient(145deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.85) 100%)',
+              borderRadius: '32px',
+              border: '1.5px solid rgba(16, 185, 129, 0.3)',
               position: 'relative',
               overflow: 'hidden',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 0 25px rgba(99, 102, 241, 0.15)'
+              boxShadow: '0 20px 40px rgba(16, 185, 129, 0.08), inset 0 1px 0 rgba(255, 255, 255, 1)',
+              gap: '20px',
+              padding: '30px'
             }}
           >
-            {/* 스캔 가이드 가이드 박스 */}
-            <div 
-              style={{
-                width: '220px',
-                height: '220px',
-                border: '2px dashed var(--neon-indigo)',
-                borderRadius: '16px',
-                position: 'relative',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <Camera size={48} className="animate-blink" style={{ color: 'var(--neon-indigo)' }} />
-              {/* 스캔 통과 레이저 모사 */}
+            {/* 애플 호흡(Breathe Glow) 파동 서클 (Light Green Theme) */}
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div 
                 style={{
-                  position: 'absolute',
-                  width: '100%',
-                  height: '4px',
-                  backgroundColor: 'var(--neon-indigo)',
-                  boxShadow: '0 0 10px var(--neon-indigo-glow)',
-                  top: '50%',
-                  animation: 'laser-scan 2s infinite ease-in-out'
-                }}
-              />
-            </div>
-            
-            <p style={{ marginTop: '16px', fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 600 }}>
-              {isSearching ? '스캔 완료! 분석 중...' : '하단 스캐너에 QR코드를 대주세요'}
-            </p>
-
-            {qrSimulationResult && (
-              <div 
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: '100%',
-                  background: 'rgba(10, 12, 16, 0.95)',
+                  width: '120px',
+                  height: '120px',
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.05))',
+                  border: '2px solid #10B981',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  flexDirection: 'column',
-                  gap: '12px'
+                  boxShadow: '0 0 35px rgba(16, 185, 129, 0.25)',
+                  animation: 'pulse 2.5s infinite ease-in-out'
                 }}
               >
-                <QrCode size={48} className="glow-text-indigo" />
-                <span style={{ fontSize: '20px', fontWeight: 800 }}>QR 스캔 성공: {qrSimulationResult}</span>
+                <Smartphone size={56} style={{ color: '#059669', filter: 'drop-shadow(0 0 8px rgba(16,185,129,0.5))' }} />
               </div>
-            )}
+            </div>
+
+            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <h3 style={{ fontSize: '26px', fontWeight: 900, color: '#0F172A', letterSpacing: '-0.5px' }}>
+                스마트폰을 대거나 <span style={{ color: '#059669', fontWeight: 900 }}>[스마트 체크인]</span>을 눌러주세요
+              </h3>
+              <div style={{ fontSize: '17px', color: '#334155', fontWeight: 600, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span>• <b>안드로이드</b>: 골포스 앱 실행 후 하단 리더기에 폰 탭 (NFC)</span>
+                <span>• <b>아이폰</b>: 골포스 앱 실행 ➔ <b style={{ color: '#059669' }}>[스마트 체크인]</b> 터치 (BLE)</span>
+              </div>
+            </div>
           </div>
 
-          {/* 상용 퀄리티 테스트용: 원클릭 QR 모사 도구 */}
-          <div className="glass-panel" style={{ width: '480px', padding: '24px', borderRadius: '16px' }}>
-            <h4 style={{ fontSize: '18px', fontWeight: 800, marginBottom: '14px', textAlign: 'center', color: '#818cf8' }}>
-              [시뮬레이터 테스트용 가상 회원 QR 코드]
-            </h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {/* 테스트 및 시뮬레이션용 빠른 태그 도구 (Deep Slate High-Legibility Style) */}
+          <div 
+            style={{ 
+              width: isSubModal ? '480px' : '680px', 
+              padding: '16px 20px', 
+              borderRadius: '20px',
+              background: 'rgba(241, 245, 249, 0.9)',
+              border: '1px solid #CBD5E1',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.03)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
+                DEBUG SIMULATOR
+              </span>
+              <span style={{ fontSize: '12px', color: '#059669', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 10px', borderRadius: '12px', fontWeight: 800 }}>
+                READY
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
               <button 
-                onClick={() => simulateQrScan('M260501')}
-                className="kiosk-btn" 
-                style={{ width: '100%', fontSize: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)' }}
+                onClick={() => setDetectedMember({
+                  member_no: 'M260501',
+                  member_name: '김골프',
+                  masked_name: '김*프',
+                  hp: '010-1234-5678',
+                  email: 'golf@example.com',
+                  member_grade: 'REGULAR',
+                  status_cd: 'ACTIVE'
+                })}
+                style={{ 
+                  fontSize: '15px', 
+                  fontWeight: 800,
+                  padding: '12px', 
+                  background: '#ffffff', 
+                  border: '1.5px solid #CBD5E1',
+                  borderRadius: '12px',
+                  color: '#0F172A',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                  transition: 'all 0.15s ease'
+                }}
               >
-                김골프 회원 (정상 회원권 보유)
+                <Smartphone size={18} color="#059669" /> 안드로이드 NFC (김골프)
               </button>
               <button 
-                onClick={() => simulateQrScan('M260502')}
-                className="kiosk-btn" 
-                style={{ width: '100%', fontSize: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)' }}
+                onClick={() => setDetectedMember({
+                  member_no: 'M260502',
+                  member_name: '이프로',
+                  masked_name: '이*로',
+                  hp: '010-9876-5432',
+                  email: 'pro@example.com',
+                  member_grade: 'VIP',
+                  status_cd: 'ACTIVE'
+                })}
+                style={{ 
+                  fontSize: '15px', 
+                  fontWeight: 800,
+                  padding: '12px', 
+                  background: '#ffffff', 
+                  border: '1.5px solid #CBD5E1',
+                  borderRadius: '12px',
+                  color: '#0F172A',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                  transition: 'all 0.15s ease'
+                }}
               >
-                이프로 회원 (VIP 회원)
-              </button>
-              <button 
-                onClick={() => simulateQrScan('M260503')}
-                className="kiosk-btn" 
-                style={{ width: '100%', fontSize: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)' }}
-              >
-                박타석 회원 (회원권 만료됨)
+                <Radio size={18} color="#059669" /> 아이폰 BLE (이프로)
               </button>
             </div>
           </div>
         </div>
       )}
       </div>
+
+      {/* 3번 방어선: 1초 회원 이름 확인 팝업 모달 (Apple Light System Dialog Portal) */}
+      {detectedMember && createPortal(
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'rgba(15, 23, 42, 0.45)',
+            backdropFilter: 'blur(24px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999999,
+            margin: 0,
+            padding: 0
+          }}
+        >
+          <div 
+            style={{
+              width: '520px',
+              padding: '40px 32px',
+              borderRadius: '28px',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '22px',
+              background: 'rgba(255, 255, 255, 0.94)',
+              border: '1px solid rgba(255, 255, 255, 0.8)',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.18), 0 4px 16px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 1)',
+              animation: 'scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+            }}
+          >
+            {/* Apple Pay 성공 뱃지 스타일 서클 */}
+            <div 
+              style={{ 
+                width: '76px', 
+                height: '76px', 
+                borderRadius: '50%', 
+                background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                boxShadow: '0 10px 25px rgba(16, 185, 129, 0.35)'
+              }}
+            >
+              <Sparkles size={40} style={{ color: '#ffffff' }} />
+            </div>
+
+            <div>
+              <h3 style={{ fontSize: '32px', fontWeight: 900, color: '#0F172A', marginBottom: '8px', letterSpacing: '-0.5px' }}>
+                <span style={{ color: '#059669', fontWeight: 900 }}>
+                  [{detectedMember.masked_name || detectedMember.member_name}]
+                </span> 회원님
+              </h3>
+              <p style={{ fontSize: '19px', color: '#475569', fontWeight: 600 }}>
+                본인이 맞으신가요?
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '12px', width: '100%', marginTop: '6px' }}>
+              <button
+                onClick={() => setDetectedMember(null)}
+                style={{
+                  height: '56px',
+                  borderRadius: '16px',
+                  fontSize: '17px',
+                  fontWeight: 700,
+                  background: '#F1F5F9',
+                  color: '#475569',
+                  border: '1px solid #CBD5E1',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.96)'}
+                onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
+                아니오 (취소)
+              </button>
+              <button
+                onClick={() => {
+                  const target = detectedMember;
+                  setDetectedMember(null);
+                  onAuthSuccess(target);
+                }}
+                style={{
+                  height: '56px',
+                  borderRadius: '16px',
+                  fontSize: '19px',
+                  fontWeight: 800,
+                  background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  boxShadow: '0 8px 20px rgba(16, 185, 129, 0.35)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.96)'}
+                onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
+                예, 맞습니다!
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* 신규 즉석 회원가입 유도 영역 */}
       {onSignUpClick && (
@@ -760,7 +768,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <span style={{ fontSize: '18px', fontWeight: 800, color: '#fff' }}>아직 회원이 아니신가요?</span>
             <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
-              휴대폰 번호와 이름만으로 30초 만에 즉시 가입하고 이용하실 수 있습니다.
+              골포스 앱을 다운로드 받아 스마트 체크인을 이용해보세요.
             </p>
           </div>
           <button
@@ -778,14 +786,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           </button>
         </div>
       )}
-
-      {/* 내부 레이저 애니메이션 스타일 인젝트 */}
-      <style>{`
-        @keyframes laser-scan {
-          0%, 100% { top: 10%; opacity: 0.2; }
-          50% { top: 90%; opacity: 1; }
-        }
-      `}</style>
     </div>
   );
 };

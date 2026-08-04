@@ -99,7 +99,7 @@ export default function KioskApp() {
   const [step, setStep] = useState<KioskStep>('INTRO');
   const [purpose, setPurpose] = useState<KioskPurpose | null>(null);
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
-  const [initialAuthMode, setInitialAuthMode] = useState<'PHONE' | 'QR' | 'FACE'>('PHONE');
+  const [initialAuthMode, setInitialAuthMode] = useState<'SMART_TAG' | 'FACE'>('SMART_TAG');
   const [faceTerminalEnabled, setFaceTerminalEnabled] = useState<boolean>(true);
 
   // 🔍 키오스크 화면 확대/축소 (Zoom Scale) 상태 및 localStorage 연동
