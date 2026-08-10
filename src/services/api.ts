@@ -85,6 +85,8 @@ export interface Bay {
   current_user_hp?: string | null;
   end_time?: string | null; // HHmm
   minutes_left?: number;
+  duration_min?: number | null;
+  prepare_remaining_sec?: number | null;
   lock_terminal_id?: string | null;
   lock_expired_at?: string | null;
   bay_name?: string;

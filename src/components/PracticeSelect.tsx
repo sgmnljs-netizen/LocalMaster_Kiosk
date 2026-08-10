@@ -156,29 +156,9 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
       let currentRemMin = mwMin > 0 ? mwMin : (bay.minutes_left || 0);
 
-      // end_time 파싱으로 currentRemMin 파이프라인 보완 (ISO datetime 및 HHMM 전천후 지원)
-      if (currentRemMin <= 0 && bay.end_time) {
-        try {
-          const endStr = String(bay.end_time);
-          let endDt: Date | null = null;
-          if (endStr.includes('T') || endStr.includes('-') || endStr.includes(':')) {
-            endDt = new Date(endStr);
-          } else if (endStr.length === 4) {
-            const hh = parseInt(endStr.substring(0, 2), 10);
-            const mm = parseInt(endStr.substring(2, 4), 10);
-            endDt = new Date();
-            endDt.setHours(hh, mm, 0, 0);
-            if (endDt.getTime() < Date.now()) {
-              endDt.setDate(endDt.getDate() + 1);
-            }
-          }
-          if (endDt && !isNaN(endDt.getTime())) {
-            const diffMs = endDt.getTime() - Date.now();
-            if (diffMs > 0) {
-              currentRemMin = Math.ceil(diffMs / (60 * 1000));
-            }
-          }
-        } catch {}
+      // SSOT minutes_left 필드 바인딩으로 currentRemMin 보완
+      if (currentRemMin <= 0 && bay.minutes_left !== undefined && bay.minutes_left !== null) {
+        currentRemMin = Math.max(0, bay.minutes_left ?? 0);
       }
 
       const extendMin = (bay as any).extend_min || 0;

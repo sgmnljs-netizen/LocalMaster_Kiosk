@@ -68,34 +68,14 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
     // ➔ 5대 변수 누적 총 합산 잔여시간 (분)
     let totalRemainingMin = currentRemMin + extendMin + waitingMin + bufferGapMin + holdMin + prepareMin;
 
-    // ➔ 백엔드 end_time(예: "09:44" 또는 "0944") 전달 시 현재 시각 기준 실제 남은 분(Minute) 정밀 동기화
-    if (bay.end_time) {
-      try {
-        const now = new Date();
-        let targetDate: Date | null = null;
-
-        if (bay.end_time.includes('T') || bay.end_time.includes('-')) {
-          targetDate = new Date(bay.end_time);
-        } else {
-          const cleanEndTime = bay.end_time.replace(':', '').trim();
-          if (cleanEndTime.length === 4) {
-            const endH = parseInt(cleanEndTime.substring(0, 2), 10);
-            const endM = parseInt(cleanEndTime.substring(2, 4), 10);
-            targetDate = new Date(now);
-            targetDate.setHours(endH, endM, 0, 0);
-          }
-        }
-
-        if (targetDate && !isNaN(targetDate.getTime()) && targetDate > now) {
-          const diffMs = targetDate.getTime() - now.getTime();
-          const diffMin = Math.ceil(diffMs / (60 * 1000));
-          // 대기 세션시간(waitingMin)과 1번째 세션 남은 시간(diffMin)을 누적 합산
-          const accumulatedMin = diffMin + waitingMin + extendMin + bufferGapMin + holdMin + prepareMin;
-          if (accumulatedMin > totalRemainingMin) {
-            totalRemainingMin = accumulatedMin;
-          }
-        }
-      } catch (e) {}
+    // ➔ 백엔드 SSOT 잔여시간(minutes_left) 전달 시 정밀 동기화
+    if (bay.minutes_left !== undefined && bay.minutes_left !== null) {
+      const diffMin = bay.minutes_left ?? 0;
+      // 대기 세션시간(waitingMin)과 1번째 세션 남은 시간(diffMin)을 누적 합산
+      const accumulatedMin = diffMin + waitingMin + extendMin + bufferGapMin + holdMin + prepareMin;
+      if (accumulatedMin > totalRemainingMin) {
+        totalRemainingMin = accumulatedMin;
+      }
     }
 
     // ➔ 최종 빈 타석 예정 시각 도출 (현재 시각 KST 기준 + totalRemainingMin)
