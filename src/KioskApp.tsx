@@ -13,6 +13,7 @@ import { PaymentTerminal } from './components/PaymentTerminal';
 import { Par3Allocation } from './components/Par3Allocation';
 import { TopTeeboxDashboard } from './components/TopTeeboxDashboard';
 import { PracticeSelect } from './components/PracticeSelect';
+import { TimeMaster } from './utils/timeMaster';
 import { CompanionSetupModal, CompanionTargetItem } from './components/CompanionSetupModal';
 import { ErrorMessageModal, ErrorModalData } from './components/ErrorMessageModal';
 import { CheckinSelect } from './components/CheckinSelect';
@@ -726,7 +727,7 @@ export default function KioskApp() {
           productName: selectedProduct.prod_nm,
           amount: payResult?.amount || selectedProduct.standard_price,
           apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
-          tradeDate: payResult?.tradeDate || new Date().toLocaleString(),
+          tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
           purchaseType: 'MEMBERSHIP'
         });
       }
@@ -741,7 +742,7 @@ export default function KioskApp() {
           productName: `${selectedLockerNo}번 개인 사물함 (라카 ${selectedProduct.days || 30}일 대여)`,
           amount: payResult?.amount || selectedProduct.standard_price,
           apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
-          tradeDate: payResult?.tradeDate || new Date().toLocaleString(),
+          tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
           purchaseType: 'LOCKER'
         });
       }

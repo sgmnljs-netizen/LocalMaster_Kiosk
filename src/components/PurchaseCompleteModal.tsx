@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, Printer, ArrowRight, CreditCard, Calendar, User, ShoppingBag, ShieldCheck } from 'lucide-react';
+import { TimeMaster } from '../utils/timeMaster';
 
 export interface CompletedPurchaseInfo {
   memberName: string;
@@ -51,10 +52,10 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
     };
   }, [onClose]);
 
-  // 오늘 날짜 및 30일/90일 유효기간 자동 계산 (시작/종료일 지정 없을 시)
+  // 오늘 날짜 및 30일/90일 유효기간 자동 계산 (TimeMaster SSOT 적용)
   const ONE_DAY_MS = 86400000;
-  const todayStr = new Date().toISOString().split('T')[0];
-  const defaultEndDateStr = new Date(Date.now() + 30 * ONE_DAY_MS).toISOString().split('T')[0];
+  const todayStr = TimeMaster.getKstYmd(new Date());
+  const defaultEndDateStr = TimeMaster.getKstYmd(new Date(Date.now() + 30 * ONE_DAY_MS));
   const startDate = purchaseInfo.startDate || todayStr;
   const endDate = purchaseInfo.endDate || defaultEndDateStr;
 

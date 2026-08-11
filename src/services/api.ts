@@ -13,6 +13,7 @@ export const STORE_CODE = 'H01-SE-001';
 // WebSocket 베이스 URL (BASE_URL에서 동적 생성 — localhost 하드코딩 제거)
 // [Fix-4] localhost:8000 하드코딩 제거 → BASE_URL 기반 생성
 const _baseHost = BASE_URL.replace('/api', '').replace('http://', 'ws://').replace('https://', 'wss://');
+import { TimeMaster } from '../utils/timeMaster';
 export const WS_BASE_URL = _baseHost;
 
 
@@ -696,12 +697,8 @@ class HybridAPIClient {
     
     const updatedBays = bays.map(bay => {
       if (bay.status === 'OCCUPIED' && bay.end_time) {
-        const endHour = parseInt(bay.end_time.substring(0, 2));
-        const endMin = parseInt(bay.end_time.substring(2, 4));
-        const endDt = new Date();
-        endDt.setHours(endHour, endMin, 0, 0);
-
-        if (endDt <= now) {
+        const endDt = TimeMaster.parseSessionEnd(bay.end_time, now);
+        if (endDt && endDt <= now) {
           // 이용시간 종료 -> 빈 타석으로 변경
           return {
             ...bay,
@@ -712,11 +709,9 @@ class HybridAPIClient {
             minutes_left: undefined
           } as Bay;
         } else {
-          const diffMs = endDt.getTime() - now.getTime();
-          const diffMin = Math.ceil(diffMs / 1000 / 60);
           return {
             ...bay,
-            minutes_left: diffMin
+            minutes_left: TimeMaster.getRemainingMinutes(bay, now)
           };
         }
       }

@@ -3,6 +3,7 @@ import { Calendar, User, Users, Clock, ArrowLeft, CreditCard, Check, HelpCircle,
 import { api, Par3Slot, Product, KioskZone, Member, MemberAsset, KioskCompanionItem, STORE_CODE } from '../services/api';
 import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
 import { MemberAuth } from './MemberAuth';
+import { TimeMaster } from '../utils/timeMaster';
 
 interface Par3AllocationProps {
   memberNo?: string;
@@ -464,7 +465,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
       if (isSuccess) {
         const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
-        const formattedDate = new Date().toLocaleString('ko-KR', { hour12: false });
+        const formattedDate = TimeMaster.formatKstDateTime(new Date());
         const mockApprNo = amount === 0 ? 'MEMBERSHIP_TICKET' : `APPR_${Math.floor(10000000 + Math.random() * 90000000)}`;
 
         // 영수증 DTO 주입 (api.getStoreInfo 동적 데이터 사용)
