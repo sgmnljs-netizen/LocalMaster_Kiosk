@@ -7,14 +7,15 @@
  */
 
 // 실제 백엔드 주소 (LocalMaster_Backend)
-const BASE_URL = 'http://localhost:8000/api'; 
-export const STORE_CODE = 'H01-SE-001';
+const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:8000/api'; 
+export const STORE_CODE = import.meta.env.VITE_STORE_CODE || localStorage.getItem('LM_STORE_CD') || 'H01-SE-001';
 
 // WebSocket 베이스 URL (BASE_URL에서 동적 생성 — localhost 하드코딩 제거)
 // [Fix-4] localhost:8000 하드코딩 제거 → BASE_URL 기반 생성
 const _baseHost = BASE_URL.replace('/api', '').replace('http://', 'ws://').replace('https://', 'wss://');
 import { TimeMaster } from '../utils/timeMaster';
 export const WS_BASE_URL = _baseHost;
+
 
 
 export interface MemberAsset {
@@ -26,6 +27,7 @@ export interface MemberAsset {
   end_date?: string;
   end_dt?: string;
   days?: number;
+  remain_days?: number;
   logic_type?: string;
   pass_type?: string;
   allowed_categories?: string[];
@@ -123,216 +125,38 @@ export interface Product {
   res_id?: string;
 }
 
+export interface KioskMasterResponse {
+  store_info?: {
+    store_cd: string;
+    store_nm: string;
+    checkin_policy: string;
+    address?: string;
+    tel?: string;
+    meta_data?: any;
+  };
+  zones?: KioskZone[];
+  bays?: Bay[];
+  lockers?: Locker[];
+  products?: Product[];
+  par3_slots?: Par3Slot[];
+  members?: Member[];
+  display_categories?: any[];
+  config?: any;
+}
+
 // --------------------------------------------------------------------------
-// 💾 Edge DB Initial Seed Data (LocalStorage 기반 가상 DB)
+// 💾 Edge DB Initializer (LocalStorage 기반 가상 DB)
 // --------------------------------------------------------------------------
 
-const SEED_MEMBERS: Member[] = [
-  {
-    member_no: 'M260501',
-    member_name: '김골프',
-    hp: '010-1234-5678',
-    email: 'golf@localmaster.com',
-    member_grade: 'GENERAL',
-    status_cd: '10',
-    recent_product_nm: '1개월 종일 회원권',
-    expiry_date: '2026-06-25',
-    remain_days: 30,
-    locker_no: 8,
-    locker_expiry_date: '2026-06-25',
-    face_registered: true,
-    face_vector_id: 'FACE_KIMGOLF',
-    store_cd: 'H01-SE-001',
-    assets: [
-      {
-        member_item_id: '101',
-        item_name: '타석이용권 1개월',
-        rem_count: 0,
-        logic_type: 'PERIOD',
-        expiry_date: '2026-06-25',
-        allowed_categories: ['BAY', 'PAR3'],
-        is_assignable: true
-      },
-      {
-        member_item_id: '102',
-        item_name: '일일타석 60분 (10회 쿠폰)',
-        rem_count: 10,
-        logic_type: 'COUNT',
-        expiry_date: '2026-12-31',
-        allowed_categories: ['BAY'],
-        is_assignable: true
-      }
-    ]
-  },
-  {
-    member_no: 'M260502',
-    member_name: '이프로',
-    hp: '010-9876-5432',
-    email: 'pro@localmaster.com',
-    member_grade: 'VIP',
-    status_cd: '10',
-    recent_product_nm: '일일 타석권 90분',
-    expiry_date: null,
-    remain_days: 0,
-    locker_no: null,
-    face_registered: true,
-    face_vector_id: 'FACE_LEETRAN',
-    store_cd: 'H01-SE-001',
-    assets: [
-      {
-        member_item_id: '201',
-        item_name: 'VIP 횟수 타석권 (20회)',
-        rem_count: 20,
-        logic_type: 'COUNT',
-        expiry_date: '2026-12-31',
-        allowed_categories: ['BAY', 'PAR3'],
-        is_assignable: true
-      }
-    ]
-  },
-  {
-    member_no: 'M260503',
-    member_name: '박타석',
-    hp: '010-5555-5555',
-    email: 'park@localmaster.com',
-    member_grade: 'GENERAL',
-    status_cd: '10',
-    recent_product_nm: '1개월 주간 회원권',
-    expiry_date: '2026-05-15', // 만료됨
-    remain_days: -10,
-    locker_no: null,
-    face_registered: false,
-    face_vector_id: null,
-    store_cd: 'H01-SE-001',
-    assets: [
-      {
-        member_item_id: '301',
-        item_name: '1개월 주간 회원권',
-        rem_count: 0,
-        logic_type: 'PERIOD',
-        expiry_date: '2026-05-15',
-        allowed_categories: ['BAY'],
-        is_assignable: false,
-        unassignable_reason: '만료된 이용권입니다.'
-      }
-    ]
-  }
-];
-
-const SEED_PRODUCTS: Product[] = [
-  { prod_cd: 'PROD_001', prod_nm: '일일 타석권 60분', standard_price: 15000, logic_type: 'MEMBERSHIP', duration_min: 60 },
-  { prod_cd: 'PROD_002', prod_nm: '일일 타석권 90분', standard_price: 20000, logic_type: 'MEMBERSHIP', duration_min: 90 },
-  { prod_cd: 'PROD_003', prod_nm: '1개월 주간 회원권', standard_price: 130000, logic_type: 'MEMBERSHIP', days: 30 },
-  { prod_cd: 'PROD_004', prod_nm: '1개월 종일 회원권', standard_price: 16000, logic_type: 'MEMBERSHIP', days: 30 }, // 16만원
-  { prod_cd: 'PROD_005', prod_nm: '3개월 종일 회원권', standard_price: 450000, logic_type: 'MEMBERSHIP', days: 90 },
-  { prod_cd: 'PROD_LK1', prod_nm: '라카 이용권 1개월', standard_price: 10000, logic_type: 'FACILITY', days: 30 },
-  { prod_cd: 'PROD_LK3', prod_nm: '라카 이용권 3개월', standard_price: 25000, logic_type: 'FACILITY', days: 90 }
-];
-
-const initializeEdgeDB = (force: boolean = false) => {
-  const existingBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
-  const isV51 = localStorage.getItem('LM_KIOSK_EDGEDB_INIT_V51');
-  
-  if (force || !isV51 || existingBays.length < 50) {
-    // 1. Members
-    localStorage.setItem('LM_MEMBERS', JSON.stringify(SEED_MEMBERS));
-    
-    // 2. Products
-    localStorage.setItem('LM_PRODUCTS', JSON.stringify(SEED_PRODUCTS));
-    
-    // 3. Bays (백오피스 표적 50개 타석 생성: 1F 20개, 2F 20개, 3F 10개)
-    const bays: Bay[] = [];
-    for (let i = 1; i <= 50; i++) {
-      const floor = i <= 20 ? 1 : (i <= 40 ? 2 : 3);
-      // 백오피스 handedness 스펙 미러링 (5번, 6번, 15번, 16번, 25번, 26번 ... 타석)
-      const type: Bay['type'] = (i === 5 || i === 6 || i === 15 || i === 16 || i === 25 || i === 26 || i === 35 || i === 36 || i === 45 || i === 46) ? 'LEFT' : 'RIGHT';
-      let status: Bay['status'] = 'AVAILABLE';
-      let current_user_name = null;
-      let minutes_left = undefined;
-      let end_time = null;
-
-      bays.push({
-        bay_id: i,
-        bay_no: i,
-        floor_no: floor,
-        floor: `${floor}F`,
-        type,
-        status: 'AVAILABLE',
-        current_user_name: null,
-        minutes_left: undefined,
-        end_time: null
-      });
-    }
-
-    // 파3 미니 라운딩 타석 5개 추가 (zone_code: 'PAR3')
-    for (let i = 51; i <= 55; i++) {
-      bays.push({
-        bay_id: i,
-        bay_no: i,
-        floor_no: 1,
-        type: 'RIGHT',
-        status: 'AVAILABLE',
-        current_user_name: null,
-        minutes_left: undefined,
-        end_time: null,
-        zone_code: 'PAR3',
-        bay_name: `PAR3-${i - 50}`
-      });
-    }
-
-    localStorage.setItem('LM_BAYS', JSON.stringify(bays));
-
-    // 4. Lockers (라카 30개 생성)
-    const lockers: Locker[] = [];
-    for (let i = 1; i <= 30; i++) {
-      const floor = i <= 15 ? 1 : 2;
-      let status: Locker['status'] = 'AVAILABLE';
-      let member_no = null;
-      let member_name = null;
-      let end_dt = null;
-
-      if (i === 8) {
-        status = 'OCCUPIED';
-        member_no = 'M260501';
-        member_name = '김골프';
-        end_dt = '2026-06-25';
-      }
-
-      lockers.push({
-        locker_id: i,
-        locker_no: i,
-        floor_no: floor,
-        status,
-        member_no,
-        member_name,
-        end_dt
-      });
-    }
-    localStorage.setItem('LM_LOCKERS', JSON.stringify(lockers));
-    
-    // 5. Sales log
-    localStorage.setItem('LM_SALES', JSON.stringify([]));
-
-    // 6. Par3 Slots 초기화
-    const slots: Par3Slot[] = [];
-    const now = new Date();
-    for (let i = 0; i < 15; i++) {
-      const slotTime = new Date(now.getTime() + (i + 1) * 20 * 60 * 1000);
-      const timeStr = `${String(slotTime.getHours()).padStart(2, '0')}:${String(slotTime.getMinutes()).padStart(2, '0')}`;
-      slots.push({
-        slot_id: `P3S-${i}`,
-        time: timeStr,
-        course_nm: i % 3 === 0 ? 'EAST' : (i % 3 === 1 ? 'WEST' : 'COMPLEX'),
-        status: i === 2 ? 'RESERVED' : 'AVAILABLE',
-        current_party_size: i === 2 ? 3 : 0
-      });
-    }
-    localStorage.setItem('LM_PAR3_SLOTS', JSON.stringify(slots));
-
-    localStorage.setItem('LM_KIOSK_EDGEDB_INIT', 'true');
-    localStorage.setItem('LM_KIOSK_EDGEDB_INIT_V51', 'true');
-    console.log('⛳ LocalMaster Kiosk: Edge DB 50-Bay Clean Initialized Successfully.');
-  }
+const initializeEdgeDB = () => {
+  if (!localStorage.getItem('LM_MEMBERS')) localStorage.setItem('LM_MEMBERS', JSON.stringify([]));
+  if (!localStorage.getItem('LM_PRODUCTS')) localStorage.setItem('LM_PRODUCTS', JSON.stringify([]));
+  if (!localStorage.getItem('LM_BAYS')) localStorage.setItem('LM_BAYS', JSON.stringify([]));
+  if (!localStorage.getItem('LM_LOCKERS')) localStorage.setItem('LM_LOCKERS', JSON.stringify([]));
+  if (!localStorage.getItem('LM_SALES')) localStorage.setItem('LM_SALES', JSON.stringify([]));
+  if (!localStorage.getItem('LM_PAR3_SLOTS')) localStorage.setItem('LM_PAR3_SLOTS', JSON.stringify([]));
+  localStorage.setItem('LM_KIOSK_EDGEDB_INIT', 'true');
+  console.log('⛳ LocalMaster Kiosk: Edge DB Clean Initialized.');
 };
 
 // 즉시 초기화 실행
@@ -344,12 +168,12 @@ initializeEdgeDB();
 
 // 미들웨어 직접 통신 URL (Edge DB 오프라인 모드 전용)
 // 환경변수 또는 localStorage 설정에서 읽음
-const MIDDLEWARE_URL = localStorage.getItem('LM_MIDDLEWARE_URL') || 'http://127.0.0.1:5001';
-// [Fix-4] KIOSK_WS_KEY: localStorage 또는 .env로 주입된 값 사용
-// LM_KIOSK_WS_KEY 설정으로 settings.KIOSK_WS_KEY와 동기화 가능
-const KIOSK_WS_KEY = localStorage.getItem('LM_KIOSK_WS_KEY') || 'kiosk-ws-key-2025';
-// [Fix-4] 미들웨어 API Key: localStorage 또는 settings.MIDDLEWARE_API_KEY와 동기화
-const MIDDLEWARE_API_KEY_CLIENT = localStorage.getItem('LM_MIDDLEWARE_API_KEY') || 'secret-key-changeme';
+const MIDDLEWARE_URL = import.meta.env.VITE_MIDDLEWARE_URL || localStorage.getItem('LM_MIDDLEWARE_URL') || 'http://127.0.0.1:5001';
+// [Fix-4] KIOSK_WS_KEY: .env 또는 localStorage 설정에서 읽음
+const KIOSK_WS_KEY = import.meta.env.VITE_KIOSK_WS_KEY || localStorage.getItem('LM_KIOSK_WS_KEY') || 'kiosk-ws-key-2025';
+// [Fix-4] 미들웨어 API Key: .env 또는 localStorage 설정에서 읽음
+const MIDDLEWARE_API_KEY_CLIENT = import.meta.env.VITE_MIDDLEWARE_API_KEY || localStorage.getItem('LM_MIDDLEWARE_API_KEY') || 'secret-key-changeme';
+
 
 
 class HybridAPIClient {
@@ -370,12 +194,57 @@ class HybridAPIClient {
   }
 
   public getStoreCd(): string {
-    return localStorage.getItem('LM_STORE_CD') || 'H01-SE-001';
+    return import.meta.env.VITE_STORE_CODE || localStorage.getItem('LM_STORE_CD') || STORE_CODE;
   }
 
   getTerminalId() {
     return this.terminalId;
   }
+
+  /**
+   * 🔄 백엔드 /api/v1/kiosk/master 마스터 데이터 연동 및 실시간 상태 바인딩
+   * - 온라인 시: /api/v1/kiosk/master 수신 후 Edge DB (localStorage) 및 state에 바인딩
+   * - 오프라인 시: Edge DB 캐시 로드
+   */
+  async getKioskMasterData(): Promise<KioskMasterResponse> {
+    const isConnected = await this.checkConnection();
+    const storeCd = this.getStoreCd();
+
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/master?store_cd=${encodeURIComponent(storeCd)}`, {
+          headers: this.getSecureHeaders()
+        });
+        if (res.ok) {
+          const masterData: KioskMasterResponse = await res.json();
+
+          // Edge DB 캐시 실시간 바인딩 & 저장
+          if (masterData.bays) localStorage.setItem('LM_BAYS', JSON.stringify(masterData.bays));
+          if (masterData.lockers) localStorage.setItem('LM_LOCKERS', JSON.stringify(masterData.lockers));
+          if (masterData.products) localStorage.setItem('LM_PRODUCTS', JSON.stringify(masterData.products));
+          if (masterData.members) localStorage.setItem('LM_MEMBERS', JSON.stringify(masterData.members));
+          if (masterData.par3_slots) localStorage.setItem('LM_PAR3_SLOTS', JSON.stringify(masterData.par3_slots));
+          if (masterData.store_info) localStorage.setItem('LM_STORE_INFO', JSON.stringify(masterData.store_info));
+          if (masterData.zones) localStorage.setItem('LM_ZONES', JSON.stringify(masterData.zones));
+
+          return masterData;
+        }
+      } catch (err) {
+        console.error('[Master API] 백엔드 마스터 수신 실패, 오프라인 Edge DB로 전환:', err);
+      }
+    }
+
+    return {
+      store_info: JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}'),
+      zones: JSON.parse(localStorage.getItem('LM_ZONES') || '[]'),
+      bays: JSON.parse(localStorage.getItem('LM_BAYS') || '[]'),
+      lockers: JSON.parse(localStorage.getItem('LM_LOCKERS') || '[]'),
+      products: JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]'),
+      members: JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]'),
+      par3_slots: JSON.parse(localStorage.getItem('LM_PAR3_SLOTS') || '[]')
+    };
+  }
+
 
   // 미들웨어 통합 제어 센터 30초 헬스체크
   async getMiddlewareStatus(): Promise<{ online: boolean; status: string }> {

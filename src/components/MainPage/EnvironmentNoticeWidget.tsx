@@ -1,7 +1,41 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { CloudRain, Megaphone } from 'lucide-react';
+import { api } from '../../services/api';
 
-export default function EnvironmentNoticeWidget() {
+interface EnvironmentNoticeWidgetProps {
+  noticeText?: string;
+  weatherText?: string;
+}
+
+export default function EnvironmentNoticeWidget({ noticeText: initialNotice, weatherText: initialWeather }: EnvironmentNoticeWidgetProps) {
+  const [weather, setWeather] = useState<string>(initialWeather || '맑음, 22°C (미세먼지 좋음)');
+  const [notice, setNotice] = useState<string>(initialNotice || '센터 공지사항을 확인해 주세요.');
+
+  useEffect(() => {
+    const fetchStoreInfo = async () => {
+      try {
+        const info = await api.getStoreInfo();
+        if (!initialNotice) {
+          const metaNotice = info.meta_data?.notice || info.meta_data?.announcement;
+          if (metaNotice) {
+            setNotice(metaNotice);
+          } else if (info.store_nm) {
+            setNotice(`${info.store_nm} 정상 운영 중 (운영시간 06:00~23:00)`);
+          }
+        }
+        if (!initialWeather) {
+          const metaWeather = info.meta_data?.weather;
+          if (metaWeather) {
+            setWeather(metaWeather);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch store info for notice widget:', err);
+      }
+    };
+    fetchStoreInfo();
+  }, [initialNotice, initialWeather]);
+
   return (
     <div className="bento-item" style={{ 
       display: 'grid', 
@@ -21,7 +55,7 @@ export default function EnvironmentNoticeWidget() {
         <div>
           <h4 style={{ margin: 0, fontSize: '18px', color: 'var(--text-secondary)' }}>현재 날씨</h4>
           <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: 'var(--color-transformative-teal)' }}>
-            흐림, 22°C (미세먼지 좋음)
+            {weather}
           </p>
         </div>
       </div>
@@ -38,7 +72,7 @@ export default function EnvironmentNoticeWidget() {
         <div>
           <h4 style={{ margin: 0, fontSize: '18px', color: 'var(--text-secondary)' }}>센터 공지</h4>
           <p style={{ margin: 0, fontSize: '22px', fontWeight: '500', color: 'var(--text-primary)' }}>
-            주말 타석 운영시간 변경 안내 (오전 6시 오픈)
+            {notice}
           </p>
         </div>
       </div>

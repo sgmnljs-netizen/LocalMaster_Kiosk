@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CreditCard, Printer, ShieldAlert, Sparkles } from 'lucide-react';
-import { api } from '../services/api';
+import { api, STORE_CODE } from '../services/api';
 
-const STORE_CODE = 'H01-SE-001';
 
 interface PaymentTerminalProps {
   productName: string;
@@ -34,13 +33,21 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const [receiptDate, setReceiptDate] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
+  // 승인번호 생성 헬퍼 (개발 환경 모의 승인번호 격리)
+  const generateApprovalNo = (): string => {
+    if (import.meta.env.DEV) {
+      return Math.floor(10000000 + Math.random() * 90000000).toString();
+    }
+    return `${Date.now().toString().slice(-8)}`;
+  };
+
   // 1. 임의의 카드 삽입/감지 시뮬레이션
   const triggerSimulation = async () => {
     setPayStep('PROCESSING');
     setErrorMsg('');
     
     // 승인번호 및 영수증 날짜 선제 생성
-    const generatedAppNo = Math.floor(10000000 + Math.random() * 90000000).toString();
+    const generatedAppNo = generateApprovalNo();
     setAppNo(generatedAppNo);
     const now = new Date();
     const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
@@ -75,7 +82,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       const now = new Date();
       const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
         `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-      const generatedAppNo = Math.floor(10000000 + Math.random() * 90000000).toString();
+      const generatedAppNo = generateApprovalNo();
       setReceiptDate(generatedTradeDate);
       setAppNo(generatedAppNo);
       onPaymentSuccess({ apprNo: generatedAppNo, tradeDate: generatedTradeDate, amount: 0 });
@@ -191,24 +198,26 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             >
               결제 취소
             </button>
-            <button 
-              onClick={triggerSimulation}
-              style={{
-                flex: 1,
-                height: '60px',
-                borderRadius: '16px',
-                background: '#0071e3',
-                border: 'none',
-                color: '#ffffff',
-                fontSize: '18px',
-                fontWeight: 800,
-                cursor: 'pointer',
-                boxShadow: '0 4px 14px rgba(0, 113, 227, 0.3)',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              즉시 결제 테스트
-            </button>
+            {import.meta.env.DEV && (
+              <button 
+                onClick={triggerSimulation}
+                style={{
+                  flex: 1,
+                  height: '60px',
+                  borderRadius: '16px',
+                  background: '#0071e3',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: '18px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 14px rgba(0, 113, 227, 0.3)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                즉시 결제 테스트
+              </button>
+            )}
           </div>
         </div>
       )}

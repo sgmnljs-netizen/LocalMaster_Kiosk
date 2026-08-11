@@ -232,9 +232,11 @@ export default function KioskApp() {
   // 0. 가맹점 상호명 및 동적 체크인 정책 로드 + WebSocket 실시간 채널 연결
   useEffect(() => {
     const fetchStoreInfo = async () => {
+      await api.getKioskMasterData();
       const info = await api.getStoreInfo();
       setStoreName(info.store_nm);
       setCheckinPolicy(info.checkin_policy);
+
       if (info.meta_data) {
         try {
           const meta = typeof info.meta_data === 'string' ? JSON.parse(info.meta_data) : info.meta_data;

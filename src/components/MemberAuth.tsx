@@ -553,86 +553,88 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             </div>
           </div>
 
-          {/* 테스트 및 시뮬레이션용 빠른 태그 도구 (Deep Slate High-Legibility Style) */}
-          <div 
-            style={{ 
-              width: isSubModal ? '480px' : '680px', 
-              padding: '16px 20px', 
-              borderRadius: '20px',
-              background: 'rgba(241, 245, 249, 0.9)',
-              border: '1px solid #CBD5E1',
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.03)'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
-                DEBUG SIMULATOR
-              </span>
-              <span style={{ fontSize: '12px', color: '#059669', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 10px', borderRadius: '12px', fontWeight: 800 }}>
-                READY
-              </span>
+          {/* 테스트 및 시뮬레이션용 빠른 태그 도구 (개발 환경 전용 격리) */}
+          {import.meta.env.DEV && (
+            <div 
+              style={{ 
+                width: isSubModal ? '480px' : '680px', 
+                padding: '16px 20px', 
+                borderRadius: '20px',
+                background: 'rgba(241, 245, 249, 0.9)',
+                border: '1px solid #CBD5E1',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.03)'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
+                  DEBUG SIMULATOR
+                </span>
+                <span style={{ fontSize: '12px', color: '#059669', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 10px', borderRadius: '12px', fontWeight: 800 }}>
+                  DEV ONLY
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+                <button 
+                  onClick={() => setDetectedMember({
+                    member_no: 'M260501',
+                    member_name: '김골프',
+                    masked_name: '김*프',
+                    hp: '010-1234-5678',
+                    email: 'golf@example.com',
+                    member_grade: 'REGULAR',
+                    status_cd: 'ACTIVE'
+                  })}
+                  style={{ 
+                    fontSize: '15px', 
+                    fontWeight: 800,
+                    padding: '12px', 
+                    background: '#ffffff', 
+                    border: '1.5px solid #CBD5E1',
+                    borderRadius: '12px',
+                    color: '#0F172A',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Smartphone size={18} color="#059669" /> 안드로이드 NFC (김골프)
+                </button>
+                <button 
+                  onClick={() => setDetectedMember({
+                    member_no: 'M260502',
+                    member_name: '이프로',
+                    masked_name: '이*로',
+                    hp: '010-9876-5432',
+                    email: 'pro@example.com',
+                    member_grade: 'VIP',
+                    status_cd: 'ACTIVE'
+                  })}
+                  style={{ 
+                    fontSize: '15px', 
+                    fontWeight: 800,
+                    padding: '12px', 
+                    background: '#ffffff', 
+                    border: '1.5px solid #CBD5E1',
+                    borderRadius: '12px',
+                    color: '#0F172A',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Radio size={18} color="#059669" /> 아이폰 BLE (이프로)
+                </button>
+              </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
-              <button 
-                onClick={() => setDetectedMember({
-                  member_no: 'M260501',
-                  member_name: '김골프',
-                  masked_name: '김*프',
-                  hp: '010-1234-5678',
-                  email: 'golf@example.com',
-                  member_grade: 'REGULAR',
-                  status_cd: 'ACTIVE'
-                })}
-                style={{ 
-                  fontSize: '15px', 
-                  fontWeight: 800,
-                  padding: '12px', 
-                  background: '#ffffff', 
-                  border: '1.5px solid #CBD5E1',
-                  borderRadius: '12px',
-                  color: '#0F172A',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <Smartphone size={18} color="#059669" /> 안드로이드 NFC (김골프)
-              </button>
-              <button 
-                onClick={() => setDetectedMember({
-                  member_no: 'M260502',
-                  member_name: '이프로',
-                  masked_name: '이*로',
-                  hp: '010-9876-5432',
-                  email: 'pro@example.com',
-                  member_grade: 'VIP',
-                  status_cd: 'ACTIVE'
-                })}
-                style={{ 
-                  fontSize: '15px', 
-                  fontWeight: 800,
-                  padding: '12px', 
-                  background: '#ffffff', 
-                  border: '1.5px solid #CBD5E1',
-                  borderRadius: '12px',
-                  color: '#0F172A',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <Radio size={18} color="#059669" /> 아이폰 BLE (이프로)
-              </button>
-            </div>
-          </div>
+          )}
         </div>
       )}
       </div>
