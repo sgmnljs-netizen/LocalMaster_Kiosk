@@ -20,95 +20,16 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   isJustAllocated = false,
 }) => {
   // 🧮 5대 시간 변수 누적 합산 정밀 계산 함수 (Master Total Availability Calculation)
-  const calculateTotalFreeTime = () => {
-    // 1. 미들웨어 실시간 타석 장비 전달 잔여시간 (config_json 1순위 파싱)
-    let middlewareMin: number | null = null;
-    if (bay.config_json) {
-      try {
-        const cfg = typeof bay.config_json === 'string' ? JSON.parse(bay.config_json) : bay.config_json;
-        if (cfg) {
-          if (cfg.remaining_time !== undefined && cfg.remaining_time !== null) {
-            middlewareMin = parseInt(cfg.remaining_time, 10);
-          } else if (cfg.remaining_min !== undefined && cfg.remaining_min !== null) {
-            middlewareMin = parseInt(cfg.remaining_min, 10);
-          }
-        }
-      } catch (e) {}
-    }
+  const canonicalStatus = (bay as any).status_info?.code || bay.status;
+  const isOccupied = canonicalStatus === 'OCCUPIED' || canonicalStatus === 'USE';
+  const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
+  const isPrepare = canonicalStatus === 'PREPARE';
+  const isMaintenance = canonicalStatus === 'UNDER_MAINTENANCE' || canonicalStatus === 'REPAIR' || canonicalStatus === 'ERROR';
+  const isAvailable = canonicalStatus === 'AVAILABLE' && !isOccupied && !isPreOccupied && !isPrepare && !isMaintenance;
 
-    // 미들웨어 수신값이 있으면 1순위 (0분도 포함), 없으면 bay.minutes_left 사용
-    let currentRemMin = middlewareMin !== null ? Math.max(0, middlewareMin) : (bay.minutes_left !== undefined ? bay.minutes_left : 0);
+  const totalRemainingMin = (bay as any).status_info?.minutes_left ?? bay.minutes_left ?? 0;
+  const finalEndTimeStr = bay.end_time ? (bay.end_time.includes(':') ? bay.end_time : `${bay.end_time.slice(0, 2)}:${bay.end_time.slice(2, 4)}`) : '종료';
 
-    // 🔄 [체크인 대기 보완] CHK/PREPARE/REQ 대기 상태이고 미들웨어 작동 전일 때 기본 배정 시간(60분) 적용
-    const isPending = ['CHK', 'PREPARE', 'REQ', 'RSV', 'HOLD'].includes((bay as any).status_cd || bay.status);
-    if (currentRemMin === 0 && isPending) {
-      currentRemMin = (bay as any).duration_min || 0;
-    }
-
-    // 2. POS/Admin 서비스 연장분
-    const extendMin = (bay as any).extend_min || (bay as any).bonus_min || 0;
-
-    // 3. 후속 대기 세션 수 및 총 이용분 (waiting_res_count)
-    const waitingCount = (bay as any).waiting_res_count || 0;
-    const waitingMin = (bay as any).waiting_res_total_min || 0;
-
-    // 4. 세션 전환 갭 (세션 당 1분 정비/대기 타임)
-    const bufferGapMin = waitingCount > 0 ? (waitingCount * 1) : 0;
-
-    // 5. 선점 홀드 타임 (preoccupy_hold_sec ➔ 분 변환)
-    const holdSec = (bay as any).preoccupy_hold_sec || 0;
-    const holdMin = Math.ceil(holdSec / 60);
-
-    // 6. [대기시간(Prepare Time) 정밀 합산] PREPARE 상태이거나 대기시간 속성이 전달된 경우 반영
-    let prepareMin = (bay as any).prepare_min || (bay as any).prepare_time || 0;
-    if (((bay.status as string) === 'PREPARE' || (bay as any).status_cd === 'PREPARE') && prepareMin === 0) {
-      prepareMin = 1; // 기본 대기시간 1분
-    }
-
-    // ➔ 5대 변수 누적 총 합산 잔여시간 (분)
-    let totalRemainingMin = currentRemMin + extendMin + waitingMin + bufferGapMin + holdMin + prepareMin;
-
-    // ➔ 백엔드 SSOT 잔여시간(minutes_left) 전달 시 정밀 동기화
-    if (bay.minutes_left !== undefined && bay.minutes_left !== null) {
-      const diffMin = bay.minutes_left ?? 0;
-      // 대기 세션시간(waitingMin)과 1번째 세션 남은 시간(diffMin)을 누적 합산
-      const accumulatedMin = diffMin + waitingMin + extendMin + bufferGapMin + holdMin + prepareMin;
-      if (accumulatedMin > totalRemainingMin) {
-        totalRemainingMin = accumulatedMin;
-      }
-    }
-
-    // ➔ 최종 빈 타석 예정 시각 도출 (현재 시각 KST 기준 + totalRemainingMin)
-    const now = new Date();
-    const finalFreeDate = new Date(now.getTime() + totalRemainingMin * 60 * 1000);
-    const hours = String(finalFreeDate.getHours()).padStart(2, '0');
-    const minutes = String(finalFreeDate.getMinutes()).padStart(2, '0');
-    const finalEndTimeStr = `${hours}:${minutes}`;
-
-    return {
-      currentRemMin,
-      totalRemainingMin,
-      finalEndTimeStr,
-    };
-  };
-
-  const { currentRemMin, totalRemainingMin, finalEndTimeStr } = calculateTotalFreeTime();
-
-  // 🔄 [동기화 핵심 픽스] 체크인 대기/입장 대기/이용 중/대기 세션 상태 정밀 판정
-  const isPendingState = ['CHK', 'PREPARE', 'REQ', 'RSV', 'HOLD', 'PENDING'].includes((bay as any).status_cd || bay.status);
-  const hasWaitingSessions = ((bay as any).waiting_res_count || 0) > 0;
-  const hasActiveRemainingTime = totalRemainingMin > 0;
-
-  const rawAvailable = bay.status === 'AVAILABLE';
-  const rawOccupied = bay.status === 'OCCUPIED' || (bay as any).status === 'USE' || (bay.status as any) === 'PREPARE' || isPendingState || hasWaitingSessions;
-
-  // [UI 붕괴 방지 가딩] rawOccupied 상태면 파싱 오차 여부와 무관하게 무조건 사용중(isOccupied = true)으로 보장
-  const isOccupied = rawOccupied;
-  const isAvailable = rawAvailable && !isOccupied && !isPendingState && !hasWaitingSessions;
-  const isPreOccupied = bay.status === 'PRE_OCCUPIED';
-  const isMaintenance = bay.status === 'UNDER_MAINTENANCE' || (bay.status as any) === 'REPAIR' || (bay.status as any) === 'ERROR';
-
-  // 🔄 [60분 스케일 잔여시간 게이지] 60분 이상 = 100% 꽉 참, 0~59분 = 잔여시간 비례 줄어듦
   const progressPercent = totalRemainingMin >= 60
     ? 100
     : Math.max(0, Math.min(100, (totalRemainingMin / 60) * 100));

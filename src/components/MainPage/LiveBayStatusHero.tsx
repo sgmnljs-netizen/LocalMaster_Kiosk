@@ -1,14 +1,17 @@
 import React from 'react';
+import type { Bay } from '../../services/api';
 
-// Mock Data
-const MOCK_BAYS = Array.from({ length: 8 }, (_, i) => ({
-  id: `bay-${i + 1}`,
-  no: i + 1,
-  status: i % 3 === 0 ? 'IN_USE' : 'AVAILABLE',
-  timeRemaining: i % 3 === 0 ? 45 : null,
-}));
+interface LiveBayStatusHeroProps {
+  bays?: Bay[];
+}
 
-export default function LiveBayStatusHero() {
+export default function LiveBayStatusHero({ bays = [] }: LiveBayStatusHeroProps) {
+  const displayBays = bays.length > 0 ? bays.slice(0, 8) : Array.from({ length: 8 }, (_, i) => ({
+    bay_no: i + 1,
+    status: 'AVAILABLE' as const,
+    minutes_left: undefined,
+  }));
+
   return (
     <div className="bento-item bento-item-hero" style={{ display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
@@ -31,37 +34,43 @@ export default function LiveBayStatusHero() {
         gap: '16px',
         flex: 1
       }}>
-        {MOCK_BAYS.map((bay) => (
-          <button 
-            key={bay.id} 
-            className={`soft-btn bay-item ${bay.status === 'AVAILABLE' ? 'available' : 'in-use'}`}
-            style={{ 
-              height: '100%', 
-              minHeight: '140px',
-              padding: '16px' 
-            }}
-          >
-            <span style={{ 
-              fontSize: '32px', 
-              fontWeight: 'bold', 
-              color: bay.status === 'AVAILABLE' ? 'var(--text-primary)' : 'var(--color-cloud-dancer)' 
-            }}>
-              {bay.no}
-            </span>
-            {bay.status === 'IN_USE' && bay.timeRemaining && (
+        {displayBays.map((bay) => {
+          const canonicalStatus = (bay as any).status_info?.code || bay.status;
+          const isUse = canonicalStatus === 'OCCUPIED' || canonicalStatus === 'USE';
+          const remMin = (bay as any).status_info?.minutes_left ?? bay.minutes_left;
+
+          return (
+            <button 
+              key={bay.bay_no} 
+              className={`soft-btn bay-item ${!isUse ? 'available' : 'in-use'}`}
+              style={{ 
+                height: '100%', 
+                minHeight: '140px',
+                padding: '16px' 
+              }}
+            >
               <span style={{ 
-                marginTop: '12px', 
-                fontSize: '18px', 
-                color: 'var(--color-sweet-corn)',
-                backgroundColor: 'rgba(0,0,0,0.2)',
-                padding: '4px 12px',
-                borderRadius: '12px'
+                fontSize: '32px', 
+                fontWeight: 'bold', 
+                color: !isUse ? 'var(--text-primary)' : 'var(--color-cloud-dancer)' 
               }}>
-                {bay.timeRemaining}분 남음
+                {bay.bay_no}
               </span>
-            )}
-          </button>
-        ))}
+              {isUse && remMin !== undefined && remMin !== null && (
+                <span style={{ 
+                  marginTop: '12px', 
+                  fontSize: '18px', 
+                  color: 'var(--color-sweet-corn)',
+                  backgroundColor: 'rgba(0,0,0,0.2)',
+                  padding: '4px 12px',
+                  borderRadius: '12px'
+                }}>
+                  {remMin}분 남음
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

@@ -70,7 +70,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   }, []);
 
   const currentRemMin = calculateRemMin(currentBay);
-  const isTimeRestricted = isMoveMode && currentBay && currentRemMin < 5;
+  const isTimeRestricted = isMoveMode && currentBay && ((currentBay as any).status_info?.is_transferable === false || currentRemMin < 5);
   const hasNoActiveBay = isMoveMode && !currentBay;
 
   // 컴포넌트 마운트 시 최신 타석 정보 강제 갱신

@@ -61,31 +61,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   };
 
   const startDisplay = formatTime(startTime);
-  let endDisplay = formatTime(endTime);
-
-  if (!endTime && startTime) {
-    let baseDt: Date | null = null;
-    const cleanSt = startTime.trim();
-    if (cleanSt.includes('T')) {
-      baseDt = new Date(cleanSt);
-    } else if (cleanSt.length === 4 && !isNaN(Number(cleanSt))) {
-      const now = new Date();
-      const hh = parseInt(cleanSt.slice(0, 2), 10);
-      const mm = parseInt(cleanSt.slice(2, 4), 10);
-      baseDt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm);
-    } else if (cleanSt.includes(':')) {
-      const parts = cleanSt.split(':');
-      const now = new Date();
-      baseDt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(parts[0], 10), parseInt(parts[1], 10));
-    }
-
-    if (baseDt && !isNaN(baseDt.getTime())) {
-      baseDt.setMinutes(baseDt.getMinutes() + durationMin);
-      const hours = String(baseDt.getHours()).padStart(2, '0');
-      const mins = String(baseDt.getMinutes()).padStart(2, '0');
-      endDisplay = `${hours}:${mins}`;
-    }
-  }
+  let endDisplay = formatTime(endTime) || '종료시';
 
   return (
     <div 

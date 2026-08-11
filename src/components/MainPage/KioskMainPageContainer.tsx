@@ -5,7 +5,7 @@ import UserAssetWidget from './UserAssetWidget';
 import DailyScheduleWidget from './DailyScheduleWidget';
 import EnvironmentNoticeWidget from './EnvironmentNoticeWidget';
 
-export default function KioskMainPageContainer() {
+export default function KioskMainPageContainer({ bays = [] }: { bays?: any[] }) {
   return (
     <div style={{
       width: '1080px',
@@ -20,7 +20,7 @@ export default function KioskMainPageContainer() {
       
       <div className="bento-grid">
         <Suspense fallback={<div className="bento-item bento-item-hero animate-pulse-glow" />}>
-          <LiveBayStatusHero />
+          <LiveBayStatusHero bays={bays} />
         </Suspense>
 
         <Suspense fallback={<div className="bento-item animate-pulse-glow" />}>

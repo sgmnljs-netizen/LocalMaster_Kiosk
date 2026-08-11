@@ -141,8 +141,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     if (!bay) return;
     if (bay.status === 'UNDER_MAINTENANCE') return;
 
-    // 이용 중인 타석 선택 시 ➔ 원래 배정 팝업에 연쇄 배정 정밀 시각 안내 바인딩
-    const isBayOccupiedStatus = bay.status === 'OCCUPIED' || (bay as any).status === 'USE' || (bay as any).status === 'IN_USE' || (bay as any).status === 'PREPARE';
+    const canonicalStatus = (bay as any).status_info?.code || bay.status;
+    const isBayOccupiedStatus = canonicalStatus === 'OCCUPIED' || canonicalStatus === 'USE' || canonicalStatus === 'PREPARE';
     if (isBayOccupiedStatus) {
       let mwMin = 0;
       if (bay.config_json) {

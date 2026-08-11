@@ -87,9 +87,11 @@ export interface Bay {
   end_time?: string | null; // HHmm
   minutes_left?: number;
   duration_min?: number | null;
+  elapsed_min?: number | null;
   prepare_remaining_sec?: number | null;
   lock_terminal_id?: string | null;
   lock_expired_at?: string | null;
+  status_info?: Record<string, any> | null;
   bay_name?: string;
   simulator_type?: string;
   handedness?: string;
