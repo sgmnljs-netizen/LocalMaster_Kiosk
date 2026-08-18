@@ -1,6 +1,7 @@
 import React from 'react';
 import { Bay } from '../services/api';
 import { Lock, Wrench, Clock } from 'lucide-react';
+import { TimeMaster } from '../utils/timeMaster';
 
 interface TeeboxTileCardProps {
   bay: Bay;
@@ -27,8 +28,8 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   const isMaintenance = canonicalStatus === 'UNDER_MAINTENANCE' || canonicalStatus === 'REPAIR' || canonicalStatus === 'ERROR';
   const isAvailable = canonicalStatus === 'AVAILABLE' && !isOccupied && !isPreOccupied && !isPrepare && !isMaintenance;
 
-  const totalRemainingMin = (bay as any).status_info?.minutes_left ?? bay.minutes_left ?? 0;
-  const finalEndTimeStr = bay.end_time ? (bay.end_time.includes(':') ? bay.end_time : `${bay.end_time.slice(0, 2)}:${bay.end_time.slice(2, 4)}`) : '종료';
+  const totalRemainingMin = (bay as any).status_info?.minutes_left ?? TimeMaster.getRemainingMinutes(bay);
+  const finalEndTimeStr = TimeMaster.formatEndTime(bay);
 
   const progressPercent = totalRemainingMin >= 60
     ? 100
@@ -169,7 +170,57 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
                 letterSpacing: '-0.2px',
               }}
             >
-              {bay.simulator_type === 'GDR_PLUS' ? 'GDR+' : bay.simulator_type === 'QED' ? 'QED' : bay.simulator_type === 'SG_GOLF' ? 'SG' : bay.simulator_type === 'LM' ? 'LM' : bay.simulator_type === 'STR' ? 'STR' : bay.simulator_type === 'VIP' ? 'VIP' : bay.simulator_type}
+              {bay.simulator_type === 'GDR_PLUS'
+                ? 'GDR+'
+                : bay.simulator_type === 'KAKAO_VX'
+                ? 'VX'
+                : bay.simulator_type === 'QED'
+                ? 'QED'
+                : bay.simulator_type === 'SDR'
+                ? 'SDR'
+                : bay.simulator_type === 'SG_GOLF'
+                ? 'SG'
+                : bay.simulator_type === 'LM'
+                ? 'LM'
+                : bay.simulator_type === 'STR'
+                ? 'STR'
+                : bay.simulator_type === 'VIP'
+                ? 'VIP'
+                : bay.simulator_type}
+            </span>
+          )}
+
+          {/* 스크린 규격 배지 */}
+          {bay.screen_spec && bay.screen_spec !== 'STANDARD' && (
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 800,
+                padding: '2px 7px',
+                borderRadius: '6px',
+                backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
+                color: isSelected ? '#ffffff' : '#475569',
+                letterSpacing: '-0.2px',
+              }}
+            >
+              {bay.screen_spec === 'WIDE_16_9' ? '16:9' : '커브드'}
+            </span>
+          )}
+
+          {/* 동반자 허용 배지 */}
+          {bay.allow_companion && (
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 800,
+                padding: '2px 7px',
+                borderRadius: '6px',
+                backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#ecfeff',
+                color: isSelected ? '#ffffff' : '#155e75',
+                letterSpacing: '-0.2px',
+              }}
+            >
+              동반자
             </span>
           )}
 
@@ -242,28 +293,46 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
           </div>
         )}
 
+        {isPrepare && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isSelected ? '#ffffff' : '#d97706', fontSize: '13px', fontWeight: 800 }}>
+            <Clock size={13} />
+            <span>
+              대기 중 ({bay.prepare_remaining_sec !== undefined && bay.prepare_remaining_sec !== null
+                ? `${Math.floor(bay.prepare_remaining_sec / 60)}:${String(bay.prepare_remaining_sec % 60).padStart(2, '0')}`
+                : '곧 시작'})
+            </span>
+          </div>
+        )}
+
         {isOccupied && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
             {/* 1. 상단 대형 강세: 누적 실질 잔여시간 (크고 굵게) */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Clock size={15} color="#059669" />
-              <span style={{ fontSize: '16px', fontWeight: 900, color: '#059669', letterSpacing: '-0.4px' }}>
+              <Clock size={15} color={isSelected ? '#ffffff' : '#059669'} />
+              <span style={{ fontSize: '16px', fontWeight: 900, color: isSelected ? '#ffffff' : '#059669', letterSpacing: '-0.4px' }}>
                 {totalRemainingMin > 0 ? `${totalRemainingMin}분 남음` : '1분 미만'}
               </span>
             </div>
 
             {/* 2. 하단 서브: 그 아래 정밀 계산된 최종 빈 타석 예정 시각 (작게) */}
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#71717a', letterSpacing: '-0.2px', paddingLeft: '2px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 600, color: isSelected ? 'rgba(255,255,255,0.8)' : '#71717a', letterSpacing: '-0.2px', paddingLeft: '2px' }}>
               {finalEndTimeStr} 빈타석 예정
             </div>
 
+            {/* 2-1. 다음 연쇄/대기 예약 안내 뱃지 */}
+            {bay.next_res_start_time && (
+              <div style={{ fontSize: '11px', fontWeight: 700, color: isSelected ? '#fed7aa' : '#ea580c', letterSpacing: '-0.2px', paddingLeft: '2px' }}>
+                대기예약 ({bay.next_res_start_time.slice(0, 2)}:{bay.next_res_start_time.slice(2, 4)})
+              </div>
+            )}
+
             {/* 잔여시간 누적 프로그레스 게이지 바 */}
-            <div style={{ width: '100%', height: '5px', backgroundColor: '#e4e4e7', borderRadius: '3px', overflow: 'hidden', marginTop: '2px' }}>
+            <div style={{ width: '100%', height: '5px', backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#e4e4e7', borderRadius: '3px', overflow: 'hidden', marginTop: '2px' }}>
               <div
                 style={{
                   width: `${progressPercent}%`,
                   height: '100%',
-                  backgroundColor: totalRemainingMin <= 15 ? '#d97706' : '#059669',
+                  backgroundColor: totalRemainingMin <= 15 ? '#d97706' : isSelected ? '#ffffff' : '#059669',
                   borderRadius: '3px',
                   transition: 'width 0.5s ease',
                 }}
@@ -273,14 +342,14 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         )}
 
         {isPreOccupied && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#6366f1', fontSize: '13px', fontWeight: 700 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isSelected ? '#ffffff' : '#6366f1', fontSize: '13px', fontWeight: 700 }}>
             <Lock size={13} />
             <span>결제 진행 중</span>
           </div>
         )}
 
         {isMaintenance && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#ef4444', fontSize: '13px', fontWeight: 700 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isSelected ? '#ffffff' : '#ef4444', fontSize: '13px', fontWeight: 700 }}>
             <Wrench size={13} />
             <span>점검 중</span>
           </div>

@@ -28,6 +28,7 @@ export interface MemberAsset {
   end_dt?: string;
   days?: number;
   remain_days?: number;
+  duration_min?: number;
   logic_type?: string;
   pass_type?: string;
   allowed_categories?: string[];
@@ -83,14 +84,19 @@ export interface Bay {
   floor?: string; // 백엔드 실제 데이터 필드 (e.g. '1F', '2F')
   zone_code?: string; // 타석 소속 구역 (e.g. 'BAY', 'PAR3')
   type: 'RIGHT' | 'LEFT'; // 우타, 좌타
-  status: 'AVAILABLE' | 'PRE_OCCUPIED' | 'OCCUPIED' | 'UNDER_MAINTENANCE';
+  status: 'AVAILABLE' | 'PRE_OCCUPIED' | 'OCCUPIED' | 'PREPARE' | 'USE' | 'UNDER_MAINTENANCE' | 'MAINTENANCE' | 'DISABLED';
   current_user_name?: string | null;
   current_user_hp?: string | null;
+  start_time?: string | null;
   end_time?: string | null; // HHmm
   minutes_left?: number;
   duration_min?: number | null;
   elapsed_min?: number | null;
   prepare_remaining_sec?: number | null;
+  server_epoch_ms?: number | null;
+  start_epoch_ms?: number | null;
+  end_epoch_ms?: number | null;
+  prepare_expired_epoch_ms?: number | null;
   lock_terminal_id?: string | null;
   lock_expired_at?: string | null;
   status_info?: Record<string, any> | null;
@@ -102,6 +108,9 @@ export interface Bay {
   allow_companion?: boolean;
   max_occupancy?: number;
   config_json?: string;
+  next_res_start_time?: string | null;
+  next_res_name?: string | null;
+  next_res_checkin_status?: string | null;
 }
 
 export interface Locker {
@@ -219,7 +228,12 @@ class HybridAPIClient {
           const masterData: KioskMasterResponse = await res.json();
 
           // Edge DB 캐시 실시간 바인딩 & 저장
-          if (masterData.bays) localStorage.setItem('LM_BAYS', JSON.stringify(masterData.bays));
+          if (masterData.bays) {
+            if (masterData.bays.length > 0 && masterData.bays[0].server_epoch_ms) {
+              TimeMaster.syncServerTime(masterData.bays[0].server_epoch_ms);
+            }
+            localStorage.setItem('LM_BAYS', JSON.stringify(masterData.bays));
+          }
           if (masterData.lockers) localStorage.setItem('LM_LOCKERS', JSON.stringify(masterData.lockers));
           if (masterData.products) localStorage.setItem('LM_PRODUCTS', JSON.stringify(masterData.products));
           if (masterData.members) localStorage.setItem('LM_MEMBERS', JSON.stringify(masterData.members));
@@ -285,6 +299,14 @@ class HybridAPIClient {
             clearTimeout(this.wsReconnectTimer);
             this.wsReconnectTimer = null;
           }
+          // [Reconnection Refresh Guard] 소켓 재연결 수립 즉시 최신 타석 상태 강제 재동기화
+          this.getBays().then(bays => {
+            bays.forEach(bay => {
+              this.bayUpdateListeners.forEach(listener => listener(bay));
+            });
+          }).catch(err => {
+            console.error('[WS-Kiosk] 재연결 타석 동기화 실패:', err);
+          });
           // Ping 유지 (30초마다)
           const pingInterval = setInterval(() => {
             if (this.ws?.readyState === WebSocket.OPEN) {
@@ -300,38 +322,43 @@ class HybridAPIClient {
             const data = JSON.parse(evt.data) as Record<string, unknown>;
             onMessage?.(data);
 
-            if (data.type === 'bay_updated' || data.type === 'bay_update') {
+            const eventType = String(data.type || data.event || '');
+            const bayObj = (data.bay as Record<string, unknown>) || data;
+            const bayNo = (bayObj.bay_no as number) || (data.bay_no as number);
+
+            if (['bay_updated', 'bay_update', 'bay_status_updated', 'bay_preoccupy'].includes(eventType)) {
               // Edge DB LocalStorage 즉시 동기화
               const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
-              const idx = bays.findIndex(b => b.bay_no === (data.bay_no as number));
+              const idx = bays.findIndex(b => b.bay_no === bayNo);
               if (idx !== -1) {
-                if (data.status === 'OCCUPIED') {
-                  bays[idx].status = 'OCCUPIED';
-                  bays[idx].current_user_name = (data.user_name as string) || (data.member_name as string) || '손님';
-                  bays[idx].lock_terminal_id = null;
-                  bays[idx].lock_expired_at = null;
-                } else if (data.status === 'AVAILABLE') {
-                  bays[idx].status = 'AVAILABLE';
-                  bays[idx].current_user_name = null;
-                  bays[idx].end_time = null;
-                  bays[idx].minutes_left = undefined;
-                }
+                const newStatus = (bayObj.status as string) || (data.status as string) || (eventType === 'bay_preoccupy' ? 'PRE_OCCUPIED' : bays[idx].status);
+                bays[idx] = {
+                  ...bays[idx],
+                  status: newStatus as any,
+                  current_user_name: (bayObj.member_name as string) || (bayObj.user_name as string) || (newStatus === 'AVAILABLE' ? null : bays[idx].current_user_name),
+                  end_time: (bayObj.end_time as string) || bays[idx].end_time,
+                  end_epoch_ms: (bayObj.end_epoch_ms as number) || bays[idx].end_epoch_ms,
+                  server_epoch_ms: (data.server_epoch_ms as number) || (bayObj.server_epoch_ms as number) || Date.now(),
+                  prepare_expired_epoch_ms: (bayObj.prepare_expired_epoch_ms as number) || bays[idx].prepare_expired_epoch_ms,
+                  lock_terminal_id: (data.terminal_id as string) || (bayObj.lock_terminal_id as string) || (newStatus === 'AVAILABLE' ? null : bays[idx].lock_terminal_id),
+                };
                 localStorage.setItem('LM_BAYS', JSON.stringify(bays));
                 this.bayUpdateListeners.forEach(listener => listener(bays[idx]));
               }
             }
 
-            // [Fix-3C] bay_release: 종료된 타석 AVAILABLE 복원
-            if (data.type === 'bay_release') {
+            // bay_release: 종료된 타석 AVAILABLE 복원
+            if (eventType === 'bay_release') {
               const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
               const bayNos = (data.bay_nos as number[]) || (data.bay_no ? [data.bay_no as number] : []);
               let changed = false;
-              for (const bayNo of bayNos) {
-                const idx = bays.findIndex(b => b.bay_no === bayNo);
+              for (const bNo of bayNos) {
+                const idx = bays.findIndex(b => b.bay_no === bNo);
                 if (idx !== -1) {
                   bays[idx].status = 'AVAILABLE';
                   bays[idx].current_user_name = null;
                   bays[idx].end_time = null;
+                  bays[idx].end_epoch_ms = undefined;
                   bays[idx].minutes_left = undefined;
                   bays[idx].lock_terminal_id = null;
                   this.bayUpdateListeners.forEach(listener => listener(bays[idx]));
@@ -364,15 +391,20 @@ class HybridAPIClient {
 
     connect();
 
-    // Cleanup 함수 반환 (React useEffect return용)
+    // Cleanup 함수 반환 (전역 소켓 보존 및 구독 리스너만 해제)
     return () => {
-      if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
-      if (this.ws) {
-        this.ws.onclose = null; // 자동 재연결 방지
-        this.ws.close();
-        this.ws = null;
-      }
       this.bayUpdateListeners = this.bayUpdateListeners.filter(l => l !== onBayUpdate);
+      if (this.bayUpdateListeners.length === 0) {
+        if (this.wsReconnectTimer) {
+          clearTimeout(this.wsReconnectTimer);
+          this.wsReconnectTimer = null;
+        }
+        if (this.ws) {
+          this.ws.onclose = null;
+          this.ws.close();
+          this.ws = null;
+        }
+      }
     };
   }
 
@@ -551,10 +583,14 @@ class HybridAPIClient {
     if (isConnected) {
       try {
         const res = await fetch(`${BASE_URL}/bays/`, {
-          headers: { 'x-store-cd': STORE_CODE }
+          headers: { 'x-store-cd': this.getStoreCd() }
         });
         if (res.ok) {
-          return await res.json() as Bay[];
+          const bayList = (await res.json()) as Bay[];
+          if (bayList && bayList.length > 0 && bayList[0].server_epoch_ms) {
+            TimeMaster.syncServerTime(bayList[0].server_epoch_ms);
+          }
+          return bayList;
         }
       } catch (err) {
         console.error('Backend getBays failed. Falling back to EdgeDB:', err);
@@ -1051,6 +1087,31 @@ class HybridAPIClient {
   }
 
 
+  // 9.1 라카 연장 홀드 API (백엔드 HOLD 예약 생성)
+  async holdLockerExtension(
+    lockerId: number,
+    amount: number,
+    prodCd: string
+  ): Promise<{ success: boolean; res_id: string; message: string }> {
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/lockers/extend/hold?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+          method: 'POST',
+          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ locker_id: lockerId, amount, prod_cd: prodCd })
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (err) {
+        console.error('[Locker Hold API] 백엔드 HOLD 생성 실패, EdgeDB 폴백:', err);
+      }
+    }
+    const resId = `RES_LOCKER_${Date.now()}_${lockerId}`;
+    return { success: true, res_id: resId, message: '오프라인 라카 연장 대기 완료' };
+  }
+
   // 10. 라카 연장 처리
   async extendLocker(
     lockerNo: number, 
@@ -1060,10 +1121,11 @@ class HybridAPIClient {
     const lockers = JSON.parse(localStorage.getItem('LM_LOCKERS') || '[]') as Locker[];
     const lIdx = lockers.findIndex(l => l.locker_no === lockerNo);
 
-    if (lIdx !== -1 && lockers[lIdx].status === 'OCCUPIED' && lockers[lIdx].end_dt) {
+    if (lIdx !== -1 && (lockers[lIdx].status === 'OCCUPIED' || lockers[lIdx].status === 'EXPIRED') && lockers[lIdx].end_dt) {
       const currentEnd = new Date(lockers[lIdx].end_dt!);
       currentEnd.setDate(currentEnd.getDate() + extendDays);
       
+      lockers[lIdx].status = 'OCCUPIED';
       lockers[lIdx].end_dt = currentEnd.toISOString().slice(0, 10);
       localStorage.setItem('LM_LOCKERS', JSON.stringify(lockers));
 
@@ -1229,7 +1291,7 @@ class HybridAPIClient {
         externalSignal.addEventListener('abort', () => controller.abort());
       }
 
-      const res = await fetch(`http://127.0.0.1:8000/api/v1/face-terminal/scan-identity?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
+      const res = await fetch(`${BASE_URL}/v1/face-terminal/scan-identity?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         signal: externalSignal || controller.signal
@@ -1259,7 +1321,7 @@ class HybridAPIClient {
   async startFaceCaptureMode(deviceIp?: string): Promise<boolean> {
     const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/v1/face-terminal/start-capture?ip=${encodeURIComponent(ip)}`, {
+      const res = await fetch(`${BASE_URL}/v1/face-terminal/start-capture?ip=${encodeURIComponent(ip)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1274,7 +1336,7 @@ class HybridAPIClient {
   async detectFaceCamera(deviceIp?: string): Promise<{ detected: boolean; imageBase64: string }> {
     const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/v1/face-terminal/detect-face?ip=${encodeURIComponent(ip)}`, {
+      const res = await fetch(`${BASE_URL}/v1/face-terminal/detect-face?ip=${encodeURIComponent(ip)}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1293,7 +1355,7 @@ class HybridAPIClient {
   async cancelFaceCaptureMode(deviceIp?: string): Promise<boolean> {
     const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/v1/face-terminal/cancel-capture?ip=${encodeURIComponent(ip)}`, {
+      const res = await fetch(`${BASE_URL}/v1/face-terminal/cancel-capture?ip=${encodeURIComponent(ip)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1310,7 +1372,7 @@ class HybridAPIClient {
     const storeCd = this.getStoreCd() || STORE_CODE;
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/v1/face-terminal/enroll', {
+      const res = await fetch(`${BASE_URL}/v1/face-terminal/enroll`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1499,11 +1561,11 @@ class HybridAPIClient {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/payment-webhook`, {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/payment-webhook?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'x-store-cd': STORE_CODE
+            'x-store-cd': this.getStoreCd()
           },
           body: JSON.stringify({
             status: 'success',
@@ -1610,7 +1672,11 @@ class HybridAPIClient {
       try {
         const res = await fetch(`${BASE_URL}/reservations/${resId}/cancel`, {
           method: 'PATCH',
-          headers: { 'x-store-cd': STORE_CODE }
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-store-cd': this.getStoreCd() 
+          },
+          body: JSON.stringify({ memo: 'Kiosk Cancel' })
         });
         if (res.ok) {
           const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];

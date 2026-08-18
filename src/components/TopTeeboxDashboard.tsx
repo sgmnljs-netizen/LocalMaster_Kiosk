@@ -1,6 +1,7 @@
 import React from 'react';
 import { Layers } from 'lucide-react';
 import { Bay } from '../services/api';
+import { TimeMaster } from '../utils/timeMaster';
 
 interface TopTeeboxDashboardProps {
   bays: Bay[];
@@ -49,8 +50,9 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   const renderBayCard = (bay: Bay) => {
     const isAvailable = bay.status === 'AVAILABLE';
     const isPreOccupied = bay.status === 'PRE_OCCUPIED';
-    const isOccupied = bay.status === 'OCCUPIED';
-    const isUnderMaintenance = bay.status === 'UNDER_MAINTENANCE';
+    const isPrepare = bay.status === 'PREPARE';
+    const isOccupied = bay.status === 'OCCUPIED' || bay.status === 'USE';
+    const isUnderMaintenance = bay.status === 'UNDER_MAINTENANCE' || bay.status === 'MAINTENANCE' || bay.status === 'DISABLED';
 
     let bgCol = '#f5f5f7';
     let borderCol = 'rgba(0, 0, 0, 0.06)';
@@ -76,6 +78,14 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
       textColor = '#ffffff';
       subTextColor = '#ffffff';
       label = '';
+    } else if (isPrepare) {
+      // 대기중: 엠버/블루 산뜻한 대기 그라데이션
+      bgCol = 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)';
+      borderCol = 'transparent';
+      textColor = '#ffffff';
+      subTextColor = '#ffffff';
+      glow = '0 4px 12px rgba(2, 132, 199, 0.3)';
+      label = lang === 'KO' ? '대기' : 'Prep';
     } else if (isOccupied) {
       // 리세스드(음각) Soft UI
       bgCol = 'rgba(0, 0, 0, 0.02)';
@@ -84,9 +94,8 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
       subTextColor = '#aeaeb2';
       glow = 'inset 0 4px 6px rgba(0, 0, 0, 0.06)';
       
-      if (bay.minutes_left !== undefined && bay.minutes_left !== null) {
-        label = `${bay.minutes_left}m`;
-      }
+      const remMin = TimeMaster.getRemainingMinutes(bay);
+      label = `${remMin}m`;
     } else if (isUnderMaintenance) {
       // 점검중: 차분한 그레이시 브릭레드 음각
       bgCol = 'rgba(178, 34, 34, 0.04)';

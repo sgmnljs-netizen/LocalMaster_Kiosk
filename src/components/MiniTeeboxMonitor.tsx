@@ -1,6 +1,7 @@
 import React from 'react';
 import { Layers } from 'lucide-react';
 import { Bay } from '../services/api';
+import { TimeMaster } from '../utils/timeMaster';
 
 interface MiniTeeboxMonitorProps {
   bays: Bay[];
@@ -13,24 +14,41 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
   onBayClick,
   lang
 }) => {
-  // 층별 필터링
-  const floor1Bays = bays.filter(b => b.floor_no === 1);
-  const floor2Bays = bays.filter(b => b.floor_no === 2);
+  // 연습타석 구역 기준 필터링
+  const practiceBays = bays.filter(bay => {
+    const zCode = (bay as any).zone_code || (bay as any).zoneCode || '';
+    return zCode !== 'PAR3' && zCode !== 'ROOM';
+  });
 
-  // 층별 잔여 대수 계산
-  const getAvailableCount = (floorBays: Bay[]) => {
-    return floorBays.filter(b => b.status === 'AVAILABLE').length;
-  };
+  // 동적 층별 그룹핑
+  const floorsMap: { [key: string]: Bay[] } = {};
+  practiceBays.forEach(bay => {
+    let floorKey = '1F';
+    if (bay.floor) {
+      floorKey = String(bay.floor);
+    } else if (bay.floor_no) {
+      floorKey = `${bay.floor_no}F`;
+    }
+    if (!floorsMap[floorKey]) {
+      floorsMap[floorKey] = [];
+    }
+    floorsMap[floorKey].push(bay);
+  });
 
-  const f1Available = getAvailableCount(floor1Bays);
-  const f2Available = getAvailableCount(floor2Bays);
-  const totalAvailable = f1Available + f2Available;
+  const sortedFloors = Object.keys(floorsMap).sort((a, b) => {
+    const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
+    const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
+    return numA - numB;
+  });
+
+  const totalAvailable = practiceBays.filter(b => b.status === 'AVAILABLE').length;
 
   const renderBayIndicator = (bay: Bay) => {
     const isAvailable = bay.status === 'AVAILABLE';
     const isPreOccupied = bay.status === 'PRE_OCCUPIED';
-    const isOccupied = bay.status === 'OCCUPIED';
-    const isUnderMaintenance = bay.status === 'UNDER_MAINTENANCE';
+    const isPrepare = bay.status === 'PREPARE';
+    const isOccupied = bay.status === 'OCCUPIED' || bay.status === 'USE';
+    const isUnderMaintenance = bay.status === 'UNDER_MAINTENANCE' || bay.status === 'MAINTENANCE' || bay.status === 'DISABLED';
 
     let bgCol = 'rgba(255, 255, 255, 0.03)';
     let borderCol = 'rgba(255, 255, 255, 0.1)';
@@ -48,6 +66,10 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
       bgCol = 'rgba(245, 158, 11, 0.15)';
       borderCol = 'rgba(245, 158, 11, 0.5)';
       textColor = 'var(--neon-amber)';
+    } else if (isPrepare) {
+      bgCol = 'rgba(2, 132, 199, 0.18)';
+      borderCol = 'rgba(2, 132, 199, 0.6)';
+      textColor = '#38bdf8';
     } else if (isOccupied) {
       bgCol = 'rgba(79, 70, 229, 0.1)';
       borderCol = 'rgba(79, 70, 229, 0.2)';
@@ -57,6 +79,11 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
       borderCol = 'rgba(239, 68, 68, 0.5)';
       textColor = 'var(--neon-red)';
     }
+
+    const remMin = TimeMaster.getRemainingMinutes(bay);
+    const titleText = `${bay.bay_no}번 타석: ${
+      isAvailable ? '이용가능' : isPrepare ? '대기중' : isOccupied ? `이용중(${remMin}분)` : isPreOccupied ? '선점중' : '점검중'
+    }`;
 
     return (
       <div
@@ -80,7 +107,7 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
           transform: isAvailable ? 'scale(1)' : 'scale(0.95)',
           position: 'relative'
         }}
-        title={`${bay.bay_no}번 타석: ${isAvailable ? '이용가능' : isOccupied ? '이용중' : isPreOccupied ? '선점중' : '점검중'}`}
+        title={titleText}
       >
         {bay.bay_no}
         {/* 좌타석 인디케이터 표시 (L) */}
@@ -135,64 +162,39 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
             {totalAvailable}
           </span>
           <span style={{ fontSize: '16px', color: 'var(--text-secondary)', fontWeight: 700 }}>
-            / {bays.length} {lang === 'KO' ? '대 예약 가능' : 'Bays Available'}
+            / {practiceBays.length} {lang === 'KO' ? '대 예약 가능' : 'Bays Available'}
           </span>
         </div>
       </div>
 
       {/* 우측: 층별 가로 맵 스트립 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>
-        {/* 1층 GDR */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div 
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '6px', 
-              fontSize: '13px', 
-              fontWeight: 900, 
-              color: 'var(--text-secondary)', 
-              background: 'rgba(255,255,255,0.03)',
-              padding: '6px 12px',
-              borderRadius: '12px',
-              border: '0.5px solid var(--glass-border)',
-              minWidth: '95px',
-              justifyContent: 'center'
-            }}
-          >
-            <Layers size={12} />
-            <span>1F GDR+</span>
+        {sortedFloors.map(floorKey => (
+          <div key={floorKey} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '13px', 
+                fontWeight: 900, 
+                color: 'var(--text-secondary)', 
+                background: 'rgba(255,255,255,0.03)',
+                padding: '6px 12px',
+                borderRadius: '12px',
+                border: '0.5px solid var(--glass-border)',
+                minWidth: '95px',
+                justifyContent: 'center'
+              }}
+            >
+              <Layers size={12} />
+              <span>{floorKey}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              {(floorsMap[floorKey] || []).map(renderBayIndicator)}
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            {floor1Bays.map(renderBayIndicator)}
-          </div>
-        </div>
-
-        {/* 2층 VX */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div 
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '6px', 
-              fontSize: '13px', 
-              fontWeight: 900, 
-              color: 'var(--text-secondary)', 
-              background: 'rgba(255,255,255,0.03)',
-              padding: '6px 12px',
-              borderRadius: '12px',
-              border: '0.5px solid var(--glass-border)',
-              minWidth: '95px',
-              justifyContent: 'center'
-            }}
-          >
-            <Layers size={12} />
-            <span>2F VX</span>
-          </div>
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            {floor2Bays.map(renderBayIndicator)}
-          </div>
-        </div>
+        ))}
       </div>
     </div>
   );

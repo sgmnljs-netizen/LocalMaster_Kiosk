@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer } from 'lucide-react';
 import { api, Bay } from '../services/api';
 import { TeeboxTileCard } from './TeeboxTileCard';
+import { TimeMaster } from '../utils/timeMaster';
 
 interface TeeboxMapProps {
   memberNo?: string;
@@ -49,24 +50,10 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       )
     : null;
 
-  // minutes_left 정밀 파싱 및 end_time fallback 계산
+  // minutes_left 정밀 파싱 및 end_time/epoch SSOT fallback 계산
   const calculateRemMin = useCallback((bay: Bay | null | undefined): number => {
     if (!bay) return 0;
-    if (bay.minutes_left !== undefined && bay.minutes_left !== null) {
-      return bay.minutes_left;
-    }
-    if (bay.end_time) {
-      try {
-        const endMs = new Date(bay.end_time).getTime();
-        const nowMs = new Date().getTime();
-        if (!isNaN(endMs)) {
-          return Math.max(0, Math.floor((endMs - nowMs) / 60000));
-        }
-      } catch {
-        return 0;
-      }
-    }
-    return 0;
+    return TimeMaster.getRemainingMinutes(bay);
   }, []);
 
   const currentRemMin = calculateRemMin(currentBay);
@@ -87,13 +74,19 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     }
   }, [selectedBayNo, onRefreshBays]);
 
+  const isConfirmedRef = useRef(false);
+
   // 선점 락 제한시간 1초 간격 갱신
   useEffect(() => {
-    if (selectedBayNo === null) return;
+    if (selectedBayNo === null || isConfirmedRef.current) return;
     
     setCountdown(60);
     const timer = setInterval(() => {
       setCountdown(prev => {
+        if (isConfirmedRef.current) {
+          clearInterval(timer);
+          return prev;
+        }
         if (prev <= 1) {
           // 선점 시간 초과 -> 자동 락 해제
           handleRelease();
@@ -106,6 +99,15 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
 
     return () => clearInterval(timer);
   }, [selectedBayNo, handleRelease, lang]);
+
+  // 컴포넌트 언마운트 시 미확정 선점 타석 자동 해제 Cleanup Guard
+  useEffect(() => {
+    return () => {
+      if (selectedBayNo !== null && !isConfirmedRef.current) {
+        api.releaseBay(selectedBayNo).catch(err => console.error('TeeboxMap cleanup release failed:', err));
+      }
+    };
+  }, [selectedBayNo]);
 
   // 타석 터치 - 원자적 선점(Pre-emption) 락 시도 (useCallback 가딩)
   const handleBayTouch = useCallback(async (bay: Bay) => {
@@ -143,6 +145,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   // 배정 최종 확인 버튼 클릭 (useCallback 가딩)
   const handleConfirm = useCallback(() => {
     if (selectedBayNo !== null) {
+      isConfirmedRef.current = true;
       onBaySelected(selectedBayNo);
     }
   }, [selectedBayNo, onBaySelected]);
@@ -685,23 +688,28 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                     gap: '6px'
                   }}
                 >
-                  {isOccupied && bay.minutes_left !== undefined ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px', width: '100%' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#515154', fontSize: '16px', fontWeight: 800 }}>
-                        <Timer size={14} style={{ color: '#515154' }} />
-                        <span>{bay.minutes_left}분 남음</span>
-                      </div>
-                      <div style={{ width: '85%', height: '4px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
-                        <div 
-                          style={{ 
-                            width: `${Math.min(100, (bay.minutes_left / 60) * 100)}%`, 
-                            height: '100%', 
-                            backgroundColor: '#515154',
-                            transition: 'width 0.5s ease'
-                          }} 
-                        />
-                      </div>
-                    </div>
+                  {isOccupied ? (
+                    (() => {
+                      const remMin = TimeMaster.getRemainingMinutes(bay);
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px', width: '100%' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#515154', fontSize: '16px', fontWeight: 800 }}>
+                            <Timer size={14} style={{ color: '#515154' }} />
+                            <span>{remMin}분 남음</span>
+                          </div>
+                          <div style={{ width: '85%', height: '4px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
+                            <div 
+                              style={{ 
+                                width: `${Math.min(100, (remMin / 60) * 100)}%`, 
+                                height: '100%', 
+                                backgroundColor: '#515154',
+                                transition: 'width 0.5s ease'
+                              }} 
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()
                   ) : (
                     <span style={{ fontSize: '16px', fontWeight: 800, color: statusColor, letterSpacing: '-0.3px' }}>
                       {statusText}

@@ -66,8 +66,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   const checkIfDaily = (prod: Product) => {
     const isDailyLogic = (prod.logic_type as string) === 'DAILY' || (prod.logic_type as string) === 'DAY';
     const isDailyCd = prod.prod_cd.startsWith('D0') || prod.prod_cd.startsWith('DLY');
-    const hasDuration = prod.duration_min != null && prod.duration_min > 0;
-    return isDailyLogic || isDailyCd || hasDuration;
+    return isDailyLogic || isDailyCd;
   };
 
   // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB 물리 컬럼 ➔ JSON access_rules/rules_detail 직접 참조)
@@ -291,7 +290,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                     color: '#ffffff',
                     boxShadow: durationMin === 60 ? '0 4px 12px rgba(52, 199, 89, 0.25)' : '0 4px 12px rgba(0, 113, 227, 0.25)'
                   }}>
-                    {durationMin === 60 ? '★ BEST 60분 추천' : 'PREMIUM 90분'}
+                    {durationMin === 60 ? '★ BEST 60분' : `${durationMin}분 이용`}
                   </span>
                 </div>
 

@@ -7,6 +7,8 @@ export interface ErrorModalData {
   errorCode?: string | number;
   isHardwareFail?: boolean;
   isVisible: boolean;
+  onCloseCallback?: () => void;
+  onRetryCallback?: () => void;
 }
 
 interface ErrorMessageModalProps {
@@ -22,6 +24,17 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
 }) => {
   const [countdown, setCountdown] = useState<number>(12);
 
+  const handleClose = () => {
+    data.onCloseCallback?.();
+    onClose();
+  };
+
+  const handleRetry = () => {
+    data.onRetryCallback?.();
+    if (onRetry) onRetry();
+    onClose();
+  };
+
   useEffect(() => {
     if (!data.isVisible) return;
     setCountdown(12);
@@ -30,7 +43,7 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          onClose();
+          handleClose();
           return 0;
         }
         return prev - 1;
@@ -83,7 +96,7 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
       >
         {/* 닫기 버튼 */}
         <button
-          onClick={onClose}
+          onClick={handleClose}
           style={{
             position: 'absolute',
             top: '24px',
@@ -145,27 +158,48 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
             borderRadius: '20px',
             border: '1px solid rgba(255, 255, 255, 0.08)',
             padding: '20px 24px',
+            marginBottom: '24px',
             width: '100%',
-            margin: '12px 0 24px 0',
-            fontSize: '20px',
-            fontWeight: 700,
-            lineHeight: 1.5,
-            color: '#f4f4f5',
-            wordBreak: 'keep-all',
+            boxSizing: 'border-box',
           }}
         >
-          {data.message}
+          <p
+            style={{
+              fontSize: '20px',
+              fontWeight: 600,
+              color: '#f4f4f5',
+              lineHeight: 1.6,
+              margin: 0,
+              wordBreak: 'keep-all',
+            }}
+          >
+            {data.message}
+          </p>
+
+          {data.errorCode && (
+            <p
+              style={{
+                fontSize: '14px',
+                fontWeight: 700,
+                color: '#71717a',
+                margin: '12px 0 0 0',
+                fontFamily: 'monospace',
+              }}
+            >
+              ERR_CODE: {data.errorCode}
+            </p>
+          )}
         </div>
 
-        {/* 조치 안내 및 카운트다운 */}
+        {/* 자동 닫힘 안내 바 */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             width: '100%',
-            padding: '12px 16px',
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
+            padding: '12px 20px',
+            backgroundColor: 'rgba(255, 255, 255, 0.04)',
             borderRadius: '14px',
             fontSize: '15px',
             color: '#a1a1aa',
@@ -186,10 +220,7 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
         <div style={{ display: 'flex', gap: '16px', width: '100%' }}>
           {onRetry && (
             <button
-              onClick={() => {
-                onClose();
-                onRetry();
-              }}
+              onClick={handleRetry}
               style={{
                 flex: 1,
                 height: '64px',
@@ -211,7 +242,7 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
             </button>
           )}
           <button
-            onClick={onClose}
+            onClick={handleClose}
             style={{
               flex: 1,
               height: '64px',

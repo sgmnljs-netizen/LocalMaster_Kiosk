@@ -305,14 +305,22 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #000', paddingTop: '10px', marginTop: '4px' }}>
-                    <span>판매금액:</span>
-                    <span>{(amount - Math.floor(amount * 0.1)).toLocaleString()} 원</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>부 가 세:</span>
-                    <span>{Math.floor(amount * 0.1).toLocaleString()} 원</span>
-                  </div>
+                  {(() => {
+                    const supplyAmount = Math.round(amount / 1.1);
+                    const vatAmount = amount - supplyAmount;
+                    return (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #000', paddingTop: '10px', marginTop: '4px' }}>
+                          <span>판매금액:</span>
+                          <span>{supplyAmount.toLocaleString()} 원</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>부 가 세:</span>
+                          <span>{vatAmount.toLocaleString()} 원</span>
+                        </div>
+                      </>
+                    );
+                  })()}
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: 800, borderTop: '1px solid #000', borderBottom: '1px solid #000', padding: '6px 0' }}>
                     <span>합계금액:</span>
                     <span>{amount.toLocaleString()} 원</span>

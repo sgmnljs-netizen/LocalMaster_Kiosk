@@ -3,6 +3,7 @@ import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer, UserCheck, 
 import { api, Bay } from '../services/api';
 import { TopTeeboxDashboard } from './TopTeeboxDashboard';
 import { TeeboxTileCard } from './TeeboxTileCard';
+import { TimeMaster } from '../utils/timeMaster';
 
 interface PracticeSelectProps {
   bays: Bay[];
@@ -51,11 +52,15 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   // 선점 락 제한시간 1초 간격 갱신
   useEffect(() => {
     const activeList = allocMode === 'SINGLE' ? (selectedBayNo !== null ? [selectedBayNo] : []) : selectedBayNos;
-    if (activeList.length === 0) return;
+    if (activeList.length === 0 || isConfirmedRef.current) return;
     
     setCountdown(allocMode === 'GROUP' ? 120 : 60);
     const timer = setInterval(() => {
       setCountdown(prev => {
+        if (isConfirmedRef.current) {
+          clearInterval(timer);
+          return prev;
+        }
         if (prev <= 1) {
           handleReleaseAll();
           setErrorMsg(lang === 'KO' ? '선점 유효 시간이 초과되어 타석 선택이 자동 취소되었습니다.' : 'Selection timeout. Teebox released.');
@@ -154,12 +159,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         } catch {}
       }
 
-      let currentRemMin = mwMin > 0 ? mwMin : (bay.minutes_left || 0);
-
-      // SSOT minutes_left 필드 바인딩으로 currentRemMin 보완
-      if (currentRemMin <= 0 && bay.minutes_left !== undefined && bay.minutes_left !== null) {
-        currentRemMin = Math.max(0, bay.minutes_left ?? 0);
-      }
+      let currentRemMin = mwMin > 0 ? mwMin : TimeMaster.getRemainingMinutes(bay);
 
       const extendMin = (bay as any).extend_min || 0;
       const waitingCount = (bay as any).waiting_res_count || 0;
@@ -175,8 +175,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
       const totalWaitMin = Math.max(1, currentRemMin + extendMin + waitingMin + bufferGapMin + holdMin + prepareMin);
 
-      const now = new Date();
-      const startDate = new Date(now.getTime() + totalWaitMin * 60 * 1000);
+      const nowMs = TimeMaster.getSyncedNowMs();
+      const startDate = new Date(nowMs + totalWaitMin * 60 * 1000);
       const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
 
       setChainedInfo({ startTimeStr, minutesWait: totalWaitMin });

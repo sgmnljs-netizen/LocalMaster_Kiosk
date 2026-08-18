@@ -5,6 +5,20 @@
  * - 백엔드 minutes_left SSOT 기반 잔여시간 산출
  */
 export class TimeMaster {
+  private static serverOffsetMs: number = 0;
+
+  /** 백엔드 server_epoch_ms를 기반으로 클라이언트-서버 시계 오차 동기화 */
+  static syncServerTime(serverEpochMs?: number | null): void {
+    if (serverEpochMs && typeof serverEpochMs === 'number') {
+      TimeMaster.serverOffsetMs = serverEpochMs - Date.now();
+    }
+  }
+
+  /** 서버 보정 현재 시각 (ms) */
+  static getSyncedNowMs(): number {
+    return Date.now() + TimeMaster.serverOffsetMs;
+  }
+
   /** KST 로컬 기준 YYYY-MM-DD 날짜 추출 (toISOString UTC -9h 오차 방지) */
   static getKstYmd(d: Date = new Date()): string {
     const y = d.getFullYear();
@@ -28,14 +42,60 @@ export class TimeMaster {
     return endDt;
   }
 
-  /** 잔여 시간 산출 (백엔드 minutes_left SSOT 최우선) */
-  static getRemainingMinutes(bay: { minutes_left?: number; end_time?: string | null }, now: Date = new Date()): number {
-    if (typeof bay.minutes_left === 'number') return bay.minutes_left;
-    if (!bay.end_time) return 0;
-    const endDt = TimeMaster.parseSessionEnd(bay.end_time, now);
-    if (!endDt) return 0;
-    const diffMs = endDt.getTime() - now.getTime();
-    return Math.max(0, Math.ceil(diffMs / 1000 / 60));
+  /** 서버 보정 현재 Date 객체 */
+  static getSyncedDate(): Date {
+    return new Date(TimeMaster.getSyncedNowMs());
+  }
+
+  /** 대기시간 잔여 (초) 산출 (prepare_expired_epoch_ms SSOT 최우선) */
+  static getPrepareRemainingSec(
+    bay?: { prepare_remaining_sec?: number; prepare_expired_epoch_ms?: number | null } | null
+  ): number {
+    if (!bay) return 0;
+    if (bay.prepare_expired_epoch_ms && typeof bay.prepare_expired_epoch_ms === 'number') {
+      const diffMs = bay.prepare_expired_epoch_ms - TimeMaster.getSyncedNowMs();
+      return Math.max(0, Math.ceil(diffMs / 1000));
+    }
+    return bay.prepare_remaining_sec ?? 0;
+  }
+
+  /** 잔여 시간 산출 (실시간 end_epoch_ms 연산 최우선) */
+  static getRemainingMinutes(
+    bay?: { minutes_left?: number; end_time?: string | null; end_epoch_ms?: number | null } | null,
+    now: Date = new Date()
+  ): number {
+    if (!bay) return 0;
+    if (bay.end_epoch_ms && typeof bay.end_epoch_ms === 'number') {
+      const diffMs = bay.end_epoch_ms - TimeMaster.getSyncedNowMs();
+      return Math.max(0, Math.ceil(diffMs / 1000 / 60));
+    }
+    if (bay.end_time) {
+      const endDt = TimeMaster.parseSessionEnd(bay.end_time, now);
+      if (endDt) {
+        const diffMs = endDt.getTime() - TimeMaster.getSyncedNowMs();
+        return Math.max(0, Math.ceil(diffMs / 1000 / 60));
+      }
+    }
+    return bay.minutes_left ?? 0;
+  }
+
+  /** 타석 종료 시각 (HH:mm) 안전 포맷팅 */
+  static formatEndTime(
+    bay?: { end_time?: string | null; end_epoch_ms?: number | null } | null
+  ): string {
+    if (!bay) return '종료';
+    if (bay.end_epoch_ms && typeof bay.end_epoch_ms === 'number') {
+      const d = new Date(bay.end_epoch_ms);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      return `${hh}:${mm}`;
+    }
+    if (!bay.end_time) return '종료';
+    const clean = String(bay.end_time).replace(/[^0-9]/g, '');
+    if (clean.length >= 4) {
+      return `${clean.substring(0, 2)}:${clean.substring(2, 4)}`;
+    }
+    return String(bay.end_time);
   }
 
   /** 날짜 및 시각 포맷팅 (YYYY.MM.DD HH:mm:ss) */

@@ -112,9 +112,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
   // 1. 슬롯 데이터 불러오기
   const fetchSlots = useCallback(async () => {
-    if (!categoryUuid) return;
+    const targetZone = course || categoryUuid;
+    if (!targetZone) return;
     try {
-      const res = await api.getPar3Slots(categoryUuid, getTodayStr());
+      const res = await api.getPar3Slots(targetZone, getTodayStr());
       setSlots(res);
       setSelectedSlot(null); // 코스 전환 시 이전 선택 초기화
     } catch {
@@ -402,8 +403,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }));
 
     try {
+      const targetZone = course || categoryUuid;
       const res = await api.bookPar3Course(
-        categoryUuid,
+        targetZone,
         getTodayStr(),
         selectedSlot.time,
         totalAmount,
@@ -504,18 +506,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     resetPaymentState();
   };
 
-  // 영수증 인쇄 완료 후 최종 메인화면 이전 처리
+  // 영수증 인쇄 완료 후 최종 메인화면 이전 처리 (결제/인쇄 완료되었으므로 메인 복귀)
   const handleReceiptClose = () => {
-    if (createdReceipt) {
-      const par3Product: Product = {
-        prod_cd: `PAR3_${course}_${selectedSlot?.time.replace(':', '')}`,
-        prod_nm: createdReceipt.prodNm,
-        standard_price: createdReceipt.totalAmount,
-        logic_type: 'FACILITY',
-        res_id: createdReceipt.resId
-      };
-      onBookingSelected(par3Product);
-    }
+    onCancel();
   };
 
   return (
