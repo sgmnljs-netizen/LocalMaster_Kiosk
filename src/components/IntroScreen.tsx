@@ -302,7 +302,12 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName, ba
               <span style={{ fontSize: '13px', fontWeight: 700 }}>오프라인 모드 작동 중</span>
             </div>
           )}
-          <span style={{ fontSize: '15px', color: '#86868b' }}>ID: {api.getTerminalId()}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '15px', color: '#86868b' }}>ID: {api.getTerminalId()}</span>
+            <span style={{ fontSize: '11px', color: '#10b981', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'monospace', fontWeight: 700 }}>
+              {__APP_VERSION__}
+            </span>
+          </div>
         </div>
       </div>
     </div>
