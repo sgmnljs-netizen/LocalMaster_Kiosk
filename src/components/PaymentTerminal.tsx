@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { CreditCard, Printer, ShieldAlert, Sparkles, ShieldCheck, RefreshCw } from 'lucide-react';
 import { api, STORE_CODE } from '../services/api';
 import { useKioskSettings } from '../stores/kioskSettings';
@@ -40,9 +40,13 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const [cardIssuer, setCardIssuer] = useState('');
   const [maskedCard, setMaskedCard] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const isPayRequested = useRef(false);
 
   // 결제 실행 핸들러
   const handleExecutePayment = useCallback(async () => {
+    if (isPayRequested.current) return;
+    isPayRequested.current = true;
+
     if (amount === 0) {
       setPayStep('PRINT_RECEIPT');
       const now = new Date();
@@ -100,10 +104,12 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           setErrorMsg(err.message || '결제 후 배정 처리 중 오류가 발생했습니다.');
         }
         setPayStep('INSERT_CARD');
+        isPayRequested.current = false;
       }
     } else {
       setPayStep('INSERT_CARD');
       setErrorMsg(res.error_message || '결제가 승인되지 않았습니다. 카드를 다시 확인해 주세요.');
+      isPayRequested.current = false;
     }
   }, [amount, productName, memberName, resId, startPayment, onPaymentSuccess]);
 

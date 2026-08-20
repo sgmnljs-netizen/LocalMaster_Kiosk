@@ -107,12 +107,13 @@ export class KioskEscPosPrinterService {
       });
       if (res.ok) {
         return { success: true, message: '키오스크 서멀 프린터 출력 완료' };
+      } else {
+        return { success: false, message: `프린터 출력 실패 (상태: ${res.status})` };
       }
-    } catch {
-      // 데몬 미동작
+    } catch (err: unknown) {
+      console.warn('[KioskPrinter] Printer daemon unreachable or print error:', err);
+      return { success: false, message: '프린터 데몬 미동작 또는 용지 부족/연결 불량 상태입니다.' };
     }
-
-    return { success: true, message: '배정표 생성 완료' };
   }
 }
 

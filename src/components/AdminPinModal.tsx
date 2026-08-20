@@ -26,8 +26,8 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
     setErrorMsg('');
 
     if (nextPin.length === 4) {
-      const correctPin = settings.adminPin || '0000';
-      if (nextPin === correctPin || nextPin === '7788' || nextPin === '0000') {
+      const correctPin = settings.adminPin || '1234';
+      if (nextPin === correctPin) {
         setTimeout(() => {
           setPin('');
           setErrorMsg('');

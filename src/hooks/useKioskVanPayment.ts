@@ -73,6 +73,9 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         setRemainingSeconds((prev) => {
           if (prev <= 1) {
             clearTimer();
+            kioskVanClient.cancelCurrentRequest();
+            setState('CANCELLED');
+            setError('결제 시간이 초과되어 취소되었습니다.');
             return 0;
           }
           return prev - 1;
@@ -117,13 +120,16 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
     [reset, clearTimer]
   );
 
+  const isProcessing = state === 'READY' || state === 'WAITING_CARD' || state === 'REQUESTING';
+
   useEffect(() => {
     return () => {
+      if (isProcessing) {
+        kioskVanClient.cancelCurrentRequest();
+      }
       clearTimer();
     };
-  }, [clearTimer]);
-
-  const isProcessing = state === 'READY' || state === 'WAITING_CARD' || state === 'REQUESTING';
+  }, [isProcessing, clearTimer]);
 
   return {
     state,
