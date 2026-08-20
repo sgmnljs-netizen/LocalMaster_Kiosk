@@ -22,6 +22,11 @@ import { PurchaseCompleteModal, CompletedPurchaseInfo } from './components/Purch
 import { api, Member, Product, Bay } from './services/api';
 import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
 import { KioskBottomBar } from './components/KioskBottomBar';
+import { useKioskSettings } from './stores/kioskSettings';
+import { useHiddenAdminTrigger } from './hooks/useHiddenAdminTrigger';
+import { AdminPinModal } from './components/AdminPinModal';
+import { KioskSettingsModal } from './components/KioskSettingsModal';
+import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 
 type KioskStep = 
   | 'INTRO' 
@@ -97,11 +102,21 @@ const TRANSLATIONS = {
 };
 
 export default function KioskApp() {
+  const { settings } = useKioskSettings();
+  const [isAdminPinOpen, setIsAdminPinOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const { handleTap: handleHiddenTap } = useHiddenAdminTrigger(5, 3000);
+
+  const handleSecretTrigger = () => {
+    setIsAdminPinOpen(true);
+  };
+
   const [step, setStep] = useState<KioskStep>('INTRO');
   const [purpose, setPurpose] = useState<KioskPurpose | null>(null);
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
   const [initialAuthMode, setInitialAuthMode] = useState<'SMART_TAG' | 'FACE'>('SMART_TAG');
   const [faceTerminalEnabled, setFaceTerminalEnabled] = useState<boolean>(true);
+
 
   // 🔍 키오스크 화면 확대/축소 (Zoom Scale) 상태 및 localStorage 연동
   const [zoomScale, setZoomScale] = useState<number>(() => {
@@ -901,6 +916,43 @@ export default function KioskApp() {
           </button>
         </div>
       )}
+
+      {/* 🔒 좌측 상단 5회 연속 탭 히든 관리자 진입 구역 (고객 비노출) */}
+      <div
+        onClick={() => handleHiddenTap(handleSecretTrigger)}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '120px',
+          height: '120px',
+          zIndex: 140,
+          cursor: 'default',
+        }}
+        title="Admin Zone"
+      />
+
+      {/* 🚧 임시 점검 모드 오버레이 */}
+      <MaintenanceOverlay
+        isVisible={settings.isMaintenanceMode}
+        onHiddenTap={() => handleHiddenTap(handleSecretTrigger)}
+      />
+
+      {/* 🔒 관리자 PIN 모달 */}
+      <AdminPinModal
+        isOpen={isAdminPinOpen}
+        onClose={() => setIsAdminPinOpen(false)}
+        onSuccess={() => {
+          setIsAdminPinOpen(false);
+          setIsSettingsOpen(true);
+        }}
+      />
+
+      {/* ⚙️ 키오스크 환경설정 모달 */}
+      <KioskSettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
 
       {/* A. 인트로 광고 화면 단계 */}
       {step === 'INTRO' && (

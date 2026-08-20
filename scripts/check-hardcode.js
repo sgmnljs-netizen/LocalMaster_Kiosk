@@ -7,9 +7,9 @@ const __dirname = path.dirname(__filename);
 const srcDir = path.join(__dirname, '../src');
 
 const FORBIDDEN_PATTERNS = [
-  { pattern: /\|\|\s*60/g, desc: '시간 60분 하드코딩 (|| 60)' },
-  { pattern: /\|\|\s*90/g, desc: '시간 90분 하드코딩 (|| 90)' },
-  { pattern: /\*\s*60(?!\s*\*\s*1000)/g, desc: '시간 60분 곱셈 하드코딩 (* 60)' },
+  { pattern: /\|\|\s*60\b/g, desc: '시간 60분 하드코딩 (|| 60)' },
+  { pattern: /\|\|\s*90\b/g, desc: '시간 90분 하드코딩 (|| 90)' },
+  { pattern: /\*\s*60(?!\s*\*\s*1000)\b/g, desc: '시간 60분 곱셈 하드코딩 (* 60)' },
   { pattern: /===\s*['"]D00[12]['"]/g, desc: '상품코드 D001/D002 고정 조건 하드코딩' }
 ];
 

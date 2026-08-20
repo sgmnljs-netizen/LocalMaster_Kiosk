@@ -1,6 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { CreditCard, Printer, ShieldAlert, Sparkles } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { CreditCard, Printer, ShieldAlert, Sparkles, ShieldCheck, RefreshCw } from 'lucide-react';
 import { api, STORE_CODE } from '../services/api';
+import { useKioskSettings } from '../stores/kioskSettings';
+import { useKioskVanPayment } from '../hooks/useKioskVanPayment';
+import { kioskVanClient } from '../services/van/van_client';
 
 
 interface PaymentTerminalProps {
@@ -28,69 +31,91 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   onPaymentSuccess,
   onCancel
 }) => {
+  const { settings } = useKioskSettings();
+  const { state: vanState, isProcessing, remainingSeconds, error: vanError, startPayment, cancelPayment } = useKioskVanPayment();
+
   const [payStep, setPayStep] = useState<'INSERT_CARD' | 'PROCESSING' | 'PRINT_RECEIPT'>('INSERT_CARD');
   const [appNo, setAppNo] = useState('');
   const [receiptDate, setReceiptDate] = useState('');
+  const [cardIssuer, setCardIssuer] = useState('');
+  const [maskedCard, setMaskedCard] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // 승인번호 생성 헬퍼 (개발 환경 모의 승인번호 격리)
-  const generateApprovalNo = (): string => {
-    if (import.meta.env.DEV) {
-      return Math.floor(10000000 + Math.random() * 90000000).toString();
-    }
-    return `${Date.now().toString().slice(-8)}`;
-  };
-
-  // 1. 임의의 카드 삽입/감지 시뮬레이션
-  const triggerSimulation = async () => {
-    setPayStep('PROCESSING');
-    setErrorMsg('');
-    
-    // 승인번호 및 영수증 날짜 선제 생성
-    const generatedAppNo = generateApprovalNo();
-    setAppNo(generatedAppNo);
-    const now = new Date();
-    const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
-      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-    setReceiptDate(generatedTradeDate);
-
-    try {
-      // 2-Phase Commit: 백엔드 결제 완료 웹훅 API 호출
-      if (resId) {
-        const res = await api.processPaymentWebhook(resId, amount);
-        if (!res.success) {
-          throw new Error(res.message);
-        }
-      } else {
-        // Fallback: 엣지/가상 모드일 때 가상 딜레이
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-      setPayStep('PRINT_RECEIPT');
-      // 승인 완료 즉시 실제 백엔드/로컬스토리지 타석 배정 및 결제 완료 처리
-      onPaymentSuccess({ apprNo: generatedAppNo, tradeDate: generatedTradeDate, amount });
-    } catch (err: any) {
-      setPayStep('INSERT_CARD');
-      setErrorMsg(err.message || '결제 처리 중 서버 승인 오류가 발생했습니다.');
-    }
-  };
-
-  // 2. 카드 자동 투입 시뮬레이터 (사용자 대기용)
-  useEffect(() => {
+  // 결제 실행 핸들러
+  const handleExecutePayment = useCallback(async () => {
     if (amount === 0) {
-      // 회원권/이용권 차감 배정인 경우 결제 단계를 즉시 통과하여 영수증 출력으로 이동
       setPayStep('PRINT_RECEIPT');
       const now = new Date();
-      const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
+      const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
         `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-      const generatedAppNo = generateApprovalNo();
+      const generatedAppNo = String(Math.floor(10000000 + Math.random() * 90000000));
       setReceiptDate(generatedTradeDate);
       setAppNo(generatedAppNo);
       onPaymentSuccess({ apprNo: generatedAppNo, tradeDate: generatedTradeDate, amount: 0 });
       return;
     }
-    const timer = setTimeout(triggerSimulation, 4500); // 4.5초 뒤 알아서 시뮬레이션 작동
-    return () => clearTimeout(timer);
+
+    setPayStep('INSERT_CARD');
+    setErrorMsg('');
+
+    const res = await startPayment({
+      amount,
+      productName,
+      customerName: memberName,
+      timeoutSeconds: 30,
+    });
+
+    if (res.success) {
+      setAppNo(res.auth_code);
+      setReceiptDate(res.approved_at);
+      setCardIssuer(res.issuer_name || '신용카드');
+      setMaskedCard(res.card_no_masked || '9410-****-****-****');
+      setPayStep('PROCESSING');
+
+      try {
+        if (resId) {
+          const webhookRes = await api.processPaymentWebhook(resId, amount);
+          if (!webhookRes.success) {
+            throw new Error(webhookRes.message);
+          }
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
+        setPayStep('PRINT_RECEIPT');
+        onPaymentSuccess({ apprNo: res.auth_code, tradeDate: res.approved_at, amount });
+      } catch (err: any) {
+        // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소)
+        try {
+          const orgDate = res.approved_at ? res.approved_at.replace(/[^0-9]/g, '').slice(0, 8) : '';
+          await kioskVanClient.cancelCardPayment({
+            amount,
+            orgAuthCode: res.auth_code,
+            orgApprovedDate: orgDate,
+            terminalId: res.terminal_id,
+            vanTrNo: res.van_tr_no,
+            reason: '타석 배정 전산 오류로 인한 자동 망취소',
+          });
+          setErrorMsg('타석 배정 처리 실패로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 회수해 주세요.');
+        } catch {
+          setErrorMsg(err.message || '결제 후 배정 처리 중 오류가 발생했습니다.');
+        }
+        setPayStep('INSERT_CARD');
+      }
+    } else {
+      setPayStep('INSERT_CARD');
+      setErrorMsg(res.error_message || '결제가 승인되지 않았습니다. 카드를 다시 확인해 주세요.');
+    }
+  }, [amount, productName, memberName, resId, startPayment, onPaymentSuccess]);
+
+  useEffect(() => {
+    handleExecutePayment();
   }, []);
+
+  const handleUserCancel = () => {
+    cancelPayment();
+    onCancel();
+  };
+
 
   return (
     <div 
@@ -175,14 +200,21 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               </div>
             </div>
 
-            <span className="animate-blink" style={{ fontSize: '15px', color: '#60a5fa', fontWeight: 700, marginTop: '4px' }}>
-              카드 자동 삽입을 대기하고 있습니다...
-            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+              <span className="animate-blink" style={{ fontSize: '16px', color: '#60a5fa', fontWeight: 800 }}>
+                {vanState === 'REQUESTING'
+                  ? '금융사 승인 처리 중입니다...'
+                  : `단말기에 IC 카드를 꽂아주세요 (${remainingSeconds}초)`}
+              </span>
+              <span style={{ fontSize: '12px', color: '#86868b', fontFamily: 'monospace' }}>
+                단말기: {settings.deviceName} (TID: {settings.terminalId})
+              </span>
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '16px', width: '100%' }}>
             <button 
-              onClick={onCancel}
+              onClick={handleUserCancel}
               style={{
                 flex: 1,
                 height: '60px',
@@ -198,9 +230,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             >
               결제 취소
             </button>
-            {import.meta.env.DEV && (
+            {errorMsg && (
               <button 
-                onClick={triggerSimulation}
+                onClick={handleExecutePayment}
                 style={{
                   flex: 1,
                   height: '60px',
@@ -211,11 +243,16 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                   fontSize: '18px',
                   fontWeight: 800,
                   cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
                   boxShadow: '0 4px 14px rgba(0, 113, 227, 0.3)',
                   transition: 'all 0.2s ease'
                 }}
               >
-                즉시 결제 테스트
+                <RefreshCw size={20} />
+                다시 시도
               </button>
             )}
           </div>
@@ -272,7 +309,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>단말기번호:</span>
-                    <strong>{api.getTerminalId()}</strong>
+                    <strong>{settings.terminalId || api.getTerminalId()}</strong>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>거래일시:</span>
@@ -328,11 +365,11 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
                     <span>결제수단:</span>
-                    <span>신용카드 (IC)</span>
+                    <span>{cardIssuer || '신용카드 (IC)'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>카드번호:</span>
-                    <span>9410-12**-****-****</span>
+                    <span>{maskedCard || '9410-12**-****-****'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>승인번호:</span>
