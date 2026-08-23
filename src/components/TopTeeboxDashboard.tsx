@@ -54,55 +54,56 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
     const isOccupied = bay.status === 'OCCUPIED' || bay.status === 'USE';
     const isUnderMaintenance = bay.status === 'UNDER_MAINTENANCE' || bay.status === 'MAINTENANCE' || bay.status === 'DISABLED';
 
-    let bgCol = '#f5f5f7';
-    let borderCol = 'rgba(0, 0, 0, 0.06)';
+    let bgCol = '#e5e5ea';
+    let borderCol = 'transparent';
     let textColor = '#8e8e93';
-    let subTextColor = '#aeaeb2';
+    let subTextColor = '#1d1d1f';
     let cursorStyle = 'not-allowed';
     let glow = 'none';
     let label = '';
 
     if (isAvailable) {
-      // 럭셔리 에메랄드 딥 그라데이션
-      bgCol = 'linear-gradient(135deg, #064e3b 0%, #059669 100%)';
+      // 💎 딥 럭셔리 쥬얼 에메랄드 + 칼 같은 샤프 마이크로 섀도우 (번짐 100% 제거)
+      bgCol = 'linear-gradient(145deg, #059669 0%, #047857 60%, #064e3b 100%)';
       borderCol = 'transparent';
       textColor = '#ffffff';
       subTextColor = 'rgba(255,255,255,0.9)';
       cursorStyle = 'pointer';
-      glow = '0 8px 16px rgba(5, 150, 105, 0.3), inset 0 2px 4px rgba(255,255,255,0.2)';
+      glow = '0 1.5px 3px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.4)';
       label = '';
     } else if (isPreOccupied) {
-      // 럭셔리 골드 그라데이션
-      bgCol = 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)';
+      // 🟡 럭셔리 골드 앰버 (샤프 마이크로 섀도우)
+      bgCol = 'linear-gradient(145deg, #f59e0b 0%, #d97706 100%)';
       borderCol = 'transparent';
       textColor = '#ffffff';
       subTextColor = '#ffffff';
+      glow = '0 1.5px 3px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.4)';
       label = '';
     } else if (isPrepare) {
-      // 대기중: 엠버/블루 산뜻한 대기 그라데이션
-      bgCol = 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)';
+      // 🔵 산뜻한 애플 마린 블루 (샤프 마이크로 섀도우)
+      bgCol = 'linear-gradient(145deg, #0ea5e9 0%, #0284c7 100%)';
       borderCol = 'transparent';
       textColor = '#ffffff';
       subTextColor = '#ffffff';
-      glow = '0 4px 12px rgba(2, 132, 199, 0.3)';
+      glow = '0 1.5px 3px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.4)';
       label = lang === 'KO' ? '대기' : 'Prep';
     } else if (isOccupied) {
-      // 리세스드(음각) Soft UI
-      bgCol = 'rgba(0, 0, 0, 0.02)';
+      // ⚪ 새틴 슬레이트 그레이 음각
+      bgCol = '#e5e5ea';
       borderCol = 'rgba(0, 0, 0, 0.04)';
       textColor = '#8e8e93';
-      subTextColor = '#aeaeb2';
-      glow = 'inset 0 4px 6px rgba(0, 0, 0, 0.06)';
+      subTextColor = '#1d1d1f';
+      glow = 'inset 0 1.5px 3px rgba(0, 0, 0, 0.06)';
       
       const remMin = TimeMaster.getRemainingMinutes(bay);
       label = `${remMin}m`;
     } else if (isUnderMaintenance) {
-      // 점검중: 차분한 그레이시 브릭레드 음각
-      bgCol = 'rgba(178, 34, 34, 0.04)';
-      borderCol = 'rgba(178, 34, 34, 0.08)';
-      textColor = '#b22222';
-      subTextColor = '#b22222';
-      glow = 'inset 0 4px 6px rgba(178, 34, 34, 0.06)';
+      // 🔴 애플 브릭 레드
+      bgCol = 'linear-gradient(145deg, #ef4444 0%, #dc2626 100%)';
+      borderCol = 'transparent';
+      textColor = '#ffffff';
+      subTextColor = '#ffffff';
+      glow = '0 1.5px 3px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.4)';
       label = lang === 'KO' ? '점검' : 'Maint';
     }
 
@@ -119,17 +120,17 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
           alignItems: 'center',
           justifyContent: 'center',
           background: bgCol,
-          border: `1.5px solid ${borderCol}`,
+          border: borderCol !== 'transparent' ? `1px solid ${borderCol}` : 'none',
           cursor: cursorStyle,
           boxShadow: glow,
-          transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+          transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
           position: 'relative',
           animation: isPreOccupied ? 'dashboardPulse 1.5s infinite ease-in-out' : 'none'
         }}
         title={`${bay.bay_no}번 타석: ${isAvailable ? '이용가능' : isOccupied ? '이용중' : isPreOccupied ? '선점중' : '점검중'}`}
       >
-        {/* 타석 번호 */}
-        <span style={{ fontSize: label ? '15px' : '18px', fontWeight: 900, color: textColor, lineHeight: 1.1 }}>
+        {/* 타석 번호 (텍스트 섀도우 완전 제거로 선명한 폰트 렌더링) */}
+        <span style={{ fontSize: label ? '15px' : '18px', fontWeight: 950, color: textColor, lineHeight: 1.1, letterSpacing: '-0.3px' }}>
           {bay.bay_no}
         </span>
         
@@ -149,11 +150,11 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
               right: '-3px', 
               fontSize: '7px', 
               fontWeight: 900, 
-              background: '#4a6984', 
+              background: '#0071e3', 
               color: '#fff', 
               padding: '0.5px 2px', 
               borderRadius: '3px',
-              border: '0.5px solid rgba(0,0,0,0.05)'
+              border: '0.5px solid rgba(255,255,255,0.6)'
             }}
           >
             L
@@ -169,41 +170,33 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
         width: '100%',
         minHeight: '420px',
         height: 'auto',
-        background: 'var(--color-cloud-dancer)',
-        borderRadius: '0 0 48px 48px', // 하단 라운딩 적용으로 Bento 박스 느낌 부여
+        background: '#ffffff',
+        borderRadius: '0 0 48px 48px', // 원본 48px 대형 곡률
         display: 'flex',
         flexDirection: 'column',
-        padding: '30px 40px 80px 40px', 
+        padding: '30px 40px 80px 40px', // 원본 80px 하단 패딩
         boxSizing: 'border-box',
         justifyContent: 'space-between',
         position: 'relative',
-        boxShadow: '0 20px 40px rgba(0, 0, 0, 0.05)',
-        borderBottom: '1px solid rgba(255,255,255,0.4)',
-        borderLeft: '1px solid rgba(255,255,255,0.4)',
-        borderRight: '1px solid rgba(255,255,255,0.4)',
+        boxShadow: '0 20px 40px rgba(0, 0, 0, 0.04)',
+        borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
         overflow: 'hidden'
       }}
     >
-      {/* 백그라운드 오로라 백릿 효과 (럭셔리 에메랄드) */}
-      <div 
-        style={{
-          position: 'absolute',
-          top: '-20%',
-          left: '20%',
-          width: '600px',
-          height: '300px',
-          background: 'radial-gradient(circle, rgba(5, 150, 105, 0.1) 0%, transparent 70%)',
-          filter: 'blur(80px)',
-          zIndex: 0,
-          pointerEvents: 'none'
-        }}
-      />
-
       {/* 헤더 및 통계 요약 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1, marginBottom: '26px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }} />
-          <h2 style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
+          <span 
+            style={{ 
+              width: '8px', 
+              height: '8px', 
+              borderRadius: '50%', 
+              background: '#059669',
+              boxShadow: '0 0 8px rgba(5, 150, 105, 0.6)'
+            }} 
+            className="animate-pulse-ring"
+          />
+          <h2 style={{ fontSize: '22px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
             {lang === 'KO' ? '실시간 타석 종합 현황판' : 'Live Teebox Board'}
           </h2>
         </div>
@@ -231,14 +224,11 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
         </div>
       </div>
 
-      {/* 층별 대형 가로 맵 그리드 (상단 라벨 배치로 가로 100% 활용) */}
+      {/* 층별 대형 가로 맵 그리드 (원본 세로 간격 20px 복원) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', zIndex: 1, width: '100%' }}>
         {sortedFloors.map(floor => {
           const floorBays = floorsMap[floor];
-          
-          // 층별 브랜드 명칭 제거 (백오피스 원본 데이터 그대로 사용)
           let brandLabel = floor;
-
           const availableCount = floorBays.filter(b => b.status === 'AVAILABLE').length;
 
           return (
@@ -248,23 +238,22 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
                 <span 
                   style={{ 
                     fontSize: '12px', 
-                    fontWeight: 800, 
-                    color: '#064e3b', 
-                    background: 'rgba(5, 150, 105, 0.08)', 
-                    border: `1px solid rgba(5, 150, 105, 0.2)`,
-                    padding: '4px 12px', 
+                    fontWeight: 900, 
+                    color: '#ffffff', 
+                    background: '#1d1d1f', 
+                    padding: '3px 10px', 
                     borderRadius: '20px',
                     letterSpacing: '-0.2px'
                   }}
                 >
                   {brandLabel}
                 </span>
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                <span style={{ fontSize: '12px', color: '#059669', fontWeight: 800 }}>
                   {lang === 'KO' ? `이용 가능 ${availableCount}개` : `${availableCount} Available`}
                 </span>
               </div>
               
-              {/* 하단 타석 일렬 그리드 (가로 영역 100% 사용하여 20개 타석 일렬 정렬) */}
+              {/* 하단 타석 일렬 그리드 (원본 구도 100% 동일) */}
               <div 
                 style={{ 
                   display: 'flex', 
@@ -297,3 +286,4 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
     </div>
   );
 };
+

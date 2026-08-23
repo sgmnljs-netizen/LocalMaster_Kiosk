@@ -154,7 +154,7 @@ body {
   background: radial-gradient(circle at 50% 30%, #0d1211 0%, var(--bg-primary) 75%);
 }
 
-/* 🎨 Vibrant Forest Luxury Web (Apple-inspired) 테마 클래스 */
+/* 🎨 Vibrant Forest Luxury Web (Apple-inspired) 테마 클래스 - 맑은 퓨어 스노우 베이스 */
 .kiosk-terminal-area-luxury {
   width: 1080px;
   height: 1312.5px;
@@ -162,29 +162,10 @@ body {
   flex-direction: column;
   padding: var(--space-lg);
   position: relative;
-  background: var(--bg-primary);
+  background: #f8f8fa;
   overflow: hidden;
 }
 
-/* 오로라 백그라운드 효과 (Apple 스타일의 동적 그라데이션) */
-.kiosk-terminal-area-luxury::before {
-  content: '';
-  position: absolute;
-  top: -20%; left: -10%; width: 70%; height: 60%;
-  background: radial-gradient(circle, rgba(52, 199, 89, 0.05) 0%, transparent 60%);
-  filter: blur(140px);
-  z-index: 0;
-  pointer-events: none;
-}
-.kiosk-terminal-area-luxury::after {
-  content: '';
-  position: absolute;
-  bottom: -10%; right: -20%; width: 80%; height: 70%;
-  background: radial-gradient(circle, rgba(52, 199, 89, 0.04) 0%, transparent 60%);
-  filter: blur(140px);
-  z-index: 0;
-  pointer-events: none;
-}
 
 .premium-glass-card {
   position: relative;

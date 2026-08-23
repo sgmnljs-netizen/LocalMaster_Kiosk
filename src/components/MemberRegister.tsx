@@ -174,7 +174,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
       const res = await api.registerMember(name, formattedHp, '', faceReg, faceVectorId, gender);
       if (res.success && res.member) {
         if (faceReg) {
-          // 프런트포스 표준: 실물 안면 단말기 푸시 동기화 등록 (실제 카메라 캐처 이미지 전달)
+          // 프런트포스 표준: 실물 안면 단말기 푸시 동기화 등록 (실제 카메라 캡처 이미지 전달)
           const enrollResult = await api.enrollMemberFace(res.member.member_no, name, faceImageBase64 || undefined);
           if (!enrollResult?.success) {
             console.warn('[Kiosk] 안면 단말기 동기화 실패 (가입은 정상 완료):', enrollResult?.message);
@@ -196,36 +196,54 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
   return (
     <div 
       style={{
-        width: '900px',
+        width: '980px',
+        maxWidth: '100%',
         margin: '0 auto',
-        padding: '48px 56px',
+        padding: '44px 52px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '36px',
-        background: 'rgba(255, 255, 255, 0.85)',
+        gap: '32px',
+        background: 'rgba(255, 255, 255, 0.96)',
         backdropFilter: 'blur(30px)',
         WebkitBackdropFilter: 'blur(30px)',
         borderRadius: '32px',
-        boxShadow: '0 20px 40px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05)',
-        border: '1px solid rgba(255, 255, 255, 0.4)',
+        boxShadow: '0 24px 60px rgba(0, 0, 0, 0.12), inset 0 1px 1.5px rgba(255, 255, 255, 0.9), 0 1px 3px rgba(0, 0, 0, 0.04)',
+        border: '1px solid rgba(0, 0, 0, 0.08)',
         fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
       }}
     >
       {/* 타이틀 헤더 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
           <div style={{ 
-            background: '#34c759', 
-            borderRadius: '50%', 
+            background: 'linear-gradient(145deg, #059669 0%, #047857 100%)', 
+            borderRadius: '16px', 
             width: '56px', height: '56px', 
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(52, 199, 89, 0.3)'
+            boxShadow: '0 4px 14px rgba(5, 150, 105, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.4)'
           }}>
-            <UserPlus size={28} color="#ffffff" strokeWidth={2.5} />
+            <UserPlus size={28} color="#ffffff" strokeWidth={2.4} />
           </div>
           <div>
-            <h2 style={{ fontSize: '32px', fontWeight: 800, color: '#1d1d1f', margin: 0, letterSpacing: '-0.5px' }}>무인 스튜디오 30초 즉석 회원가입</h2>
-            <p style={{ fontSize: '17px', color: '#86868b', margin: '4px 0 0 0', fontWeight: 500 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h2 style={{ fontSize: '32px', fontWeight: 950, color: '#1d1d1f', margin: 0, letterSpacing: '-0.8px' }}>
+                무인 스튜디오 30초 즉석 회원가입
+              </h2>
+              <span 
+                style={{ 
+                  fontSize: '12px', 
+                  fontWeight: 900, 
+                  color: '#059669', 
+                  background: 'rgba(5, 150, 105, 0.1)', 
+                  padding: '4px 10px', 
+                  borderRadius: '999px',
+                  border: '1px solid rgba(5, 150, 105, 0.2)'
+                }}
+              >
+                ⚡ 간편 30초
+              </span>
+            </div>
+            <p style={{ fontSize: '16px', color: '#86868b', margin: '4px 0 0 0', fontWeight: 600 }}>
               간단한 기본 정보 입력 후 정기권 회원 혜택과 타석 예약을 시작하세요.
             </p>
           </div>
@@ -234,15 +252,15 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
           onClick={onCancel}
           style={{
             background: '#f5f5f7',
-            border: 'none',
+            border: '1px solid rgba(0, 0, 0, 0.06)',
             color: '#1d1d1f',
-            padding: '12px 24px',
-            borderRadius: '20px',
+            padding: '10px 22px',
+            borderRadius: '999px',
             cursor: 'pointer',
-            fontSize: '16px',
-            fontWeight: 600,
+            fontSize: '15px',
+            fontWeight: 800,
             transition: 'all 0.2s ease',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}
           onMouseOver={(e) => e.currentTarget.style.background = '#e8e8ed'}
           onMouseOut={(e) => e.currentTarget.style.background = '#f5f5f7'}
@@ -253,9 +271,9 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
 
       {/* 에러 */}
       {errorMsg && (
-        <div style={{ background: '#fff0f0', padding: '16px 20px', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '12px', border: '1px solid #ffc2c2' }}>
+        <div style={{ background: '#fff0f0', padding: '16px 20px', borderRadius: '18px', display: 'flex', alignItems: 'center', gap: '12px', border: '1px solid rgba(255, 59, 48, 0.2)' }}>
           <ShieldAlert size={20} color="#ff3b30" />
-          <span style={{ fontSize: '15px', fontWeight: 600, color: '#ff3b30' }}>{errorMsg}</span>
+          <span style={{ fontSize: '15px', fontWeight: 700, color: '#ff3b30' }}>{errorMsg}</span>
         </div>
       )}
 
@@ -264,8 +282,8 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
         /* 안면 정보 등록 UI */
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '30px' }}>
           <div style={{ textAlign: 'center' }}>
-            <h3 style={{ fontSize: '24px', fontWeight: 700, color: '#1d1d1f', letterSpacing: '-0.5px' }}>[단계 2/2] 페이스 ID 안면 등록</h3>
-            <p style={{ fontSize: '16px', color: '#86868b', marginTop: '8px', fontWeight: 500 }}>
+            <h3 style={{ fontSize: '26px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>[단계 2/2] 페이스 ID 안면 등록</h3>
+            <p style={{ fontSize: '16px', color: '#86868b', marginTop: '8px', fontWeight: 600 }}>
               무인 기기 입장 시 신속한 본인 확인을 위해 페이스 ID 정보를 등록합니다.
             </p>
           </div>
@@ -273,11 +291,11 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
           {/* 가상 카메라 캡처 박스 */}
           <div
             style={{
-              width: '480px',
-              height: '320px',
+              width: '520px',
+              height: '340px',
               background: '#f5f5f7',
-              borderRadius: '24px',
-              border: `2px solid ${faceCaptured ? '#34c759' : '#0071e3'}`,
+              borderRadius: '28px',
+              border: `2px solid ${faceCaptured ? '#059669' : '#1d1d1f'}`,
               position: 'relative',
               overflow: 'hidden',
               display: 'flex',
@@ -285,31 +303,31 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               boxShadow: faceCaptured 
-                ? '0 0 25px rgba(52, 199, 89, 0.15)' 
-                : '0 0 25px rgba(0, 113, 227, 0.1)',
+                ? '0 0 30px rgba(5, 150, 105, 0.2)' 
+                : '0 0 30px rgba(0, 0, 0, 0.08)',
               transition: 'all 0.3s ease'
             }}
           >
             {/* 가이드 타원 */}
             <div
               style={{
-                width: '160px',
-                height: '210px',
-                border: `2.5px ${faceCaptured ? 'solid #34c759' : 'dashed #0071e3'}`,
+                width: '170px',
+                height: '220px',
+                border: `2.5px ${faceCaptured ? 'solid #059669' : 'dashed #1d1d1f'}`,
                 borderRadius: '50% / 40%',
                 position: 'relative',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: faceCaptured ? '0 0 20px rgba(52, 199, 89, 0.3)' : 'none',
+                boxShadow: faceCaptured ? '0 0 20px rgba(5, 150, 105, 0.3)' : 'none',
                 background: '#ffffff',
                 transition: 'all 0.3s ease'
               }}
             >
               {faceCapturing ? (
-                <div style={{ fontSize: '15px', color: '#0071e3', fontWeight: 700 }}>분석 중...</div>
+                <div style={{ fontSize: '16px', color: '#059669', fontWeight: 800 }}>분석 중...</div>
               ) : (
-                <Camera size={38} style={{ color: faceCaptured ? '#34c759' : '#0071e3' }} />
+                <Camera size={42} style={{ color: faceCaptured ? '#059669' : '#1d1d1f' }} />
               )}
 
               {/* 캡처 진행 시 로딩 애니메이션 */}
@@ -319,8 +337,8 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                     position: 'absolute',
                     width: '100%',
                     height: '4px',
-                    backgroundColor: '#0071e3',
-                    boxShadow: '0 0 10px rgba(0, 113, 227, 0.5)',
+                    backgroundColor: '#059669',
+                    boxShadow: '0 0 10px rgba(5, 150, 105, 0.6)',
                     top: '10%',
                     animation: 'face-scanner 2s infinite ease-in-out'
                   }}
@@ -328,7 +346,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
               )}
             </div>
 
-            <p style={{ marginTop: '20px', fontSize: '16px', color: faceCaptured ? '#34c759' : '#1d1d1f', fontWeight: 600 }}>
+            <p style={{ marginTop: '20px', fontSize: '16px', color: faceCaptured ? '#059669' : '#1d1d1f', fontWeight: 700 }}>
               {faceCaptured 
                 ? (lang === 'EN' ? 'Face capture successful! Please complete registration.' : '안면 정보 캡처 성공! 가입을 완료해 주세요.') 
                 : (faceCapturing 
@@ -353,17 +371,17 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                   gap: '12px'
                 }}
               >
-                <div style={{ background: '#34c759', borderRadius: '50%', padding: '12px' }}>
+                <div style={{ background: '#059669', borderRadius: '50%', padding: '14px' }}>
                   <Check size={48} color="#ffffff" strokeWidth={3} />
                 </div>
-                <span style={{ fontSize: '20px', fontWeight: 700, color: '#1d1d1f' }}>
+                <span style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f' }}>
                   {lang === 'EN' ? 'Face Capture Completed' : '안면 캡처 완료'}
                 </span>
               </div>
             )}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '480px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '520px' }}>
             {/* 촬영/재시도 트리거 버튼 */}
             {!faceCaptured && (
               <button
@@ -373,14 +391,14 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 style={{ 
                   height: '64px', 
                   fontSize: '18px', 
-                  fontWeight: 700,
-                  borderRadius: '20px',
-                  background: '#0071e3',
+                  fontWeight: 900,
+                  borderRadius: '999px',
+                  background: '#1d1d1f',
                   color: '#ffffff',
                   border: 'none',
                   cursor: faceCapturing ? 'not-allowed' : 'pointer',
                   opacity: faceCapturing ? 0.7 : 1,
-                  boxShadow: '0 4px 16px rgba(0, 113, 227, 0.3)'
+                  boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)'
                 }}
               >
                 {faceCapturing 
@@ -398,11 +416,11 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 style={{ 
                   height: '60px', 
                   fontSize: '17px', 
-                  fontWeight: 600, 
-                  background: '#ffffff', 
-                  border: '1px solid #d2d2d7',
+                  fontWeight: 700, 
+                  background: '#f5f5f7', 
+                  border: '1px solid rgba(0, 0, 0, 0.08)',
                   color: '#1d1d1f',
-                  borderRadius: '16px',
+                  borderRadius: '999px',
                   cursor: loading ? 'not-allowed' : 'pointer'
                 }}
               >
@@ -416,14 +434,14 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 style={{ 
                   height: '60px', 
                   fontSize: '17px', 
-                  fontWeight: 700,
-                  background: '#34c759',
+                  fontWeight: 900,
+                  background: 'linear-gradient(145deg, #059669 0%, #047857 100%)',
                   color: '#ffffff',
                   border: 'none',
-                  borderRadius: '16px',
+                  borderRadius: '999px',
                   cursor: (loading || !faceCaptured) ? 'not-allowed' : 'pointer',
                   opacity: (loading || !faceCaptured) ? 0.5 : 1,
-                  boxShadow: '0 4px 12px rgba(52, 199, 89, 0.3)'
+                  boxShadow: '0 4px 14px rgba(5, 150, 105, 0.3)'
                 }}
               >
                 {loading ? '가입 처리 중...' : '안면 등록 가입'}
@@ -435,15 +453,15 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
               onClick={() => { setIsFaceEnrollStep(false); setFaceCaptured(false); }}
               style={{ 
                 fontSize: '15px', 
-                color: '#0071e3', 
+                color: '#86868b', 
                 border: 'none', 
                 background: 'transparent', 
                 cursor: 'pointer', 
                 marginTop: '8px',
-                fontWeight: 500
+                fontWeight: 600
               }}
             >
-              이전 단계(정보 수정)로 돌아가기
+              ‹ 이전 단계(정보 수정)로 돌아가기
             </button>
           </div>
         </div>
@@ -451,12 +469,12 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
         /* 회원가입 1단계: 기본 정보 입력 폼 */
         <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '48px' }}>
           
-          {/* 좌측: 이름 / 휴대폰 / 이메일 등 입력 상자 */}
+          {/* 좌측: 이름 / 휴대폰 / 성별 등 입력 상자 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
             {/* 이름 입력 필드 */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <label style={{ fontSize: '17px', fontWeight: 600, color: '#1d1d1f' }}>이름 (실명 입력)</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>이름 (실명 입력)</label>
               <input
                 type="text"
                 readOnly
@@ -465,88 +483,96 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 placeholder="여기를 터치하여 이름을 입력하세요"
                 style={{
                   width: '100%',
-                  height: '64px',
-                  borderRadius: '16px',
-                  border: `2px solid ${activeField === 'NAME' ? '#0071e3' : 'transparent'}`,
-                  background: '#f5f5f7',
+                  height: '68px',
+                  borderRadius: '18px',
+                  border: activeField === 'NAME' ? '2px solid #1d1d1f' : '1px solid rgba(0, 0, 0, 0.08)',
+                  background: activeField === 'NAME' ? '#ffffff' : '#f5f5f7',
                   color: '#1d1d1f',
                   fontSize: '20px',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   padding: '0 24px',
-                  boxShadow: activeField === 'NAME' ? '0 4px 12px rgba(0, 113, 227, 0.15)' : 'inset 0 2px 4px rgba(0,0,0,0.02)',
+                  boxShadow: activeField === 'NAME' ? '0 6px 16px rgba(0, 0, 0, 0.08)' : 'inset 0 1px 2px rgba(0,0,0,0.02)',
                   cursor: 'pointer',
                   outline: 'none',
-                  transition: 'all 0.2s ease'
+                  transition: 'all 0.2s ease',
+                  boxSizing: 'border-box'
                 }}
               />
             </div>
 
-            {/* 성별 선택 */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <label style={{ fontSize: '17px', fontWeight: 600, color: '#1d1d1f' }}>성별</label>
+            {/* 성별 선택 (애플 세그먼트 컨트롤) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>성별</label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                {([['M', '남성 ♂'], ['F', '여성 ♀']] as const).map(([val, label]) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setGender(val)}
-                    style={{
-                      height: '60px',
-                      fontSize: '18px',
-                      fontWeight: 700,
-                      borderRadius: '16px',
-                      border: `2px solid ${gender === val ? '#0071e3' : '#e5e5ea'}`,
-                      background: gender === val ? '#0071e3' : '#f5f5f7',
-                      color: gender === val ? '#ffffff' : '#1d1d1f',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      boxShadow: gender === val ? '0 4px 12px rgba(0, 113, 227, 0.25)' : 'none'
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
+                {([['M', '남성 ♂'], ['F', '여성 ♀']] as const).map(([val, label]) => {
+                  const isSelected = gender === val;
+                  return (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setGender(val)}
+                      style={{
+                        height: '64px',
+                        fontSize: '18px',
+                        fontWeight: isSelected ? 950 : 700,
+                        borderRadius: '18px',
+                        border: isSelected ? '1px solid #1d1d1f' : '1px solid rgba(0, 0, 0, 0.06)',
+                        background: isSelected ? '#1d1d1f' : '#f5f5f7',
+                        color: isSelected ? '#ffffff' : '#1d1d1f',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
+                        boxShadow: isSelected ? '0 4px 14px rgba(0, 0, 0, 0.15)' : 'none'
+                      }}
+                      className="apple-card-hover"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
+
+            {/* 약관 동의 박스 (Clean Glass Box) */}
             <div 
               onClick={() => setAgree(!agree)}
               style={{ 
-                padding: '24px', 
+                padding: '22px 24px', 
                 borderRadius: '20px', 
                 display: 'flex', 
                 alignItems: 'flex-start', 
                 gap: '16px',
                 cursor: 'pointer',
-                border: `1.5px solid ${agree ? '#34c759' : '#e5e5ea'}`,
-                background: agree ? 'rgba(52, 199, 89, 0.04)' : '#ffffff',
-                boxShadow: agree ? '0 8px 24px rgba(52, 199, 89, 0.1)' : '0 2px 8px rgba(0,0,0,0.03)',
+                border: agree ? '1.5px solid rgba(5, 150, 105, 0.35)' : '1px solid rgba(0, 0, 0, 0.08)',
+                background: agree ? 'rgba(5, 150, 105, 0.05)' : '#fbfbfc',
+                boxShadow: agree ? '0 8px 20px rgba(5, 150, 105, 0.08)' : '0 1px 3px rgba(0,0,0,0.02)',
                 transition: 'all 0.2s ease',
-                marginTop: '8px'
+                marginTop: '4px'
               }}
             >
               <div 
                 style={{ 
-                  width: '28px', 
-                  height: '28px', 
+                  width: '26px', 
+                  height: '26px', 
                   borderRadius: '8px', 
-                  border: `2px solid ${agree ? '#34c759' : '#d2d2d7'}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: agree ? '#34c759' : 'transparent',
-                  color: '#ffffff',
+                  border: agree ? 'none' : '1.5px solid #d2d2d7',
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  backgroundColor: agree ? '#059669' : '#ffffff', 
+                  color: '#ffffff', 
                   marginTop: '2px',
                   transition: 'all 0.2s ease',
-                  flexShrink: 0
+                  flexShrink: 0,
+                  boxShadow: agree ? '0 2px 6px rgba(5, 150, 105, 0.3)' : 'none'
                 }}
               >
-                {agree && <Check size={18} strokeWidth={3} />}
+                {agree && <Check size={16} strokeWidth={3} />}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <span style={{ fontSize: '17px', fontWeight: 700, color: '#1d1d1f' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>
                   [필수] 개인정보 수집 및 키오스크 이용약관 동의
                 </span>
-                <p style={{ fontSize: '14px', color: '#86868b', lineHeight: 1.5, margin: 0, fontWeight: 500 }}>
+                <p style={{ fontSize: '13px', color: '#86868b', lineHeight: 1.45, margin: 0, fontWeight: 500 }}>
                   무인 시설 입장 바코드 생성, 타석 배정 예약 정보의 알림톡 발송을 위해 이름과 연락처 수집에 동의해 주셔야 가입이 가능합니다.
                 </p>
               </div>
@@ -554,38 +580,39 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
           </div>
 
           {/* 우측: 휴대폰 입력 전용 콤팩트 키패드 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
-              <label style={{ fontSize: '17px', fontWeight: 600, color: '#1d1d1f', textAlign: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+              <label style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f', textAlign: 'center' }}>
                 휴대폰 번호 입력
               </label>
               <div 
                 style={{
                   width: '100%',
-                  height: '64px',
+                  height: '68px',
                   background: '#f5f5f7',
-                  border: '2px solid transparent',
-                  borderRadius: '16px',
+                  border: '1px solid rgba(0, 0, 0, 0.06)',
+                  borderRadius: '18px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: '28px',
-                  fontWeight: 700,
+                  fontWeight: 900,
                   color: hp ? '#1d1d1f' : '#a1a1a6',
                   letterSpacing: '1px',
-                  boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)'
+                  boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.03)',
+                  boxSizing: 'border-box'
                 }}
               >
                 {hp ? formatPhoneNumber(hp) : '010-0000-0000'}
               </div>
             </div>
 
-            {/* 콤팩트 텐키 그리드 */}
+            {/* 콤팩트 텐키 그리드 (2.5D 애플 햅틱 스타일) */}
             <div 
               style={{ 
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(3, 1fr)', 
-                gap: '12px', 
+                gap: '10px', 
                 width: '100%' 
               }}
             >
@@ -595,21 +622,18 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                   key={n} 
                   onClick={() => handleNumClick(n)} 
                   style={{ 
-                    height: '64px', 
-                    fontSize: '24px', 
-                    fontWeight: 600,
-                    borderRadius: '16px',
+                    height: '68px', 
+                    fontSize: '26px', 
+                    fontWeight: 800,
+                    borderRadius: '18px',
                     background: '#ffffff',
                     color: '#1d1d1f',
-                    border: '1px solid #e5e5ea',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                    border: '1px solid rgba(0, 0, 0, 0.08)',
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.03), inset 0 1px 1px rgba(255, 255, 255, 0.8)',
                     cursor: 'pointer',
-                    transition: 'all 0.1s ease'
+                    transition: 'all 0.1s cubic-bezier(0.25, 1, 0.5, 1)'
                   }}
-                  onMouseOver={(e) => e.currentTarget.style.background = '#f5f5f7'}
-                  onMouseOut={(e) => e.currentTarget.style.background = '#ffffff'}
-                  onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.95)'; e.currentTarget.style.background = '#e8e8ed'; }}
-                  onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = '#f5f5f7'; }}
+                  className="apple-card-hover"
                 >
                   {n}
                 </button>
@@ -618,19 +642,18 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 type="button" 
                 onClick={() => setHp('')} 
                 style={{ 
-                  height: '64px', 
-                  fontSize: '16px', 
-                  fontWeight: 600,
-                  color: '#ff3b30', 
-                  borderRadius: '16px',
-                  background: '#ffffff',
-                  border: '1px solid #e5e5ea',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                  height: '68px', 
+                  fontSize: '15px', 
+                  fontWeight: 800,
+                  color: '#ef4444', 
+                  borderRadius: '18px',
+                  background: '#fff5f5',
+                  border: '1px solid rgba(239, 68, 68, 0.15)',
+                  boxShadow: '0 2px 6px rgba(239, 68, 68, 0.04)',
                   cursor: 'pointer',
-                  transition: 'all 0.1s ease'
+                  transition: 'all 0.1s cubic-bezier(0.25, 1, 0.5, 1)'
                 }} 
-                onMouseOver={(e) => e.currentTarget.style.background = '#fff0f0'}
-                onMouseOut={(e) => e.currentTarget.style.background = '#ffffff'}
+                className="apple-card-hover"
               >
                 전체 지움
               </button>
@@ -638,19 +661,18 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 type="button" 
                 onClick={() => handleNumClick('0')} 
                 style={{ 
-                  height: '64px', 
-                  fontSize: '24px', 
-                  fontWeight: 600,
-                  borderRadius: '16px',
+                  height: '68px', 
+                  fontSize: '26px', 
+                  fontWeight: 800,
+                  borderRadius: '18px',
                   background: '#ffffff',
                   color: '#1d1d1f',
-                  border: '1px solid #e5e5ea',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                  border: '1px solid rgba(0, 0, 0, 0.08)',
+                  boxShadow: '0 2px 6px rgba(0, 0, 0, 0.03), inset 0 1px 1px rgba(255, 255, 255, 0.8)',
                   cursor: 'pointer',
-                  transition: 'all 0.1s ease'
+                  transition: 'all 0.1s cubic-bezier(0.25, 1, 0.5, 1)'
                 }}
-                onMouseOver={(e) => e.currentTarget.style.background = '#f5f5f7'}
-                onMouseOut={(e) => e.currentTarget.style.background = '#ffffff'}
+                className="apple-card-hover"
               >
                 0
               </button>
@@ -658,53 +680,53 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 type="button" 
                 onClick={handleBackspace} 
                 style={{ 
-                  height: '64px', 
-                  borderRadius: '16px', 
+                  height: '68px', 
+                  borderRadius: '18px', 
                   display: 'flex', 
                   alignItems: 'center', 
                   justifyContent: 'center',
-                  background: '#e5e5ea',
+                  background: '#f5f5f7',
                   color: '#1d1d1f',
-                  border: 'none',
-                  fontSize: '24px',
+                  border: '1px solid rgba(0, 0, 0, 0.06)',
+                  fontSize: '22px',
+                  fontWeight: 800,
                   cursor: 'pointer',
-                  transition: 'all 0.1s ease'
+                  transition: 'all 0.1s cubic-bezier(0.25, 1, 0.5, 1)'
                 }} 
-                onMouseOver={(e) => e.currentTarget.style.background = '#d2d2d7'}
-                onMouseOut={(e) => e.currentTarget.style.background = '#e5e5ea'}
+                className="apple-card-hover"
               >
                 ←
               </button>
             </div>
 
-            {/* 가입 완료 최종 제출 버튼 */}
+            {/* 가입 완료 최종 제출 버튼 (딥 쥬얼 에메랄드 볼드 필) */}
             <button
               type="submit"
               disabled={loading}
               style={{
                 width: '100%',
                 height: '72px',
-                borderRadius: '20px',
+                borderRadius: '999px',
                 fontSize: '20px',
-                fontWeight: 700,
+                fontWeight: 950,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '10px',
-                marginTop: '16px',
-                background: '#34c759',
+                marginTop: '8px',
+                background: 'linear-gradient(145deg, #059669 0%, #047857 50%, #064e3b 100%)',
                 color: '#ffffff',
-                border: 'none',
+                border: '1.5px solid rgba(52, 211, 153, 0.4)',
                 cursor: loading ? 'not-allowed' : 'pointer',
                 opacity: loading ? 0.7 : 1,
-                boxShadow: '0 8px 24px rgba(52, 199, 89, 0.3)',
-                transition: 'all 0.2s ease'
+                boxShadow: '0 8px 24px rgba(6, 78, 59, 0.28)',
+                transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
+                letterSpacing: '-0.3px'
               }}
-              onMouseOver={(e) => !loading && (e.currentTarget.style.transform = 'translateY(-2px)')}
-              onMouseOut={(e) => !loading && (e.currentTarget.style.transform = 'translateY(0)')}
+              className="apple-card-hover"
             >
               <Sparkles size={24} />
-              {loading ? '가입 처리 중...' : (faceTerminalEnabled ? '다음 단계 (안면 등록)' : '즉석 회원가입 완료')}
+              {loading ? '가입 처리 중...' : (faceTerminalEnabled ? '다음 단계 (안면 등록) ›' : '⚡ 3초 즉석 회원가입 완료 ›')}
             </button>
           </div>
 
@@ -722,4 +744,6 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
     </div>
   );
 };
+
+export default MemberRegister;
 
