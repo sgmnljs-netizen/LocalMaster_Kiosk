@@ -11,6 +11,7 @@ const appVersion = fs.existsSync(rootVersionPath)
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: './',
   define: {
     __APP_VERSION__: JSON.stringify(`v${appVersion}`),
   },

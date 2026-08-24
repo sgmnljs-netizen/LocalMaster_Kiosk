@@ -154,18 +154,78 @@ export interface KioskMasterResponse {
 }
 
 // --------------------------------------------------------------------------
-// 💾 Edge DB Initializer (LocalStorage 기반 가상 DB)
+// 💾 Edge DB Initializer (LocalStorage 기반 가상 DB & 데모 시드 데이터)
 // --------------------------------------------------------------------------
 
 const initializeEdgeDB = () => {
-  if (!localStorage.getItem('LM_MEMBERS')) localStorage.setItem('LM_MEMBERS', JSON.stringify([]));
-  if (!localStorage.getItem('LM_PRODUCTS')) localStorage.setItem('LM_PRODUCTS', JSON.stringify([]));
-  if (!localStorage.getItem('LM_BAYS')) localStorage.setItem('LM_BAYS', JSON.stringify([]));
+  // 1. 기본 가맹점 정보
+  if (!localStorage.getItem('LM_STORE_INFO') || localStorage.getItem('LM_STORE_INFO') === '{}') {
+    localStorage.setItem('LM_STORE_INFO', JSON.stringify({
+      store_cd: STORE_CODE,
+      store_nm: '로컬마스터 강남 1호점 (체험관)',
+      business_no: '721-81-04039',
+      ceo_name: '대표이사',
+      address: '서울특별시 강남구 테헤란로 123',
+      tel: '1566-8705',
+      checkin_policy: 'CHECKIN_REQUIRED',
+      meta_data: { integration: { face_terminal_yn: true } }
+    }));
+  }
+
+  // 2. 기본 구역 정보 (ZONES)
+  if (!localStorage.getItem('LM_ZONES') || localStorage.getItem('LM_ZONES') === '[]') {
+    localStorage.setItem('LM_ZONES', JSON.stringify([
+      { zone_cd: 'BAY', zone_name: '일반 타석 (1F~2F)', floor_no: 1 },
+      { zone_cd: 'PAR3', zone_name: '천연잔디 PAR3', floor_no: 1 },
+    ]));
+  }
+
+  // 3. 기본 타석 목록 (1~12번 타석)
+  const existingBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
+  if (!existingBays || existingBays.length === 0) {
+    const defaultBays: Bay[] = Array.from({ length: 12 }, (_, i) => ({
+      bay_id: i + 1,
+      bay_no: i + 1,
+      floor_no: 1,
+      floor: '1F',
+      zone_code: 'BAY',
+      type: i === 1 ? 'LEFT' : 'RIGHT',
+      status: (i === 1 || i === 4 || i === 7) ? 'OCCUPIED' : 'AVAILABLE',
+      current_user_name: i === 1 ? '김프로' : i === 4 ? '이회원' : i === 7 ? '박골퍼' : null,
+      current_user_hp: i === 1 ? '010-1234-5678' : i === 4 ? '010-9988-7766' : i === 7 ? '010-5544-3322' : null,
+      minutes_left: i === 1 ? 45 : i === 4 ? 12 : i === 7 ? 30 : undefined,
+      end_time: i === 1 ? '15:45' : i === 4 ? '15:12' : i === 7 ? '15:30' : null,
+      bay_name: `${i + 1}번 타석 ${i === 1 ? '(좌타겸용)' : i === 2 ? '(프라이빗)' : '(오픈형)'}`,
+    }));
+    localStorage.setItem('LM_BAYS', JSON.stringify(defaultBays));
+  }
+
+  // 4. 기본 상품 목록 (PRODUCTS)
+  const existingProducts = JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]');
+  if (!existingProducts || existingProducts.length === 0) {
+    localStorage.setItem('LM_PRODUCTS', JSON.stringify([
+      { prod_cd: 'P01', prod_nm: '일일 타석 60분', standard_price: 20000, sale_price: 20000, logic_type: 'FACILITY', duration_min: 60 },
+      { prod_cd: 'P02', prod_nm: '일일 타석 90분', standard_price: 28000, sale_price: 28000, logic_type: 'FACILITY', duration_min: 90 },
+      { prod_cd: 'P03', prod_nm: '1개월 정기 회원권', standard_price: 180000, sale_price: 180000, logic_type: 'MEMBERSHIP', days: 30 },
+      { prod_cd: 'P04', prod_nm: '3개월 정기 회원권', standard_price: 480000, sale_price: 450000, logic_type: 'MEMBERSHIP', days: 90 },
+    ]));
+  }
+
+  // 5. 기본 회원 목록 (MEMBERS)
+  const existingMembers = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]');
+  if (!existingMembers || existingMembers.length === 0) {
+    localStorage.setItem('LM_MEMBERS', JSON.stringify([
+      { member_no: 'M001', member_name: '홍길동', hp: '010-1234-5678', member_grade: '정회원', status_cd: 'ACTIVE' },
+      { member_no: 'M002', member_name: '이골프', hp: '010-9988-7766', member_grade: '정회원', status_cd: 'ACTIVE' },
+      { member_no: 'M003', member_name: '박프로', hp: '010-5544-3322', member_grade: 'VIP', status_cd: 'ACTIVE' },
+    ]));
+  }
+
   if (!localStorage.getItem('LM_LOCKERS')) localStorage.setItem('LM_LOCKERS', JSON.stringify([]));
   if (!localStorage.getItem('LM_SALES')) localStorage.setItem('LM_SALES', JSON.stringify([]));
   if (!localStorage.getItem('LM_PAR3_SLOTS')) localStorage.setItem('LM_PAR3_SLOTS', JSON.stringify([]));
   localStorage.setItem('LM_KIOSK_EDGEDB_INIT', 'true');
-  console.log('⛳ LocalMaster Kiosk: Edge DB Clean Initialized.');
+  console.log('⛳ LocalMaster Kiosk: Edge DB Seeded & Ready.');
 };
 
 // 즉시 초기화 실행
@@ -248,10 +308,32 @@ class HybridAPIClient {
       }
     }
 
+    const cachedBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
+    const baysToReturn = (cachedBays && cachedBays.length > 0) ? cachedBays : Array.from({ length: 12 }, (_, i) => ({
+      bay_id: i + 1,
+      bay_no: i + 1,
+      floor_no: 1,
+      floor: '1F',
+      zone_code: 'BAY',
+      type: i === 1 ? 'LEFT' : 'RIGHT',
+      status: (i === 1 || i === 4 || i === 7) ? 'OCCUPIED' : 'AVAILABLE',
+      current_user_name: i === 1 ? '김프로' : i === 4 ? '이회원' : i === 7 ? '박골퍼' : null,
+      current_user_hp: i === 1 ? '010-1234-5678' : i === 4 ? '010-9988-7766' : i === 7 ? '010-5544-3322' : null,
+      minutes_left: i === 1 ? 45 : i === 4 ? 12 : i === 7 ? 30 : undefined,
+      end_time: i === 1 ? '15:45' : i === 4 ? '15:12' : i === 7 ? '15:30' : null,
+      bay_name: `${i + 1}번 타석 ${i === 1 ? '(좌타겸용)' : i === 2 ? '(프라이빗)' : '(오픈형)'}`,
+    }));
+
+    const cachedZones = JSON.parse(localStorage.getItem('LM_ZONES') || '[]');
+    const zonesToReturn = (cachedZones && cachedZones.length > 0) ? cachedZones : [
+      { zone_cd: 'BAY', zone_name: '일반 타석 (1F~2F)', floor_no: 1 },
+      { zone_cd: 'PAR3', zone_name: '천연잔디 PAR3', floor_no: 1 },
+    ];
+
     return {
       store_info: JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}'),
-      zones: JSON.parse(localStorage.getItem('LM_ZONES') || '[]'),
-      bays: JSON.parse(localStorage.getItem('LM_BAYS') || '[]'),
+      zones: zonesToReturn,
+      bays: baysToReturn,
       lockers: JSON.parse(localStorage.getItem('LM_LOCKERS') || '[]'),
       products: JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]'),
       members: JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]'),
@@ -610,9 +692,23 @@ class HybridAPIClient {
       }
     }
 
-    // Edge DB 모드
-    // 실시간으로 남은 시간이 0이 되었을 때 AVAILABLE로 갱신하는 시뮬레이션 포함
-    const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
+    let bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
+    if (!bays || bays.length === 0) {
+      bays = Array.from({ length: 12 }, (_, i) => ({
+        bay_id: i + 1,
+        bay_no: i + 1,
+        floor_no: 1,
+        floor: '1F',
+        zone_code: 'BAY',
+        type: i === 1 ? 'LEFT' : 'RIGHT',
+        status: (i === 1 || i === 4 || i === 7) ? 'OCCUPIED' : 'AVAILABLE',
+        current_user_name: i === 1 ? '김프로' : i === 4 ? '이회원' : i === 7 ? '박골퍼' : null,
+        current_user_hp: i === 1 ? '010-1234-5678' : i === 4 ? '010-9988-7766' : i === 7 ? '010-5544-3322' : null,
+        minutes_left: i === 1 ? 45 : i === 4 ? 12 : i === 7 ? 30 : undefined,
+        end_time: i === 1 ? '15:45' : i === 4 ? '15:12' : i === 7 ? '15:30' : null,
+        bay_name: `${i + 1}번 타석 ${i === 1 ? '(좌타겸용)' : i === 2 ? '(프라이빗)' : '(오픈형)'}`,
+      }));
+    }
     const now = new Date();
     
     const updatedBays = bays.map(bay => {
