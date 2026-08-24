@@ -11,7 +11,7 @@
     "app:dev": "node scripts/launch_app.js --dev",
     "audit:hardcode": "node scripts/check-hardcode.js",
     "build": "npm run audit:hardcode && tsc && vite build",
-    "build:demo": "vite build --base=/demo/apps/kiosk/ --outDir ../localmaster-homepage/public/demo/apps/kiosk",
+    "build:demo": "vite build --base=/demo/apps/kiosk/ --outDir ../localmaster-homepage/public/demo/apps/kiosk --emptyOutDir",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
