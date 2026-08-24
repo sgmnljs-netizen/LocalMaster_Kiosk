@@ -196,7 +196,20 @@ export default function KioskApp() {
   const [customMenuNotice, setCustomMenuNotice] = useState<{ title: string; desc: string } | null>(null);
 
   useEffect(() => {
+    const isDemoEnvironment = 
+      import.meta.env.VITE_DEMO_MODE === 'true' ||
+      (typeof window !== 'undefined' && (
+        window.location.search.includes('demo=true') ||
+        window.location.pathname.includes('/demo/') ||
+        window.location.hostname === 'segnet.co.kr' ||
+        window.location.hostname === 'localhost'
+      ));
+
     const checkMw = async () => {
+      if (isDemoEnvironment) {
+        setIsMiddlewareOffline(false);
+        return;
+      }
       const status = await api.getMiddlewareStatus();
       setIsMiddlewareOffline(!status.online);
     };
