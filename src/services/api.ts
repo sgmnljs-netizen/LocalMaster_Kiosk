@@ -1961,6 +1961,51 @@ class HybridAPIClient {
     }
     return []; // EdgeDB Fallback 시 빈 리스트
   }
+
+  // 19. 고아 결제(Ghost Charge) 긴급 DLQ 보고 API
+  async reportGhostCharge(params: {
+    terminalId: string;
+    deviceType?: string;
+    authNo: string;
+    amount: number;
+    cardName?: string;
+    cardNoMasked?: string;
+    vanTrNo?: string;
+    approvedAt?: string;
+    backendErrorReason?: string;
+    reversalErrorReason?: string;
+    rawApprovalData?: string;
+  }): Promise<{ success: boolean; dlq_id?: string; message?: string }> {
+    try {
+      const res = await fetch(`${BASE_URL}/sales/dlq/report-ghost-charge`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-store-cd': STORE_CODE,
+        },
+        body: JSON.stringify({
+          store_cd: STORE_CODE,
+          terminal_id: params.terminalId || this.terminalId || 'KIOSK-01',
+          device_type: params.deviceType || 'KIOSK',
+          auth_no: params.authNo,
+          amount: params.amount,
+          card_name: params.cardName || '',
+          card_no_masked: params.cardNoMasked || '',
+          van_tr_no: params.vanTrNo,
+          approved_at: params.approvedAt,
+          backend_error_reason: params.backendErrorReason,
+          reversal_error_reason: params.reversalErrorReason,
+          raw_approval_data: params.rawApprovalData,
+        }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.error('[DLQ] Failed to report ghost charge to backend:', err);
+    }
+    return { success: false, message: 'DLQ 보고 실패' };
+  }
 }
 
 export const api = new HybridAPIClient();

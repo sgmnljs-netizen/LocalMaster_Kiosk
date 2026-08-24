@@ -772,10 +772,38 @@ export default function KioskApp() {
       if (cancelRes.success) {
         return { success: true, message: '전산 처리 오류로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 챙겨주세요.' };
       } else {
-        return { success: false, message: `카드 자동 취소 실패 (${cancelRes.error_message || '단말기 미응답'}). 영수증을 지참하여 직원에게 문의하세요.` };
+        // 🚨 [고아 결제(Ghost Charge) 긴급 DLQ 보고]
+        api.reportGhostCharge({
+          terminalId: cardApproval.terminal_id || 'KIOSK-01',
+          deviceType: 'KIOSK',
+          authNo: cardApproval.auth_code,
+          amount: payAmount || cardApproval.amount,
+          cardName: cardApproval.issuer_name || '',
+          cardNoMasked: cardApproval.card_no_masked || '',
+          vanTrNo: cardApproval.van_tr_no,
+          approvedAt: cardApproval.approved_at,
+          backendErrorReason: reason,
+          reversalErrorReason: cancelRes.error_message || '단말기 미응답/거절',
+        }).catch(err => console.error('[DLQ] report error:', err));
+
+        return { success: false, message: `카드 자동 취소 실패 (${cancelRes.error_message || '단말기 미응답'}). 관제 시스템에 긴급 접수되었습니다. 영수증을 지참하여 직원에게 문의하세요.` };
       }
     } catch (err: any) {
-      return { success: false, message: `망취소 통신 오류: ${err?.message || '단말기 연결 실패'}` };
+      // 🚨 [고아 결제(Ghost Charge) 긴급 DLQ 보고]
+      api.reportGhostCharge({
+        terminalId: cardApproval.terminal_id || 'KIOSK-01',
+        deviceType: 'KIOSK',
+        authNo: cardApproval.auth_code,
+        amount: payAmount || cardApproval.amount,
+        cardName: cardApproval.issuer_name || '',
+        cardNoMasked: cardApproval.card_no_masked || '',
+        vanTrNo: cardApproval.van_tr_no,
+        approvedAt: cardApproval.approved_at,
+        backendErrorReason: reason,
+        reversalErrorReason: `망취소 통신 오류: ${err?.message || '단말기 연결 실패'}`,
+      }).catch(dlqErr => console.error('[DLQ] report error:', dlqErr));
+
+      return { success: false, message: `망취소 통신 오류: ${err?.message || '단말기 연결 실패'}. 관제 시스템에 긴급 접수되었습니다.` };
     }
   };
 
@@ -910,7 +938,13 @@ export default function KioskApp() {
             const cancelRes = await executeAutoReversal(payResult.cardApproval, totalPaid, err?.message || '동반자 배정 오류');
             cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
           }
-          showErrorModal((err?.message || '동반자 타석 배정 처리 중 오류가 발생했습니다.') + cancelInfo, '동반자 배정 실패 및 결제 취소');
+          showErrorModal(
+            (err?.message || '동반자 타석 배정 처리 중 오류가 발생했습니다.') + cancelInfo,
+            '동반자 배정 실패 및 결제 취소',
+            false,
+            undefined,
+            () => handleLogoutToHome()
+          );
           return;
         }
       }
