@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Printer, ArrowRight, CreditCard, Calendar, User, ShoppingBag, ShieldCheck } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { CheckCircle2, Printer, ArrowRight, CreditCard, Calendar, User, ShoppingBag, ShieldCheck, RefreshCw } from 'lucide-react';
 import { TimeMaster } from '../utils/timeMaster';
+import { kioskEscPosPrinter } from '../services/printer/escpos_printer';
+import { useKioskSettings } from '../stores/kioskSettings';
 
 export interface CompletedPurchaseInfo {
   memberName: string;
@@ -27,13 +29,43 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
 }) => {
   const [countdown, setCountdown] = useState(10);
   const [isPrinting, setIsPrinting] = useState(true);
+  const [printStatus, setPrintStatus] = useState<string | null>(null);
+  const { settings } = useKioskSettings();
+  const storeName = settings.deviceName || 'LocalMaster Golf';
+  const autoPrintReceipt = true;
+
+  const handlePrint = useCallback(async () => {
+    setIsPrinting(true);
+    setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
+    const safeApprNo = purchaseInfo?.apprNo || '00000000';
+    const res = await kioskEscPosPrinter.printReceipt({
+      storeName: storeName || 'LocalMaster Golf',
+      receiptNo: `RC-${safeApprNo.slice(-6)}`,
+      tradeDate: purchaseInfo?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
+      memberName: purchaseInfo?.memberName,
+      payAmount: purchaseInfo?.amount,
+      purchaseType: purchaseInfo?.purchaseType || 'MEMBERSHIP',
+      cardInfo: {
+        issuerName: '신용카드',
+        cardNoMasked: '****-****-****-****',
+        approvalNo: safeApprNo,
+        terminalId: 'KIOSK-01'
+      },
+      barcodeText: `PUR-${safeApprNo}`
+    });
+    setIsPrinting(false);
+    setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
+  }, [purchaseInfo, storeName, lang]);
 
   useEffect(() => {
-    // 영수증 인쇄 3초 애니메이션
-    const printTimer = setTimeout(() => {
+    if (autoPrintReceipt) {
+      handlePrint();
+    } else {
       setIsPrinting(false);
-    }, 3000);
+    }
+  }, [autoPrintReceipt, handlePrint]);
 
+  useEffect(() => {
     // 10초 카운트다운 타이머
     const timer = setInterval(() => {
       setCountdown((prev) => {
@@ -47,7 +79,6 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
     }, 1000);
 
     return () => {
-      clearTimeout(printTimer);
       clearInterval(timer);
     };
   }, [onClose]);
@@ -205,7 +236,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
                 <span>결제 수단 / 승인번호</span>
               </div>
               <span style={{ fontWeight: 700, color: '#334155' }}>
-                신용카드 IC ({purchaseInfo.apprNo})
+                신용카드 IC ({purchaseInfo?.apprNo || '승인완료'})
               </span>
             </div>
 
@@ -234,37 +265,62 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
           </div>
         </div>
 
-        {/* 확인 및 복귀 버튼 */}
-        <button
-          onClick={onClose}
-          style={{
-            width: '100%',
-            height: '64px',
-            borderRadius: '999px',
-            background: 'linear-gradient(135deg, #047857 0%, #059669 100%)',
-            color: '#ffffff',
-            border: 'none',
-            fontSize: '20px',
-            fontWeight: 800,
-            letterSpacing: '-0.5px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '10px',
-            boxShadow: '0 10px 25px rgba(5, 150, 105, 0.35)',
-            transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
-          }}
-          onMouseDown={(e) => {
-            e.currentTarget.style.transform = 'scale(0.97)';
-          }}
-          onMouseUp={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-          }}
-        >
-          <span>{lang === 'KO' ? `확인 및 메인으로 이동 (${countdown}s)` : `Confirm & Go Home (${countdown}s)`}</span>
-          <ArrowRight size={22} style={{ color: '#ffffff' }} />
-        </button>
+        {/* 버튼 영역: 재출력 버튼 + 확인 버튼 */}
+        <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+          <button
+            onClick={handlePrint}
+            style={{
+              flex: '1',
+              height: '64px',
+              borderRadius: '999px',
+              background: '#f1f5f9',
+              color: '#0f172a',
+              border: '1px solid #cbd5e1',
+              fontSize: '18px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
+            }}
+          >
+            <Printer size={20} style={{ color: '#047857' }} />
+            <span>{lang === 'KO' ? '영수증 재출력' : 'Reprint'}</span>
+          </button>
+
+          <button
+            onClick={onClose}
+            style={{
+              flex: '2',
+              height: '64px',
+              borderRadius: '999px',
+              background: 'linear-gradient(135deg, #047857 0%, #059669 100%)',
+              color: '#ffffff',
+              border: 'none',
+              fontSize: '20px',
+              fontWeight: 800,
+              letterSpacing: '-0.5px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              boxShadow: '0 10px 25px rgba(5, 150, 105, 0.35)',
+              transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
+            }}
+            onMouseDown={(e) => {
+              e.currentTarget.style.transform = 'scale(0.97)';
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+          >
+            <span>{lang === 'KO' ? `확인 (${countdown}s)` : `Confirm (${countdown}s)`}</span>
+            <ArrowRight size={22} style={{ color: '#ffffff' }} />
+          </button>
+        </div>
       </div>
     </div>
   );

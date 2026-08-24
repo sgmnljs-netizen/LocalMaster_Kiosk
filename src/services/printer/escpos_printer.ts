@@ -14,11 +14,17 @@ export interface KioskReceiptPrintData {
   startTime?: string;
   endTime?: string;
   payAmount: number;
+  barcodeText?: string;
+  purchaseType?: 'MEMBERSHIP' | 'LOCKER' | 'DAILY' | 'PRODUCT';
   cardInfo?: {
     issuerName: string;
     cardNoMasked: string;
     approvalNo: string;
     terminalId: string;
+  };
+  cashInfo?: {
+    approvalNo: string;
+    receiptType?: string;
   };
 }
 
@@ -58,7 +64,7 @@ export class KioskEscPosPrinterService {
       append(`${dblDivider}\n`);
     }
 
-    // 4. 이용 시간
+    // 4. 이용 시간 / 고객 정보
     appendBytes(0x1b, 0x61, 0x00); // Left Align
     if (data.memberName) append(`회 원 명: ${data.memberName}\n`);
     if (data.useMinutes) append(`이용시간: ${data.useMinutes}분\n`);
@@ -73,14 +79,35 @@ export class KioskEscPosPrinterService {
       append(`카드정보: ${data.cardInfo.issuerName} (${data.cardInfo.cardNoMasked})\n`);
       append(`승인번호: ${data.cardInfo.approvalNo}\n`);
       append(`단말기ID: ${data.cardInfo.terminalId}\n`);
+    } else if (data.cashInfo) {
+      append(`현금영수증: ${data.cashInfo.receiptType || '소득공제'}\n`);
+      append(`승인번호: ${data.cashInfo.approvalNo}\n`);
     }
     append(`${dblDivider}\n`);
 
-    // 6. 푸터
+    // 6. [Code128 출입 바코드] (게이트 통과용)
+    const barcode = data.barcodeText || (data.bayNo ? `BAY-${data.bayNo}-${data.receiptNo.slice(-6)}` : undefined);
+    if (barcode) {
+      appendBytes(0x1b, 0x61, 0x01); // Center Align
+      append(`[출입 게이트 태깅 바코드]\n`);
+      
+      // Code128 바코드 커맨드: GS h 80, GS w 2, GS H 2, GS k 73 {n} {data}
+      appendBytes(0x1d, 0x68, 0x50); // 바코드 높이 80 dot
+      appendBytes(0x1d, 0x77, 0x02); // 바코드 폭 2
+      appendBytes(0x1d, 0x48, 0x02); // HRI 문자 바코드 아래 인쇄
+      
+      // Code128-B 인코딩 ({B prefix = 0x7B, 0x42)
+      const bBytes = encoder.encode(barcode);
+      const code128Payload = [0x7b, 0x42, ...Array.from(bBytes)];
+      appendBytes(0x1d, 0x6b, 0x49, code128Payload.length, ...code128Payload);
+      append(`\n\n`);
+    }
+
+    // 7. 푸터
     appendBytes(0x1b, 0x61, 0x01); // Center Align
     append(`배정된 타석으로 이동해 주시기 바랍니다.\n이용해 주셔서 감사합니다.\n\n`);
 
-    // 7. 용지 절단
+    // 8. 용지 절단 (Full Cut)
     appendBytes(0x1b, 0x64, 0x04); // Feed 4 lines
     appendBytes(0x1d, 0x56, 0x41, 0x00); // Full Cut
 
@@ -97,23 +124,45 @@ export class KioskEscPosPrinterService {
   public async printReceipt(data: KioskReceiptPrintData): Promise<{ success: boolean; message: string }> {
     const buffer = this.buildReceiptBuffer(data);
 
-    // VCAT 9099 포트로 Raw Print 시도
-    try {
-      const res = await fetch('http://127.0.0.1:9099/vcat/print', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: buffer as unknown as BodyInit,
-        signal: AbortSignal.timeout(2000),
-      });
-      if (res.ok) {
-        return { success: true, message: '키오스크 서멀 프린터 출력 완료' };
-      } else {
-        return { success: false, message: `프린터 출력 실패 (상태: ${res.status})` };
+    // 1. VCAT 8090 및 9099 포트 순차 시도
+    const targetPorts = [8090, 9099];
+    for (const port of targetPorts) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/vcat/print`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: buffer as unknown as BodyInit,
+          signal: AbortSignal.timeout(1500),
+        });
+        if (res.ok) {
+          return { success: true, message: `키오스크 서멀 프린터 출력 완료 (포트 ${port})` };
+        }
+      } catch {
+        // 다음 포트 시도
       }
-    } catch (err: unknown) {
-      console.warn('[KioskPrinter] Printer daemon unreachable or print error:', err);
-      return { success: false, message: '프린터 데몬 미동작 또는 용지 부족/연결 불량 상태입니다.' };
     }
+
+    // 2. WebSerial API 시도 (직접 연결 프린터)
+    if (typeof navigator !== 'undefined' && 'serial' in navigator) {
+      try {
+        // @ts-expect-error WebSerial experimental
+        const ports = await navigator.serial.getPorts();
+        if (ports.length > 0) {
+          const port = ports[0];
+          await port.open({ baudRate: 9600 });
+          const writer = port.writable.getWriter();
+          await writer.write(buffer);
+          writer.releaseLock();
+          await port.close();
+          return { success: true, message: '서멀 프린터(WebSerial) 출력 완료' };
+        }
+      } catch (e) {
+        console.warn('[KioskPrinter] WebSerial print error:', e);
+      }
+    }
+
+    console.warn('[KioskPrinter] Printer daemon unreachable on ports 8090/9099. Falling back silently.');
+    return { success: false, message: '프린터 데몬 미동작 또는 용지 부족/연결 불량 상태입니다.' };
   }
 }
 

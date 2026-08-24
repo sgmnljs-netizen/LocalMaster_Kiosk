@@ -4,6 +4,7 @@ import { api, STORE_CODE } from '../services/api';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { useKioskVanPayment } from '../hooks/useKioskVanPayment';
 import { kioskVanClient } from '../services/van/van_client';
+import type { CardApprovalResult } from '../services/van/van_types';
 
 
 interface PaymentTerminalProps {
@@ -15,7 +16,7 @@ interface PaymentTerminalProps {
   resId?: string | null;
   memberName?: string;
   memberNo?: string;
-  onPaymentSuccess: (payResult?: { apprNo: string; tradeDate: string; amount: number }) => void;
+  onPaymentSuccess: (payResult?: { apprNo: string; tradeDate: string; amount: number; cardApproval?: CardApprovalResult }) => void;
   onCancel: () => void;
 }
 
@@ -86,7 +87,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           await new Promise((resolve) => setTimeout(resolve, 800));
         }
         setPayStep('PRINT_RECEIPT');
-        onPaymentSuccess({ apprNo: res.auth_code, tradeDate: res.approved_at, amount });
+        onPaymentSuccess({ apprNo: res.auth_code, tradeDate: res.approved_at, amount, cardApproval: res });
       } catch (err: any) {
         // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소)
         try {

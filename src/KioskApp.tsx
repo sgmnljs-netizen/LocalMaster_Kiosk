@@ -20,6 +20,8 @@ import { CheckinSelect } from './components/CheckinSelect';
 import { AllocationCompleteModal } from './components/AllocationCompleteModal';
 import { PurchaseCompleteModal, CompletedPurchaseInfo } from './components/PurchaseCompleteModal';
 import { api, Member, Product, Bay } from './services/api';
+import type { CardApprovalResult } from './services/van/van_types';
+import { kioskVanClient } from './services/van/van_client';
 import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
 import { KioskBottomBar } from './components/KioskBottomBar';
 import { useKioskSettings } from './stores/kioskSettings';
@@ -185,6 +187,9 @@ export default function KioskApp() {
     durationMin: number;
     startTime?: string;
     endTime?: string;
+    resId?: string;
+    memberName?: string;
+    payAmount?: number;
   } | null>(null);
   const [completedPurchaseInfo, setCompletedPurchaseInfo] = useState<CompletedPurchaseInfo | null>(null);
 
@@ -746,7 +751,35 @@ export default function KioskApp() {
   };
 
   // 5. 결제 및 배정 완전 성공 (영수증 출력 후 메인 복귀)
-  const handlePaymentCompleted = async (payResult?: { apprNo: string; tradeDate: string; amount: number }) => {
+  const executeAutoReversal = async (
+    cardApproval: CardApprovalResult | undefined,
+    payAmount: number,
+    reason: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!cardApproval || !cardApproval.auth_code) {
+      return { success: false, message: '카드 승인 정보가 없어 자동 취소할 수 없습니다.' };
+    }
+    try {
+      const orgDate = cardApproval.approved_at ? cardApproval.approved_at.replace(/[^0-9]/g, '').slice(0, 8) : '';
+      const cancelRes = await kioskVanClient.cancelCardPayment({
+        amount: payAmount || cardApproval.amount,
+        orgAuthCode: cardApproval.auth_code,
+        orgApprovedDate: orgDate,
+        terminalId: cardApproval.terminal_id,
+        vanTrNo: cardApproval.van_tr_no,
+        reason: `무인 키오스크 장애: ${reason}`
+      });
+      if (cancelRes.success) {
+        return { success: true, message: '전산 처리 오류로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 챙겨주세요.' };
+      } else {
+        return { success: false, message: `카드 자동 취소 실패 (${cancelRes.error_message || '단말기 미응답'}). 영수증을 지참하여 직원에게 문의하세요.` };
+      }
+    } catch (err: any) {
+      return { success: false, message: `망취소 통신 오류: ${err?.message || '단말기 연결 실패'}` };
+    }
+  };
+
+  const handlePaymentCompleted = async (payResult?: { apprNo: string; tradeDate: string; amount: number; cardApproval?: CardApprovalResult }) => {
     if (isAllocatingRef.current) return;
     isAllocatingRef.current = true;
     showToast('모든 처리가 안전하게 완료되었습니다. 이용권을 챙겨주세요!');
@@ -767,14 +800,21 @@ export default function KioskApp() {
             authMember?.hp || '010-0000-0000',
             undefined,       // member_item_id — 일일권은 null
             'CARD',          // [BUG-3 FIX] payment_method 명시
-            selectedProduct.standard_price  // [BUG-3 FIX] 매출 금액 전달
+            selectedProduct.standard_price,  // [BUG-3 FIX] 매출 금액 전달
+            payResult?.cardApproval          // [VAN Financial Integration] 승인 메타데이터 전달
           );
           if (allocResult) {
             if (!allocResult.success) {
               hasCustomModal = false;
+              // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소)
+              let cancelInfo = '';
+              if (payResult?.cardApproval) {
+                const cancelRes = await executeAutoReversal(payResult.cardApproval, selectedProduct.standard_price, allocResult.message || '타석 배정 실패');
+                cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
+              }
               showErrorModal(
-                allocResult.message || '일일권 타석 배정에 실패했습니다. 카운터 직원을 호출해 주세요.',
-                '타석 배정 실패',
+                (allocResult.message || '일일권 타석 배정에 실패했습니다. 카운터 직원을 호출해 주세요.') + cancelInfo,
+                '타석 배정 실패 및 결제 취소',
                 false,
                 undefined,
                 () => handleLogoutToHome()
@@ -795,30 +835,41 @@ export default function KioskApp() {
                 bayNo: selectedBayNo,
                 durationMin: finalDuration,
                 startTime: (allocResult as any).start_time || (allocResult as any).startTime,
-                endTime: (allocResult as any).end_time || (allocResult as any).endTime
+                endTime: (allocResult as any).end_time || (allocResult as any).endTime,
+                resId: allocResult.res_id,
+                memberName: authMember?.member_name || '비회원',
+                payAmount: selectedProduct.standard_price
               });
             }
           }
         } catch (err: any) {
           console.error('[BUG-1 FIX] 일일권 타석 배정 실패:', err);
           hasCustomModal = false;
+          // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소)
+          let cancelInfo = '';
+          if (payResult?.cardApproval) {
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, selectedProduct.standard_price, err?.message || '통신 오류');
+            cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
+          }
           showErrorModal(
-            err?.message || '타석 배정 중 오류가 발생했습니다. 직원에게 문의해주세요.',
-            '타석 배정 실패',
+            (err?.message || '타석 배정 중 오류가 발생했습니다. 직원에게 문의해주세요.') + cancelInfo,
+            '타석 배정 오류 및 결제 취소',
             false,
             undefined,
             () => handleLogoutToHome()
           );
+          return;
         }
       }
 
       // 동반자 일괄 결제 완료 시점에 반영
       if (companionTargets.length > 0) {
         hasCustomModal = true;
+        const allocatedBays: number[] = [];
         try {
           for (const t of companionTargets) {
             const pMethod = t.price > 0 ? 'CARD' : 'TICKET';
-            await api.allocateBay(
+            const res = await api.allocateBay(
               t.bayNo,
               t.durationMin ?? 60,
               t.memberNo,
@@ -826,8 +877,13 @@ export default function KioskApp() {
               t.hp,
               t.memberItemId,
               pMethod,
-              t.price
+              t.price,
+              payResult?.cardApproval
             );
+            if (!res || !res.success) {
+              throw new Error(res?.message || `${t.bayNo}번 타석 배정 실패`);
+            }
+            allocatedBays.push(t.bayNo);
           }
           setCompanionTargets([]);
           setAuthMember(null);
@@ -838,38 +894,97 @@ export default function KioskApp() {
           showToast(lang === 'KO' ? '동반자 타석 결제 및 배정이 완료되었습니다!' : 'Group allocation & payment completed!');
         } catch (err: any) {
           console.error('동반자 결제 후 배정 실패:', err);
-          showErrorModal(err?.message || '동반자 타석 배정 처리 중 오류가 발생했습니다.');
+          hasCustomModal = false;
+          // 🚨 동반자 배정 실패 시 이미 배정된 타석 롤백
+          for (const bNo of allocatedBays) {
+            try {
+              await api.releaseBay(bNo);
+            } catch (e) {
+              console.error(`타석 ${bNo} 롤백 실패:`, e);
+            }
+          }
+          // 🚨 통합 카드 결제 자동 망취소
+          let cancelInfo = '';
+          if (payResult?.cardApproval) {
+            const totalPaid = companionTargets.reduce((sum, c) => sum + (c.price || 0), 0);
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, totalPaid, err?.message || '동반자 배정 오류');
+            cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
+          }
+          showErrorModal((err?.message || '동반자 타석 배정 처리 중 오류가 발생했습니다.') + cancelInfo, '동반자 배정 실패 및 결제 취소');
+          return;
         }
       }
 
       // 일반 회원권 구매 성공인 경우
       if (purpose === 'PURCHASE_PRODUCT' && authMember && selectedProduct) {
         hasCustomModal = true;
-        await api.purchaseProduct(authMember.member_no, selectedProduct.prod_cd, selectedProduct.standard_price);
-        setCompletedPurchaseInfo({
-          memberName: authMember.member_name,
-          memberHp: authMember.hp,
-          productName: selectedProduct.prod_nm,
-          amount: payResult?.amount || selectedProduct.standard_price,
-          apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
-          tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
-          purchaseType: 'MEMBERSHIP'
-        });
+        try {
+          const res: any = await api.purchaseProduct(authMember.member_no, selectedProduct.prod_cd, selectedProduct.standard_price);
+          if (res && res.success === false) {
+            throw new Error(res.message || '회원권 전산 등록에 실패했습니다.');
+          }
+          setCompletedPurchaseInfo({
+            memberName: authMember.member_name,
+            memberHp: authMember.hp,
+            productName: selectedProduct.prod_nm,
+            amount: payResult?.amount || selectedProduct.standard_price,
+            apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
+            tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
+            purchaseType: 'MEMBERSHIP'
+          });
+        } catch (err: any) {
+          console.error('회원권 구매 등록 실패:', err);
+          hasCustomModal = false;
+          let cancelInfo = '';
+          if (payResult?.cardApproval) {
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, selectedProduct.standard_price, err?.message || '회원권 등록 실패');
+            cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
+          }
+          showErrorModal(
+            (err?.message || '회원권 전산 등록 중 오류가 발생했습니다.') + cancelInfo,
+            '회원권 구매 실패 및 결제 취소',
+            false,
+            undefined,
+            () => handleLogoutToHome()
+          );
+          return;
+        }
       }
 
       // 라카 연장/대여 결제 완료 시점에 반영
       if (purpose === 'EXTEND_LOCKER' && selectedLockerNo && selectedProduct && authMember) {
         hasCustomModal = true;
-        await api.extendLocker(selectedLockerNo, selectedProduct.days || 30, selectedProduct.standard_price);
-        setCompletedPurchaseInfo({
-          memberName: authMember.member_name,
-          memberHp: authMember.hp,
-          productName: `${selectedLockerNo}번 개인 사물함 (라카 ${selectedProduct.days || 30}일 대여)`,
-          amount: payResult?.amount || selectedProduct.standard_price,
-          apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
-          tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
-          purchaseType: 'LOCKER'
-        });
+        try {
+          const res: any = await api.extendLocker(selectedLockerNo, selectedProduct.days || 30, selectedProduct.standard_price);
+          if (res && res.success === false) {
+            throw new Error(res.message || '라카 연장 전산 등록에 실패했습니다.');
+          }
+          setCompletedPurchaseInfo({
+            memberName: authMember.member_name,
+            memberHp: authMember.hp,
+            productName: `${selectedLockerNo}번 개인 사물함 (라카 ${selectedProduct.days || 30}일 대여)`,
+            amount: payResult?.amount || selectedProduct.standard_price,
+            apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
+            tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
+            purchaseType: 'LOCKER'
+          });
+        } catch (err: any) {
+          console.error('라카 연장 등록 실패:', err);
+          hasCustomModal = false;
+          let cancelInfo = '';
+          if (payResult?.cardApproval) {
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, selectedProduct.standard_price, err?.message || '라카 연장 등록 실패');
+            cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
+          }
+          showErrorModal(
+            (err?.message || '라카 연장 전산 등록 중 오류가 발생했습니다.') + cancelInfo,
+            '라카 연장 실패 및 결제 취소',
+            false,
+            undefined,
+            () => handleLogoutToHome()
+          );
+          return;
+        }
       }
 
       // 성공적으로 배정된 타석 변수 초기화 (중복 release 락 해제 방지)
@@ -1891,6 +2006,9 @@ export default function KioskApp() {
           durationMin={completedAllocationInfo.durationMin}
           startTime={completedAllocationInfo.startTime}
           endTime={completedAllocationInfo.endTime}
+          resId={completedAllocationInfo.resId}
+          memberName={completedAllocationInfo.memberName}
+          payAmount={completedAllocationInfo.payAmount}
           lang={lang}
           onClose={() => {
             // 🔒 [3차 방어막] 배정 완료 모달이 닫히면 (외부 클릭 등 강제 종료 시도 포함) 즉시 키오스크 세션 완전 파기 (Race Condition 차단)

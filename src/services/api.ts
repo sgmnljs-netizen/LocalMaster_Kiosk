@@ -14,6 +14,7 @@ export const STORE_CODE = import.meta.env.VITE_STORE_CODE || localStorage.getIte
 // [Fix-4] localhost:8000 하드코딩 제거 → BASE_URL 기반 생성
 const _baseHost = BASE_URL.replace('/api', '').replace('http://', 'ws://').replace('https://', 'wss://');
 import { TimeMaster } from '../utils/timeMaster';
+import type { CardApprovalResult } from './van/van_types';
 export const WS_BASE_URL = _baseHost;
 
 
@@ -802,6 +803,11 @@ class HybridAPIClient {
           })
         });
         if (res.ok) return true;
+        // 서버가 명시적으로 점유 거절(409/400 등)한 경우 Edge DB로 Fallback하지 않고 즉시 실패 반환
+        if (res.status === 409 || res.status === 400 || res.status === 422) {
+          console.warn(`[Preoccupy] 서버에서 타석 선점 거절 (HTTP ${res.status})`);
+          return false;
+        }
       } catch (err) {
         console.error('Backend preoccupy failed. Falling back to EdgeDB:', err);
       }
@@ -939,7 +945,8 @@ class HybridAPIClient {
     hpNo?: string,
     memberItemId?: number | string,
     paymentMethod: 'TICKET' | 'CARD' = 'TICKET',
-    amount: number = 0
+    amount: number = 0,
+    paymentApproval?: Partial<CardApprovalResult>
   ): Promise<{ success: boolean; res_id?: string; message: string; hardware_success?: boolean; start_time?: string; end_time?: string; is_chained?: boolean }> {
     const isConnected = await this.checkConnection();
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -963,7 +970,14 @@ class HybridAPIClient {
             member_item_id: isNaN(parsedItemId as number) ? null : parsedItemId,
             payment_method: paymentMethod,     // TICKET(회원권) | CARD(일일권)
             terminal_id: this.terminalId,      // 선점 락 검증 필수값
-            amount: amount                     // 일일권 결제 금액
+            amount: amount,                    // 일일권 결제 금액
+            approval_no: paymentApproval?.auth_code || null,
+            issuer_name: paymentApproval?.issuer_name || null,
+            acquirer_name: paymentApproval?.acquirer_name || null,
+            card_no_masked: paymentApproval?.card_no_masked || null,
+            installment_months: paymentApproval?.installment_months ?? 0,
+            van_tr_no: paymentApproval?.van_tr_no || paymentApproval?.auth_code || null,
+            raw_data: paymentApproval?.raw_response || null,
           })
         });
 
@@ -995,7 +1009,12 @@ class HybridAPIClient {
           };
         } else {
           const errData = await res.json().catch(() => ({ detail: `HTTP ${res.status} 오류가 발생했습니다.` }));
-          const errMsg = errData.detail || errData.message || `타석 배정에 실패했습니다. (코드: ${res.status})`;
+          let errMsg: string;
+          if (errData.detail && typeof errData.detail === 'object') {
+            errMsg = String(errData.detail.message || errData.detail.detail || JSON.stringify(errData.detail));
+          } else {
+            errMsg = String(errData.detail || errData.message || `타석 배정에 실패했습니다. (코드: ${res.status})`);
+          }
           return { success: false, message: errMsg };
         }
       } catch (err) {

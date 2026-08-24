@@ -1,11 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import { Check, Printer, ArrowRight } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Check, Printer, ArrowRight, RefreshCw } from 'lucide-react';
+import { kioskEscPosPrinter } from '../services/printer/escpos_printer';
+import { useKioskSettings } from '../stores/kioskSettings';
+import { TimeMaster } from '../utils/timeMaster';
 
 interface AllocationCompleteModalProps {
   bayNo: number | string;
   durationMin: number;
   startTime?: string;
   endTime?: string;
+  resId?: string;
+  memberName?: string;
+  payAmount?: number;
   lang?: 'KO' | 'EN';
   onClose: () => void;
 }
@@ -15,12 +21,44 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   durationMin,
   startTime,
   endTime,
+  resId,
+  memberName,
+  payAmount = 0,
   lang = 'KO',
   onClose
 }) => {
-  const [countdown, setCountdown] = useState(5);
+  const [countdown, setCountdown] = useState(6);
+  const [printStatus, setPrintStatus] = useState<string | null>(null);
+  const { settings } = useKioskSettings();
+  const storeName = settings.deviceName || 'LocalMaster Golf';
+  const autoPrintReceipt = true;
 
-  // 5초 자동 카운트다운
+  const handlePrint = useCallback(async () => {
+    setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
+    const nowStr = TimeMaster.formatKstDateTime(new Date());
+    const res = await kioskEscPosPrinter.printReceipt({
+      storeName: storeName || 'LocalMaster Golf',
+      receiptNo: resId || `LM-${Date.now().toString().slice(-6)}`,
+      tradeDate: nowStr,
+      bayNo,
+      memberName: memberName || '회원/비회원',
+      useMinutes: durationMin,
+      startTime: startTime || nowStr.slice(11, 16),
+      endTime: endTime || '',
+      payAmount,
+      barcodeText: resId || `BAY-${bayNo}-${Date.now().toString().slice(-4)}`
+    });
+    setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
+  }, [bayNo, durationMin, startTime, endTime, resId, memberName, payAmount, lang, storeName]);
+
+  // 마운트 시 자동 인쇄
+  useEffect(() => {
+    if (autoPrintReceipt) {
+      handlePrint();
+    }
+  }, [autoPrintReceipt, handlePrint]);
+
+  // 6초 자동 카운트다운
   useEffect(() => {
     const timer = setInterval(() => {
       setCountdown((prev) => {
@@ -126,7 +164,11 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#86868b', fontSize: '16px', fontWeight: 500, marginBottom: '32px', letterSpacing: '-0.3px' }}>
           <Printer size={18} style={{ color: '#0071e3' }} />
-          <span>{lang === 'KO' ? '영수증 및 타석 배정표가 현장에서 출력 중입니다.' : 'Printing receipt and bay assignment ticket...'}</span>
+          <span>
+            {printStatus 
+              ? `${lang === 'KO' ? '영수증 인쇄 상태' : 'Print Status'}: ${printStatus}` 
+              : (lang === 'KO' ? '영수증 및 타석 배정표가 현장에서 출력 중입니다.' : 'Printing receipt and bay assignment ticket...')}
+          </span>
         </div>
 
         {/* 한글 데이터 그리드 티켓 카딩 */}
@@ -180,38 +222,63 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
           </div>
         </div>
 
-        {/* 애플 딥 차콜 필 버튼 */}
-        <button
-          onClick={onClose}
-          style={{
-            width: '100%',
-            height: '64px',
-            borderRadius: '999px',
-            background: '#1d1d1f',
-            color: '#ffffff',
-            border: 'none',
-            fontSize: '20px',
-            fontWeight: 700,
-            letterSpacing: '-0.5px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '10px',
-            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
-            transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
-          }}
-          onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.opacity = '0.9'; }}
-          onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.opacity = '1'; }}
-        >
-          <span>
-            {lang === 'KO' 
-              ? `확인 및 메인으로 이동 (${countdown}s)` 
-              : `Confirm & Go Home (${countdown}s)`}
-          </span>
-          <ArrowRight size={22} style={{ color: '#ffffff' }} />
-        </button>
+        {/* 버튼 영역: 재출력 버튼 + 확인 버튼 */}
+        <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+          <button
+            onClick={handlePrint}
+            style={{
+              flex: '1',
+              height: '64px',
+              borderRadius: '999px',
+              background: '#f5f5f7',
+              color: '#1d1d1f',
+              border: '1px solid #d2d2d7',
+              fontSize: '18px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
+            }}
+          >
+            <Printer size={20} style={{ color: '#0071e3' }} />
+            <span>{lang === 'KO' ? '영수증 재출력' : 'Reprint'}</span>
+          </button>
+
+          <button
+            onClick={onClose}
+            style={{
+              flex: '2',
+              height: '64px',
+              borderRadius: '999px',
+              background: '#1d1d1f',
+              color: '#ffffff',
+              border: 'none',
+              fontSize: '20px',
+              fontWeight: 700,
+              letterSpacing: '-0.5px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
+              transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
+            }}
+            onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.opacity = '0.9'; }}
+            onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.opacity = '1'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.opacity = '1'; }}
+          >
+            <span>
+              {lang === 'KO' 
+                ? `확인 (${countdown}s)` 
+                : `Confirm (${countdown}s)`}
+            </span>
+            <ArrowRight size={22} style={{ color: '#ffffff' }} />
+          </button>
+        </div>
       </div>
     </div>
   );
