@@ -64,9 +64,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
 
   // 일일 타석 배정권 여부 판별 헬퍼 (상품 DB 속성 직접 참조)
   const checkIfDaily = (prod: Product) => {
-    const isDailyLogic = (prod.logic_type as string) === 'DAILY' || (prod.logic_type as string) === 'DAY';
-    const isDailyCd = prod.prod_cd.startsWith('D0') || prod.prod_cd.startsWith('DLY');
-    return isDailyLogic || isDailyCd;
+    const isDailyLogic = (prod.logic_type as string) === 'DAILY' || (prod.logic_type as string) === 'DAY' || (prod.logic_type as string) === 'FACILITY';
+    const isDailyCd = prod.prod_cd.startsWith('D') || prod.prod_cd.startsWith('P01') || prod.prod_cd.startsWith('P02');
+    const isDailyName = prod.prod_nm.includes('일일') || prod.prod_nm.includes('타석권') || prod.prod_nm.includes('60분') || prod.prod_nm.includes('90분');
+    const hasDuration = prod.duration_min != null && prod.duration_min > 0;
+    return (isDailyLogic || isDailyCd || isDailyName) && hasDuration;
   };
 
   // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB 물리 컬럼 ➔ JSON access_rules/rules_detail 직접 참조)

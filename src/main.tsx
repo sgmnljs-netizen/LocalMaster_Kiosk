@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import KioskApp from './KioskApp'
 import './styles/kiosk_design_system.css'
+import { generateDefault50Bays, DEFAULT_50_ZONES } from './services/api'
 
 // [Demo Showcase Environment Init]
 function initDemoEnvironment() {
@@ -9,32 +10,26 @@ function initDemoEnvironment() {
     localStorage.setItem('LM_STORE_INFO', JSON.stringify({
       store_cd: 'H01-SE-001',
       store_nm: '로컬마스터 강남 1호점 (체험관)',
-      business_no: '123-45-67890',
-      ceo_name: '홍길동',
+      business_no: '721-81-04039',
+      ceo_name: '대표이사',
       address: '서울특별시 강남구 테헤란로 123',
     }));
   }
 
-  if (!localStorage.getItem('LM_BAYS')) {
-    const bays = Array.from({ length: 12 }, (_, i) => ({
-      bay_id: i + 1,
-      bay_no: i + 1,
-      floor_no: 1,
-      floor: '1F',
-      zone_code: 'BAY',
-      type: i === 1 ? 'LEFT' : 'RIGHT',
-      status: i === 1 || i === 4 || i === 7 ? 'OCCUPIED' : 'AVAILABLE',
-      current_user_name: i === 1 ? '김프로' : i === 4 ? '이회원' : i === 7 ? '박골퍼' : null,
-      minutes_left: i === 1 ? 45 : i === 4 ? 12 : i === 7 ? 30 : 0,
-      bay_name: `${i + 1}번 타석 ${i === 1 ? '(좌타겸용)' : i === 2 ? '(프라이빗)' : '(오픈형)'}`,
-    }));
-    localStorage.setItem('LM_BAYS', JSON.stringify(bays));
+  if (!localStorage.getItem('LM_ZONES') || localStorage.getItem('LM_ZONES') === '[]') {
+    localStorage.setItem('LM_ZONES', JSON.stringify(DEFAULT_50_ZONES));
+  }
+
+  const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
+  if (!bays || bays.length !== 50) {
+    localStorage.setItem('LM_BAYS', JSON.stringify(generateDefault50Bays()));
   }
 
   if (!localStorage.getItem('LM_PRODUCTS')) {
     const products = [
-      { prod_cd: 'P01', prod_nm: '일일 타석 60분', standard_price: 20000, sale_price: 20000, logic_type: 'FACILITY', duration_min: 60 },
-      { prod_cd: 'P02', prod_nm: '일일 타석 90분', standard_price: 28000, sale_price: 28000, logic_type: 'FACILITY', duration_min: 90 },
+      { prod_cd: 'D01', prod_nm: '일일 타석 60분', standard_price: 20000, sale_price: 20000, logic_type: 'DAILY', duration_min: 60 },
+      { prod_cd: 'D02', prod_nm: '일일 타석 90분', standard_price: 28000, sale_price: 28000, logic_type: 'DAILY', duration_min: 90 },
+      { prod_cd: 'D03', prod_nm: '일일 타석 120분', standard_price: 35000, sale_price: 35000, logic_type: 'DAILY', duration_min: 120 },
       { prod_cd: 'P03', prod_nm: '1개월 정기 회원권', standard_price: 180000, sale_price: 180000, logic_type: 'MEMBERSHIP', days: 30 },
       { prod_cd: 'P04', prod_nm: '3개월 정기 회원권', standard_price: 480000, sale_price: 450000, logic_type: 'MEMBERSHIP', days: 90 },
     ];

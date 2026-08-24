@@ -214,13 +214,15 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName, ba
 
         {/* 거대한 상호명 타이포그래피 (High Contrast) */}
         <div style={{ textAlign: 'center', width: '100%', marginBottom: '60px' }}>
-          <h1 style={{ fontSize: '72px', letterSpacing: '-3px', color: '#fff', display: 'flex', justifyContent: 'center', gap: '12px' }}>
-            <span style={{ fontWeight: 900 }}>{storeName.split(' ')[0] || 'SGM'}</span>
-            <span style={{ fontWeight: 200, color: 'rgba(255, 255, 255, 0.75)' }}>
-              {storeName.split(' ').slice(1).join(' ') || 'Golf Academy'}
+          <h1 style={{ fontSize: '64px', letterSpacing: '-2px', color: '#fff', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 900, background: 'linear-gradient(135deg, #ffffff 0%, #a7f3d0 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              로컬마스터
+            </span>
+            <span style={{ fontWeight: 600, color: 'rgba(255, 255, 255, 0.85)' }}>
+              {storeName.includes('로컬마스터') ? storeName.replace('로컬마스터', '').trim() : (storeName || '강남 1호점 (체험관)')}
             </span>
           </h1>
-          <p style={{ fontSize: '24px', color: '#86868b', fontWeight: 600, letterSpacing: '-0.5px', marginTop: '16px' }}>
+          <p style={{ fontSize: '24px', color: '#86868b', fontWeight: 600, letterSpacing: '-0.5px', marginTop: '14px' }}>
             The Next Generation of Golf Club.
           </p>
         </div>
