@@ -382,6 +382,24 @@ class HybridAPIClient {
   }
 
 
+  /**
+   * 범용 GET 요청 헬퍼 (백엔드 API 호출용)
+   */
+  async get<T = any>(endpoint: string): Promise<{ data: T }> {
+    const cleanUrl = endpoint.startsWith('http') ? endpoint : `${BASE_URL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+    const res = await fetch(cleanUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
+    }
+    const data = await res.json();
+    return { data };
+  }
+
   // 미들웨어 통합 제어 센터 헬스체크 (데모 쇼룸 및 엣지 모드 100% ONLINE 보장)
   async getMiddlewareStatus(): Promise<{ online: boolean; status: string }> {
     // 1. 데모 쇼룸 모드 또는 브라우저 데모 환경 감지 시 항상 ONLINE 반환

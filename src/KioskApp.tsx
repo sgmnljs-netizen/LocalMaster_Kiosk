@@ -29,6 +29,7 @@ import { useHiddenAdminTrigger } from './hooks/useHiddenAdminTrigger';
 import { AdminPinModal } from './components/AdminPinModal';
 import { KioskSettingsModal } from './components/KioskSettingsModal';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
+import { useKioskHardwareHeartbeat } from './hooks/useKioskHardwareHeartbeat';
 
 type KioskStep = 
   | 'INTRO' 
@@ -108,6 +109,9 @@ export default function KioskApp() {
   const [isAdminPinOpen, setIsAdminPinOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const { handleTap: handleHiddenTap } = useHiddenAdminTrigger(5, 3000);
+
+  // 🚦 키오스크 하드웨어 실시간 헬스체크 (30초 주기 하트비트)
+  useKioskHardwareHeartbeat();
 
   const handleSecretTrigger = () => {
     setIsAdminPinOpen(true);

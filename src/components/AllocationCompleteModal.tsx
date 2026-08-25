@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Check, Printer, ArrowRight, RefreshCw } from 'lucide-react';
-import { kioskEscPosPrinter } from '../services/printer/escpos_printer';
+import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { TimeMaster } from '../utils/timeMaster';
 
@@ -30,24 +30,50 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   const [countdown, setCountdown] = useState(6);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
   const { settings } = useKioskSettings();
-  const storeName = settings.deviceName || 'LocalMaster Golf';
+  const storeName = settings.deviceName || '골포스 스마트 키오스크';
   const autoPrintReceipt = true;
 
   const handlePrint = useCallback(async () => {
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
     const nowStr = TimeMaster.formatKstDateTime(new Date());
-    const res = await kioskEscPosPrinter.printReceipt({
-      storeName: storeName || 'LocalMaster Golf',
-      receiptNo: resId || `LM-${Date.now().toString().slice(-6)}`,
-      tradeDate: nowStr,
-      bayNo,
-      memberName: memberName || '회원/비회원',
-      useMinutes: durationMin,
-      startTime: startTime || nowStr.slice(11, 16),
-      endTime: endTime || '',
-      payAmount,
-      barcodeText: resId || `BAY-${bayNo}-${Date.now().toString().slice(-4)}`
+    const startStr = startTime || nowStr.slice(11, 16);
+    const vat = Math.round(payAmount / 11);
+    const supply = payAmount - vat;
+
+    const res = await kioskHardwareBridge.printReceipt({
+      sale_id: resId || `ALLOC-${Date.now()}`,
+      receipt_no: resId ? `TICK-${resId.slice(-6)}` : `TICK-${Date.now().toString().slice(-6)}`,
+      trade_dt: nowStr,
+      member_name: memberName || '회원',
+      pay_method: payAmount > 0 ? 'CARD' : 'SERVICE',
+      store_info: {
+        store_name: storeName,
+        biz_no: '123-45-67890',
+        ceo_name: '대표자',
+        tel: '02-0000-0000',
+        address: '서울시 강남구',
+      },
+      items: [
+        {
+          name: `타석 [${bayNo}번] ${durationMin}분 배정표`,
+          qty: 1,
+          unit_price: payAmount,
+          amount: payAmount,
+        },
+      ],
+      tax_summary: {
+        supply_amt: supply,
+        tax_amt: vat,
+        tax_free_amt: 0,
+        total_amt: payAmount,
+        discount_amt: 0,
+        pay_amt: payAmount,
+      },
+      barcode_text: `BAY-${bayNo}-${startStr.replace(':', '')}`,
+      header_message: `★★★ [${bayNo}번 타석 배정표] ★★★`,
+      footer_message: `이용시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n타석으로 이동하여 연습을 시작해 주십시오.`,
     });
+
     setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
   }, [bayNo, durationMin, startTime, endTime, resId, memberName, payAmount, lang, storeName]);
 

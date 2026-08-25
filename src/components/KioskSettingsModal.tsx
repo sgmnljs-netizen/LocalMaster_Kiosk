@@ -1,11 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, X, Monitor, Wifi, Shield, Zap, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { useKioskSettings, KIOSK_DEVICE_OPTIONS, KioskSettings } from '../stores/kioskSettings';
+import { useKioskSettings, KioskSettings } from '../stores/kioskSettings';
+import { api } from '../services/api';
 
 interface KioskSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+interface TerminalDeviceItem {
+  device_id: string;
+  device_name: string;
+  device_type: string;
+  van_provider: string;
+  terminal_id: string;
+  vcat_port: number;
+}
+
+const FALLBACK_KIOSK_OPTIONS: TerminalDeviceItem[] = [
+  { device_id: 'DEV_KIOSK_01', device_name: '입구 무인 키오스크 1호기', terminal_id: '88010003', vcat_port: 9099, van_provider: 'SMARTRO', device_type: 'KIOSK' },
+  { device_id: 'DEV_KIOSK_02', device_name: '2층 무인 키오스크 2호기', terminal_id: '88010004', vcat_port: 9099, van_provider: 'KCP', device_type: 'KIOSK' },
+  { device_id: 'custom', device_name: '⚙️ 직접 입력 (커스텀 설정)', terminal_id: '', vcat_port: 9099, van_provider: 'KCP', device_type: 'KIOSK' },
+];
 
 export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   isOpen,
@@ -14,6 +30,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const { settings, updateSettings } = useKioskSettings();
 
   const [activeTab, setActiveTab] = useState<'device' | 'connection' | 'maintenance'>('device');
+  const [terminalList, setTerminalList] = useState<TerminalDeviceItem[]>(FALLBACK_KIOSK_OPTIONS);
   const [formDeviceId, setFormDeviceId] = useState(settings.deviceId);
   const [formDeviceName, setFormDeviceName] = useState(settings.deviceName);
   const [formProviderType, setFormProviderType] = useState(settings.providerType);
@@ -45,20 +62,41 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       setFormIsMaintenance(settings.isMaintenanceMode);
       setPingStatus(null);
       setSaveSuccess(false);
+
+      // 백엔드 실시간 단말기 마스터 조회
+      const fetchTerminals = async () => {
+        try {
+          const res = await api.get('/v1/terminals').catch(() => null);
+          if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+            const customOpt: TerminalDeviceItem = {
+              device_id: 'custom',
+              device_name: '⚙️ 직접 입력 (커스텀 설정)',
+              terminal_id: '',
+              vcat_port: 9099,
+              van_provider: 'KCP',
+              device_type: 'KIOSK',
+            };
+            setTerminalList([...res.data, customOpt]);
+          }
+        } catch {
+          setTerminalList(FALLBACK_KIOSK_OPTIONS);
+        }
+      };
+      fetchTerminals();
     }
   }, [isOpen, settings]);
 
   if (!isOpen) return null;
 
   const handleDeviceSelect = (devId: string) => {
-    const matched = KIOSK_DEVICE_OPTIONS.find((d) => d.id === devId);
+    const matched = terminalList.find((d) => d.device_id === devId);
     if (matched) {
-      setFormDeviceId(matched.id);
-      setFormDeviceName(matched.name);
-      if (matched.id !== 'custom') {
-        setFormTerminalId(matched.terminalId);
-        setFormVcatPort(matched.vcatPort);
-        setFormProviderType(matched.providerType);
+      setFormDeviceId(matched.device_id);
+      setFormDeviceName(matched.device_name);
+      if (matched.device_id !== 'custom') {
+        setFormTerminalId(matched.terminal_id);
+        setFormVcatPort(String(matched.vcat_port));
+        setFormProviderType(matched.van_provider);
       }
     }
   };
@@ -248,9 +286,9 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  {KIOSK_DEVICE_OPTIONS.map((opt) => (
-                    <option key={opt.id} value={opt.id} style={{ background: '#181a20', color: '#fff' }}>
-                      {opt.name} {opt.terminalId ? `(TID: ${opt.terminalId})` : ''}
+                  {terminalList.map((opt) => (
+                    <option key={opt.device_id} value={opt.device_id} style={{ background: '#181a20', color: '#fff' }}>
+                      {opt.device_name} {opt.terminal_id ? `(TID: ${opt.terminal_id} / ${opt.van_provider})` : ''}
                     </option>
                   ))}
                 </select>

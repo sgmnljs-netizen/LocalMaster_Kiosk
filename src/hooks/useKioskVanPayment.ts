@@ -34,11 +34,16 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
   // 키오스크 로컬 설정이 변경되면 vanClient 설정도 동기화
   useEffect(() => {
+    let rawProvider = (settings.providerType || 'KCP').toUpperCase();
+    if (rawProvider.endsWith('_VAN')) {
+      rawProvider = rawProvider.replace('_VAN', '');
+    }
     kioskVanClient.setConfig({
+      provider: rawProvider as any,
       terminalId: settings.terminalId || '88010003',
       vcatPort: parseInt(settings.vcatPort, 10) || 9099,
     });
-  }, [settings.terminalId, settings.vcatPort]);
+  }, [settings.terminalId, settings.vcatPort, settings.providerType]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {

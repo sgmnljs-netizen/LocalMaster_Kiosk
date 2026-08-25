@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { CheckCircle2, Printer, ArrowRight, CreditCard, Calendar, User, ShoppingBag, ShieldCheck, RefreshCw } from 'lucide-react';
 import { TimeMaster } from '../utils/timeMaster';
-import { kioskEscPosPrinter } from '../services/printer/escpos_printer';
+import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
 import { useKioskSettings } from '../stores/kioskSettings';
 
 export interface CompletedPurchaseInfo {
@@ -14,6 +14,9 @@ export interface CompletedPurchaseInfo {
   startDate?: string;
   endDate?: string;
   purchaseType?: 'MEMBERSHIP' | 'LOCKER' | 'PRODUCT';
+  cardIssuer?: string;
+  cardNoMasked?: string;
+  terminalId?: string;
 }
 
 interface PurchaseCompleteModalProps {
@@ -31,31 +34,58 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
   const [isPrinting, setIsPrinting] = useState(true);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
   const { settings } = useKioskSettings();
-  const storeName = settings.deviceName || 'LocalMaster Golf';
-  const autoPrintReceipt = true;
+  const storeName = settings.deviceName || '골포스 스마트 키오스크';
 
   const handlePrint = useCallback(async () => {
     setIsPrinting(true);
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
     const safeApprNo = purchaseInfo?.apprNo || '00000000';
-    const res = await kioskEscPosPrinter.printReceipt({
-      storeName: storeName || 'LocalMaster Golf',
-      receiptNo: `RC-${safeApprNo.slice(-6)}`,
-      tradeDate: purchaseInfo?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
-      memberName: purchaseInfo?.memberName,
-      payAmount: purchaseInfo?.amount,
-      purchaseType: purchaseInfo?.purchaseType || 'MEMBERSHIP',
-      cardInfo: {
-        issuerName: '신용카드',
-        cardNoMasked: '****-****-****-****',
-        approvalNo: safeApprNo,
-        terminalId: 'KIOSK-01'
+    const vat = Math.round((purchaseInfo?.amount || 0) / 11);
+    const supply = (purchaseInfo?.amount || 0) - vat;
+
+    const res = await kioskHardwareBridge.printReceipt({
+      sale_id: `SALE-${safeApprNo}`,
+      receipt_no: `RC-${safeApprNo.slice(-6)}`,
+      trade_dt: purchaseInfo?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
+      member_name: purchaseInfo?.memberName || '비회원',
+      pay_method: 'CARD',
+      store_info: {
+        store_name: storeName,
+        biz_no: '123-45-67890',
+        ceo_name: '대표자',
+        tel: '02-0000-0000',
+        address: '서울시 강남구',
       },
-      barcodeText: `PUR-${safeApprNo}`
+      items: [
+        {
+          name: purchaseInfo?.productName || '이용권',
+          qty: 1,
+          unit_price: purchaseInfo?.amount || 0,
+          amount: purchaseInfo?.amount || 0,
+        },
+      ],
+      tax_summary: {
+        supply_amt: supply,
+        tax_amt: vat,
+        tax_free_amt: 0,
+        total_amt: purchaseInfo?.amount || 0,
+        discount_amt: 0,
+        pay_amt: purchaseInfo?.amount || 0,
+      },
+      card_info: {
+        issuer_name: purchaseInfo?.cardIssuer || '신용카드',
+        card_no_masked: purchaseInfo?.cardNoMasked || '9410-****-****-1234',
+        approval_no: safeApprNo,
+        installment_months: 0,
+        terminal_id: purchaseInfo?.terminalId || settings.terminalId || '88010003',
+      },
+      barcode_text: `PUR-${safeApprNo}`,
+      footer_message: '키오스크 결제가 완료되었습니다. (주차 2시간 무료)',
     });
+
     setIsPrinting(false);
     setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
-  }, [purchaseInfo, storeName, lang]);
+  }, [purchaseInfo, storeName, settings.terminalId, lang]);
 
   useEffect(() => {
     if (autoPrintReceipt) {
