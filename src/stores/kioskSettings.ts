@@ -11,6 +11,7 @@ export interface KioskSettings {
   deviceKey: string;
   adminPin: string;
   isMaintenanceMode: boolean;
+  autoPrintReceipt?: boolean;
 }
 
 export const KIOSK_DEVICE_OPTIONS = [

@@ -5,6 +5,8 @@ import { api, Product } from '../services/api';
 interface ProductShopProps {
   memberNo?: string;
   memberName?: string;
+  discountRate?: number;
+  gradeName?: string;
   purposeType?: 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT';
   onProductSelected: (product: Product) => void;
   onCancel: () => void;
@@ -20,6 +22,8 @@ interface DisplayCategoryItem {
 export const ProductShop: React.FC<ProductShopProps> = ({
   memberNo,
   memberName,
+  discountRate = 0,
+  gradeName,
   purposeType,
   onProductSelected,
   onCancel
@@ -246,7 +250,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           filteredProducts.map((prod) => {
             const isDaily = checkIfDaily(prod);
             const durationMin = getDurationMin(prod);
-            const priceFormatted = prod.standard_price.toLocaleString();
+            const basePrice = prod.standard_price;
+            const hasDiscount = Boolean(discountRate && discountRate > 0);
+            const discountAmt = hasDiscount ? Math.round(basePrice * (discountRate! / 100)) : 0;
+            const finalPrice = Math.max(0, basePrice - discountAmt);
+            const priceFormatted = finalPrice.toLocaleString();
 
             return (
               <div
@@ -325,9 +333,21 @@ export const ProductShop: React.FC<ProductShopProps> = ({
 
                 {/* 가격 및 애플 필 구매 버튼 */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                    <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>이용요금</span>
-                    <span style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span style={{ fontSize: '13px', color: '#86868b', fontWeight: 600 }}>이용요금</span>
+                      {hasDiscount && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '14px', color: '#86868b', textDecoration: 'line-through' }}>
+                            {basePrice.toLocaleString()}원
+                          </span>
+                          <span style={{ fontSize: '11px', fontWeight: 900, color: '#059669', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px' }}>
+                            {gradeName || 'VIP'} {discountRate}% 할인
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '28px', fontWeight: 900, color: hasDiscount ? '#059669' : '#1d1d1f', letterSpacing: '-0.8px' }}>
                       {priceFormatted}원
                     </span>
                   </div>

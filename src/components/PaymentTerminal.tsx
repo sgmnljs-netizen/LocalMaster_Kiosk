@@ -16,7 +16,10 @@ interface PaymentTerminalProps {
   resId?: string | null;
   memberName?: string;
   memberNo?: string;
-  onPaymentSuccess: (payResult?: { apprNo: string; tradeDate: string; amount: number; cardApproval?: CardApprovalResult }) => void;
+  memberPoint?: number;
+  discountRate?: number;
+  gradeName?: string;
+  onPaymentSuccess: (payResult?: { apprNo: string; tradeDate: string; amount: number; usedPoints?: number; discountAmount?: number; cardApproval?: CardApprovalResult }) => void;
   onCancel: () => void;
 }
 
@@ -29,12 +32,16 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   resId,
   memberName,
   memberNo,
+  memberPoint = 0,
+  discountRate = 0,
+  gradeName,
   onPaymentSuccess,
   onCancel
 }) => {
   const { settings } = useKioskSettings();
   const { state: vanState, isProcessing, remainingSeconds, error: vanError, startPayment, cancelPayment } = useKioskVanPayment();
 
+  const [usedPoints, setUsedPoints] = useState<number>(0);
   const [payStep, setPayStep] = useState<'INSERT_CARD' | 'PROCESSING' | 'PRINT_RECEIPT'>('INSERT_CARD');
   const [appNo, setAppNo] = useState('');
   const [receiptDate, setReceiptDate] = useState('');
@@ -43,20 +50,48 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const isPayRequested = useRef(false);
 
+  // 등급 할인 및 최종 카드 결제 금액 실시간 산출
+  const gradeDiscountAmt = discountRate > 0 ? Math.round(amount * (discountRate / 100)) : 0;
+  const targetPayAmt = Math.max(0, amount - gradeDiscountAmt);
+  const finalCardAmt = Math.max(0, targetPayAmt - usedPoints);
+
+  // 포인트 전액 사용 퀵 핸들러 (가맹점 최대 한도 적용)
+  const handleUseAllPoints = () => {
+    const maxUsable = Math.min(memberPoint, targetPayAmt);
+    // 10P 단위 절삭
+    const rounded = Math.floor(maxUsable / 10) * 10;
+    setUsedPoints(rounded);
+  };
+
+  // 포인트 퀵 칩 가산 핸들러
+  const handleAddPoints = (addAmt: number) => {
+    const nextVal = Math.min(usedPoints + addAmt, memberPoint, targetPayAmt);
+    const rounded = Math.floor(nextVal / 10) * 10;
+    setUsedPoints(rounded);
+  };
+
   // 결제 실행 핸들러
-  const handleExecutePayment = useCallback(async () => {
+  const handleExecutePayment = useCallback(async (actualPayAmt: number, ptsUsed: number) => {
     if (isPayRequested.current) return;
     isPayRequested.current = true;
 
-    if (amount === 0) {
+    if (actualPayAmt === 0) {
       setPayStep('PRINT_RECEIPT');
       const now = new Date();
       const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
         `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-      const generatedAppNo = String(Math.floor(10000000 + Math.random() * 90000000));
+      const generatedAppNo = `POINT-${String(Math.floor(10000000 + Math.random() * 90000000))}`;
       setReceiptDate(generatedTradeDate);
       setAppNo(generatedAppNo);
-      onPaymentSuccess({ apprNo: generatedAppNo, tradeDate: generatedTradeDate, amount: 0 });
+      setCardIssuer('포인트 전액 결제');
+      setMaskedCard('100% 포인트 차감');
+      onPaymentSuccess({ 
+        apprNo: generatedAppNo, 
+        tradeDate: generatedTradeDate, 
+        amount: 0,
+        usedPoints: ptsUsed,
+        discountAmount: gradeDiscountAmt 
+      });
       return;
     }
 
@@ -64,7 +99,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     setErrorMsg('');
 
     const res = await startPayment({
-      amount,
+      amount: actualPayAmt,
       productName,
       customerName: memberName,
       timeoutSeconds: 30,
@@ -79,7 +114,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
 
       try {
         if (resId) {
-          const webhookRes = await api.processPaymentWebhook(resId, amount);
+          const webhookRes = await api.processPaymentWebhook(resId, actualPayAmt);
           if (!webhookRes.success) {
             throw new Error(webhookRes.message);
           }
@@ -87,13 +122,20 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           await new Promise((resolve) => setTimeout(resolve, 800));
         }
         setPayStep('PRINT_RECEIPT');
-        onPaymentSuccess({ apprNo: res.auth_code, tradeDate: res.approved_at, amount, cardApproval: res });
+        onPaymentSuccess({ 
+          apprNo: res.auth_code, 
+          tradeDate: res.approved_at, 
+          amount: actualPayAmt, 
+          usedPoints: ptsUsed,
+          discountAmount: gradeDiscountAmt,
+          cardApproval: res 
+        });
       } catch (err: any) {
         // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소)
         try {
           const orgDate = res.approved_at ? res.approved_at.replace(/[^0-9]/g, '').slice(0, 8) : '';
           await kioskVanClient.cancelCardPayment({
-            amount,
+            amount: actualPayAmt,
             orgAuthCode: res.auth_code,
             orgApprovedDate: orgDate,
             terminalId: res.terminal_id,
@@ -112,17 +154,27 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       setErrorMsg(res.error_message || '결제가 승인되지 않았습니다. 카드를 다시 확인해 주세요.');
       isPayRequested.current = false;
     }
-  }, [amount, productName, memberName, resId, startPayment, onPaymentSuccess]);
+  }, [productName, memberName, resId, gradeDiscountAmt, startPayment, onPaymentSuccess]);
 
+  // 포인트 보유 회원의 경우 사용자가 포인트를 선택하고 결제를 시작할 수 있도록 제어
+  const [isReadyToPay, setIsReadyToPay] = useState<boolean>(!memberNo || memberPoint === 0);
+
+  // 비회원이거나 포인트가 0인 경우 기존처럼 바로 카드 결제 요청
   useEffect(() => {
-    handleExecutePayment();
+    if (!memberNo || memberPoint === 0) {
+      handleExecutePayment(finalCardAmt, 0);
+    }
   }, []);
+
+  const handleStartPayment = () => {
+    setIsReadyToPay(true);
+    handleExecutePayment(finalCardAmt, usedPoints);
+  };
 
   const handleUserCancel = () => {
     cancelPayment();
     onCancel();
   };
-
 
   return (
     <div 
@@ -130,11 +182,11 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         width: '100%',
         maxWidth: '720px',
         margin: '0 auto',
-        padding: '40px 48px',
+        padding: '36px 44px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '32px',
+        gap: '24px',
         background: 'rgba(255, 255, 255, 0.95)',
         backdropFilter: 'blur(30px)',
         WebkitBackdropFilter: 'blur(30px)',
@@ -144,19 +196,19 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
       }}
     >
-      {/* 1단계: 카드 삽입 대기 */}
+      {/* 1단계: 카드 삽입 대기 / 포인트 선택 */}
       {payStep === 'INSERT_CARD' && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '28px', width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', width: '100%' }}>
           {errorMsg && (
             <div 
               style={{ 
                 background: '#fff0f0', 
                 border: '1px solid #ffc2c2',
-                padding: '16px', 
+                padding: '14px', 
                 borderRadius: '16px', 
                 textAlign: 'center',
                 color: '#ff3b30',
-                fontSize: '16px',
+                fontSize: '15px',
                 fontWeight: 700,
                 width: '100%'
               }}
@@ -165,71 +217,184 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             </div>
           )}
           <div style={{ textAlign: 'center' }}>
-            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#1d1d1f', marginBottom: '8px', letterSpacing: '-0.5px' }}>신용카드 결제 진행</h2>
-            <p style={{ fontSize: '17px', color: '#86868b', margin: 0, fontWeight: 500 }}>IC 카드를 아래의 단말기 투입구에 깊숙이 꽂아 주세요.</p>
+            <h2 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', marginBottom: '6px', letterSpacing: '-0.5px' }}>
+              {finalCardAmt === 0 ? '포인트 전액 결제' : '간편 결제 진행'}
+            </h2>
+            <p style={{ fontSize: '15px', color: '#86868b', margin: 0, fontWeight: 500 }}>
+              {finalCardAmt === 0 ? '보유 포인트로 전액 결제됩니다. 승인 버튼을 눌러주세요.' : '금액 확인 후 IC 카드를 단말기에 꽂아주세요.'}
+            </p>
           </div>
 
           {/* 결제 요약 금액 명세서 */}
-          <div style={{ width: '100%', padding: '24px 28px', background: '#f5f5f7', borderRadius: '20px', border: '1px solid #e5e5ea', display: 'flex', flexDirection: 'column', gap: '14px', boxSizing: 'border-box' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '17px' }}>
+          <div style={{ width: '100%', padding: '20px 24px', background: '#f5f5f7', borderRadius: '20px', border: '1px solid #e5e5ea', display: 'flex', flexDirection: 'column', gap: '10px', boxSizing: 'border-box' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '16px' }}>
               <span style={{ color: '#86868b', fontWeight: 600 }}>구매 상품</span>
               <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>{productName}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '17px', borderTop: '1px solid #e5e5ea', paddingTop: '14px' }}>
-              <span style={{ color: '#86868b', fontWeight: 600 }}>결제 금액</span>
-              <strong style={{ color: '#0071e3', fontSize: '26px', fontWeight: 900, letterSpacing: '-0.5px' }}>{amount.toLocaleString()} 원</strong>
+
+            {/* 등급 할인 행 (할인율 존재 시 노출) */}
+            {gradeDiscountAmt > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '15px', color: '#059669' }}>
+                <span style={{ fontWeight: 700 }}>🎉 {gradeName || '회원'} 등급 할인 ({discountRate}%)</span>
+                <strong style={{ fontWeight: 800 }}>- {gradeDiscountAmt.toLocaleString()} 원</strong>
+              </div>
+            )}
+
+            {/* 포인트 사용 행 (포인트 차감 시 노출) */}
+            {usedPoints > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '15px', color: '#0284c7' }}>
+                <span style={{ fontWeight: 700 }}>⚡ 포인트 사용</span>
+                <strong style={{ fontWeight: 800 }}>- {usedPoints.toLocaleString()} P</strong>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '16px', borderTop: '1px solid #e5e5ea', paddingTop: '12px' }}>
+              <span style={{ color: '#1d1d1f', fontWeight: 800 }}>최종 결제 금액</span>
+              <strong style={{ color: '#0071e3', fontSize: '26px', fontWeight: 900, letterSpacing: '-0.5px' }}>
+                {finalCardAmt.toLocaleString()} 원
+              </strong>
             </div>
           </div>
 
-          {/* 단말기 투입구 모사 애니메이션 */}
-          <div className="card-terminal-wrap" style={{ width: '100%', background: '#1d1d1f', padding: '28px 20px', borderRadius: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', boxSizing: 'border-box', boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.3)' }}>
-            {/* 단말기 투입구 */}
-            <div style={{ width: '220px', height: '20px', background: '#000000', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 0 10px rgba(0,0,0,0.8)' }} />
-            
-            {/* 카드 투입 모션 */}
-            <div className="animate-card-slide" style={{ position: 'relative' }}>
-              <div 
+          {/* 👆 [원터치 포인트 사용 패널] (회원 인증 및 포인트 보유 시) */}
+          {memberNo && memberPoint > 0 && !isReadyToPay && (
+            <div style={{ width: '100%', padding: '18px 20px', background: '#f0fdf4', borderRadius: '20px', border: '1.5px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: '12px', boxSizing: 'border-box' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '14px', fontWeight: 800, color: '#166534' }}>
+                  보유 포인트: <strong style={{ fontSize: '16px', color: '#15803d' }}>{memberPoint.toLocaleString()} P</strong>
+                </span>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#15803d' }}>
+                  (10P 단위 사용 가능)
+                </span>
+              </div>
+
+              {/* 원터치 전액사용 대형 버튼 */}
+              <button
+                type="button"
+                onClick={handleUseAllPoints}
                 style={{
-                  width: '140px',
-                  height: '220px',
+                  width: '100%',
+                  height: '48px',
                   borderRadius: '14px',
-                  background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)',
-                  border: '1.5px solid rgba(99, 102, 241, 0.4)',
-                  padding: '16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
+                  background: '#16a34a',
+                  color: '#ffffff',
+                  fontSize: '16px',
+                  fontWeight: 900,
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(22, 163, 74, 0.25)',
+                  transition: 'all 0.15s ease'
                 }}
               >
-                <div style={{ width: '36px', height: '28px', background: '#fbbf24', borderRadius: '4px', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.3)' }} />
-                <div style={{ color: '#fff', fontWeight: 800, fontSize: '13px', letterSpacing: '1px', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>PREMIUM CARD</div>
+                ⚡ 보유 포인트 전액 사용 ({(Math.floor(Math.min(memberPoint, targetPayAmt) / 10) * 10).toLocaleString()}P)
+              </button>
+
+              {/* 퀵 칩 버튼 (+1천, +5천, +1만, 초기화) */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleAddPoints(1000)}
+                  style={{ padding: '8px 0', borderRadius: '10px', background: '#ffffff', border: '1px solid #86efac', color: '#166534', fontWeight: 800, fontSize: '13px', cursor: 'pointer' }}
+                >
+                  +1천P
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAddPoints(5000)}
+                  style={{ padding: '8px 0', borderRadius: '10px', background: '#ffffff', border: '1px solid #86efac', color: '#166534', fontWeight: 800, fontSize: '13px', cursor: 'pointer' }}
+                >
+                  +5천P
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAddPoints(10000)}
+                  style={{ padding: '8px 0', borderRadius: '10px', background: '#ffffff', border: '1px solid #86efac', color: '#166534', fontWeight: 800, fontSize: '13px', cursor: 'pointer' }}
+                >
+                  +1만P
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUsedPoints(0)}
+                  style={{ padding: '8px 0', borderRadius: '10px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontWeight: 800, fontSize: '13px', cursor: 'pointer' }}
+                >
+                  초기화
+                </button>
+              </div>
+
+              {/* 결제 확인 버튼 */}
+              <button
+                type="button"
+                onClick={handleStartPayment}
+                style={{
+                  width: '100%',
+                  height: '52px',
+                  borderRadius: '14px',
+                  background: '#1d1d1f',
+                  color: '#ffffff',
+                  fontSize: '17px',
+                  fontWeight: 900,
+                  border: 'none',
+                  cursor: 'pointer',
+                  marginTop: '4px',
+                  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.2)'
+                }}
+              >
+                {finalCardAmt === 0 ? '✅ 0원 전액 결제 승인' : `💳 ${finalCardAmt.toLocaleString()}원 카드 결제 시작`}
+              </button>
+            </div>
+          )}
+
+          {/* 단말기 투입구 모사 애니메이션 (결제 대기 시) */}
+          {isReadyToPay && finalCardAmt > 0 && (
+            <div className="card-terminal-wrap" style={{ width: '100%', background: '#1d1d1f', padding: '24px 20px', borderRadius: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', boxSizing: 'border-box', boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.3)' }}>
+              {/* 단말기 투입구 */}
+              <div style={{ width: '220px', height: '18px', background: '#000000', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 0 10px rgba(0,0,0,0.8)' }} />
+              
+              {/* 카드 투입 모션 */}
+              <div className="animate-card-slide" style={{ position: 'relative' }}>
+                <div 
+                  style={{
+                    width: '130px',
+                    height: '200px',
+                    borderRadius: '14px',
+                    background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)',
+                    border: '1.5px solid rgba(99, 102, 241, 0.4)',
+                    padding: '14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
+                  }}
+                >
+                  <div style={{ width: '32px', height: '24px', background: '#fbbf24', borderRadius: '4px', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.3)' }} />
+                  <div style={{ color: '#fff', fontWeight: 800, fontSize: '12px', letterSpacing: '1px', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>PREMIUM CARD</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                <span className="animate-blink" style={{ fontSize: '16px', color: '#60a5fa', fontWeight: 800 }}>
+                  {vanState === 'REQUESTING'
+                    ? '금융사 승인 처리 중입니다...'
+                    : `단말기에 IC 카드를 꽂아주세요 (${remainingSeconds}초)`}
+                </span>
+                <span style={{ fontSize: '12px', color: '#86868b', fontFamily: 'monospace' }}>
+                  단말기: {settings.deviceName} (TID: {settings.terminalId})
+                </span>
               </div>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-              <span className="animate-blink" style={{ fontSize: '16px', color: '#60a5fa', fontWeight: 800 }}>
-                {vanState === 'REQUESTING'
-                  ? '금융사 승인 처리 중입니다...'
-                  : `단말기에 IC 카드를 꽂아주세요 (${remainingSeconds}초)`}
-              </span>
-              <span style={{ fontSize: '12px', color: '#86868b', fontFamily: 'monospace' }}>
-                단말기: {settings.deviceName} (TID: {settings.terminalId})
-              </span>
-            </div>
-          </div>
+          )}
 
           <div style={{ display: 'flex', gap: '16px', width: '100%' }}>
             <button 
               onClick={handleUserCancel}
               style={{
                 flex: 1,
-                height: '60px',
+                height: '56px',
                 borderRadius: '16px',
                 background: '#f5f5f7',
                 border: '1px solid #e5e5ea',
                 color: '#1d1d1f',
-                fontSize: '18px',
+                fontSize: '17px',
                 fontWeight: 800,
                 cursor: 'pointer',
                 transition: 'all 0.2s ease'
@@ -239,7 +404,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             </button>
             {errorMsg && (
               <button 
-                onClick={handleExecutePayment}
+                onClick={() => handleExecutePayment(finalCardAmt, usedPoints)}
                 style={{
                   flex: 1,
                   height: '60px',
@@ -480,7 +645,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           </div>
 
           <button 
-            onClick={() => onPaymentSuccess({ apprNo: appNo, tradeDate: receiptDate, amount })}
+            onClick={() => onPaymentSuccess({ apprNo: appNo, tradeDate: receiptDate, amount: finalCardAmt, usedPoints, discountAmount: gradeDiscountAmt })}
             style={{
               width: '100%',
               height: '60px',

@@ -10,6 +10,60 @@ interface MemberRegisterProps {
   lang?: 'KO' | 'EN' | 'ko' | 'en';
 }
 
+const DEFAULT_TERMS = {
+  KO: {
+    privacy_title: "개인정보 수집 및 이용 동의 (필수)",
+    privacy_content: `[1. 수집하는 개인정보 항목]
+• 필수항목: 이름, 휴대폰 번호, (안면 등록 시) 안면 템플릿 데이터
+
+[2. 수집 및 이용 목적]
+• 무인 타석 배정 및 키오스크 본인 확인
+• 예약 및 이용 시간 안내 알림톡(SMS) 발송
+• 매장 보안 및 부정 이용 방지
+
+[3. 보유 및 이용 기간]
+• 회원 탈퇴 시 또는 최종 이용일로부터 1년간 보관 후 즉시 파기
+
+[4. 동의 거부 권리 및 불이익]
+• 귀하는 개인정보 수집 동의를 거부할 권리가 있으나, 필수 항목 미동의 시 무인 회원 가입 및 타석 이용이 제한됩니다.`,
+    marketing_title: "혜택 및 마케팅 정보 수신 동의 (선택)",
+    marketing_content: `[1. 수집 및 이용 목적]
+• 할인 쿠폰, 생일 축하 혜택, 이벤트 프로모션 안내
+• 신규 레슨 및 매장 대회 안내
+
+[2. 전송 매체]
+• 휴대폰 문자메시지(SMS/LMS) 및 카카오 알림톡
+
+[3. 철회 안내]
+• 마이페이지 또는 카운터 직원을 통해 언제든지 수신 동의를 철회하실 수 있습니다.`
+  },
+  EN: {
+    privacy_title: "Privacy Policy Agreement (Required)",
+    privacy_content: `[1. Collected Personal Information]
+• Required: Name, Mobile Phone Number, Face Data (if enrolled)
+
+[2. Purpose of Collection & Use]
+• Bay assignment & Kiosk identity verification
+• Notification alerts (SMS/Kakao) for reservations & usage time
+• Security and fraud prevention
+
+[3. Retention & Usage Period]
+• Retained for 1 year from last visit or until account deletion
+
+[4. Right to Refuse]
+• You may refuse consent, but Kiosk membership services will be restricted.`,
+    marketing_title: "Marketing & Promotional Alerts (Optional)",
+    marketing_content: `[1. Purpose]
+• Discount coupons, birthday benefits, tournament promotions
+
+[2. Transmission Channel]
+• SMS & Mobile messaging
+
+[3. Opt-out]
+• You can withdraw consent at any time via My Page or counter staff.`
+  }
+};
+
 // 🌐 Pure Utility Helper (컴포넌트 외부 배치하여 불필요한 재생성 방지)
 const formatPhoneNumber = (num: string) => {
   const cleaned = num.replace(/[^0-9]/g, '');
@@ -27,8 +81,16 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
   const [name, setName] = useState('');
   const [hp, setHp] = useState('');
 
-  const [agree, setAgree] = useState(false);
+  const [privacyAgree, setPrivacyAgree] = useState(false);
+  const [marketingAgree, setMarketingAgree] = useState(false);
+  const [termsData, setTermsData] = useState<{ privacy_title: string; privacy_content: string; marketing_title: string; marketing_content: string } | null>(null);
+  const [modalTerms, setModalTerms] = useState<{ title: string; content: string } | null>(null);
   const [gender, setGender] = useState<'M' | 'F'>('M');
+
+  // 약관 데이터 비동기 로드
+  useEffect(() => {
+    api.getTerms().then(setTermsData).catch(console.warn);
+  }, []);
 
   // 입력 활성화 포커스 제어
   const [activeField, setActiveField] = useState<'NAME' | 'HP' | null>(null);
@@ -149,8 +211,8 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
       return;
     }
 
-    if (!agree) {
-      setErrorMsg('개인정보 수집 및 키오스크 이용약관에 동의해 주세요.');
+    if (!privacyAgree) {
+      setErrorMsg('필수 개인정보 수집 및 키오스크 이용약관에 동의해 주세요.');
       return;
     }
 
@@ -171,7 +233,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
       const formattedHp = formatPhoneNumber(hp);
       const faceVectorId = faceReg ? `FACE_${hp.replace(/[^0-9]/g, '')}` : null;
       
-      const res = await api.registerMember(name, formattedHp, '', faceReg, faceVectorId, gender);
+      const res = await api.registerMember(name, formattedHp, '', faceReg, faceVectorId, gender, marketingAgree);
       if (res.success && res.member) {
         if (faceReg) {
           // 프런트포스 표준: 실물 안면 단말기 푸시 동기화 등록 (실제 카메라 캡처 이미지 전달)
@@ -191,7 +253,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [name, hp, gender, faceImageBase64, onRegisterSuccess]);
+  }, [name, hp, gender, marketingAgree, faceImageBase64, onRegisterSuccess]);
 
   return (
     <div 
@@ -532,49 +594,160 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
               </div>
             </div>
 
-            {/* 약관 동의 박스 (Clean Glass Box) */}
-            <div 
-              onClick={() => setAgree(!agree)}
-              style={{ 
-                padding: '22px 24px', 
-                borderRadius: '20px', 
-                display: 'flex', 
-                alignItems: 'flex-start', 
-                gap: '16px',
-                cursor: 'pointer',
-                border: agree ? '1.5px solid rgba(5, 150, 105, 0.35)' : '1px solid rgba(0, 0, 0, 0.08)',
-                background: agree ? 'rgba(5, 150, 105, 0.05)' : '#fbfbfc',
-                boxShadow: agree ? '0 8px 20px rgba(5, 150, 105, 0.08)' : '0 1px 3px rgba(0,0,0,0.02)',
-                transition: 'all 0.2s ease',
-                marginTop: '4px'
-              }}
-            >
-              <div 
-                style={{ 
-                  width: '26px', 
-                  height: '26px', 
-                  borderRadius: '8px', 
-                  border: agree ? 'none' : '1.5px solid #d2d2d7',
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center', 
-                  backgroundColor: agree ? '#059669' : '#ffffff', 
-                  color: '#ffffff', 
-                  marginTop: '2px',
-                  transition: 'all 0.2s ease',
-                  flexShrink: 0,
-                  boxShadow: agree ? '0 2px 6px rgba(5, 150, 105, 0.3)' : 'none'
+            {/* 약관 동의 그룹 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '4px' }}>
+              {/* ⚡ 1터치 전체 동의 대형 버튼 */}
+              <button
+                type="button"
+                onClick={() => {
+                  const nextState = !(privacyAgree && marketingAgree);
+                  setPrivacyAgree(nextState);
+                  setMarketingAgree(nextState);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '14px 18px',
+                  borderRadius: '16px',
+                  border: (privacyAgree && marketingAgree) ? '1.5px solid #059669' : '1px solid rgba(0, 0, 0, 0.1)',
+                  background: (privacyAgree && marketingAgree) ? '#ecfdf5' : '#f5f5f7',
+                  color: (privacyAgree && marketingAgree) ? '#065f46' : '#1d1d1f',
+                  fontSize: '15px',
+                  fontWeight: 900,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
                 }}
               >
-                {agree && <Check size={16} strokeWidth={3} />}
+                <div style={{
+                  width: '22px',
+                  height: '22px',
+                  borderRadius: '6px',
+                  backgroundColor: (privacyAgree && marketingAgree) ? '#059669' : '#ffffff',
+                  border: (privacyAgree && marketingAgree) ? 'none' : '1.5px solid #d2d2d7',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff'
+                }}>
+                  {(privacyAgree && marketingAgree) && <Check size={14} strokeWidth={3} />}
+                </div>
+                <span>⚡ 전체 약관 동의 (필수 + 선택 혜택 알림)</span>
+              </button>
+
+              {/* [필수] 개인정보 수집 및 키오스크 이용약관 */}
+              <div style={{
+                padding: '12px 16px',
+                borderRadius: '14px',
+                border: privacyAgree ? '1.5px solid rgba(5, 150, 105, 0.35)' : '1px solid rgba(0, 0, 0, 0.08)',
+                background: privacyAgree ? 'rgba(5, 150, 105, 0.05)' : '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px'
+              }}>
+                <div 
+                  onClick={() => setPrivacyAgree(!privacyAgree)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: 1 }}
+                >
+                  <div style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '6px',
+                    backgroundColor: privacyAgree ? '#059669' : '#ffffff',
+                    border: privacyAgree ? 'none' : '1.5px solid #d2d2d7',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ffffff',
+                    flexShrink: 0
+                  }}>
+                    {privacyAgree && <Check size={12} strokeWidth={3} />}
+                  </div>
+                  <span style={{ fontSize: '14px', fontWeight: 800, color: '#1d1d1f' }}>
+                    [필수] 개인정보 수집 및 이용 동의
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fallback = (lang === 'EN' || lang === 'en') ? DEFAULT_TERMS.EN : DEFAULT_TERMS.KO;
+                    setModalTerms({
+                      title: termsData?.privacy_title || fallback.privacy_title,
+                      content: termsData?.privacy_content || fallback.privacy_content
+                    });
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(0,0,0,0.1)',
+                    background: '#f5f5f7',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#86868b',
+                    cursor: 'pointer'
+                  }}
+                >
+                  전문보기
+                </button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <span style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>
-                  [필수] 개인정보 수집 및 키오스크 이용약관 동의
-                </span>
-                <p style={{ fontSize: '13px', color: '#86868b', lineHeight: 1.45, margin: 0, fontWeight: 500 }}>
-                  무인 시설 입장 바코드 생성, 타석 배정 예약 정보의 알림톡 발송을 위해 이름과 연락처 수집에 동의해 주셔야 가입이 가능합니다.
-                </p>
+
+              {/* [선택] 마케팅 수신 동의 */}
+              <div style={{
+                padding: '12px 16px',
+                borderRadius: '14px',
+                border: marketingAgree ? '1.5px solid rgba(5, 150, 105, 0.35)' : '1px solid rgba(0, 0, 0, 0.08)',
+                background: marketingAgree ? 'rgba(5, 150, 105, 0.05)' : '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px'
+              }}>
+                <div 
+                  onClick={() => setMarketingAgree(!marketingAgree)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: 1 }}
+                >
+                  <div style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '6px',
+                    backgroundColor: marketingAgree ? '#059669' : '#ffffff',
+                    border: marketingAgree ? 'none' : '1.5px solid #d2d2d7',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ffffff',
+                    flexShrink: 0
+                  }}>
+                    {marketingAgree && <Check size={12} strokeWidth={3} />}
+                  </div>
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#4b5563' }}>
+                    [선택] 혜택 및 이벤트 알림(마케팅) 수신
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fallback = (lang === 'EN' || lang === 'en') ? DEFAULT_TERMS.EN : DEFAULT_TERMS.KO;
+                    setModalTerms({
+                      title: termsData?.marketing_title || fallback.marketing_title,
+                      content: termsData?.marketing_content || fallback.marketing_content
+                    });
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(0,0,0,0.1)',
+                    background: '#f5f5f7',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#86868b',
+                    cursor: 'pointer'
+                  }}
+                >
+                  전문보기
+                </button>
               </div>
             </div>
           </div>
@@ -740,6 +913,68 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
           onChange={(val) => setName(val)}
           onClose={() => setActiveField(null)}
         />
+      )}
+
+      {/* 약관 전문 열람 팝업 모달 */}
+      {modalTerms && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(10px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '24px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '24px',
+            maxWidth: '680px',
+            width: '100%',
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
+            overflow: 'hidden'
+          }}>
+            <div style={{ padding: '24px', borderBottom: '1px solid #e5e5ea', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', margin: 0 }}>{modalTerms.title}</h3>
+              <button
+                type="button"
+                onClick={() => setModalTerms(null)}
+                style={{ padding: '8px', borderRadius: '50%', border: 'none', background: '#f5f5f7', cursor: 'pointer' }}
+              >
+                <X size={20} color="#1d1d1f" />
+              </button>
+            </div>
+            <div style={{ padding: '24px', overflowY: 'auto', fontSize: '15px', lineHeight: 1.6, color: '#333336', whiteSpace: 'pre-wrap' }}>
+              {modalTerms.content}
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid #e5e5ea', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setModalTerms(null)}
+                style={{
+                  padding: '12px 28px',
+                  borderRadius: '999px',
+                  background: '#1d1d1f',
+                  color: '#ffffff',
+                  fontWeight: 800,
+                  fontSize: '16px',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                확인 및 닫기
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

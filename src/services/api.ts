@@ -63,6 +63,10 @@ export interface Member {
   face_registered?: boolean;
   face_vector_id?: string | null;
   store_cd?: string;
+  total_point?: number;
+  discount_rate?: number;
+  point_rate?: number;
+  grade_cd?: string;
 }
 
 export interface KioskZone {
@@ -264,9 +268,9 @@ const initializeEdgeDB = () => {
   const existingMembers = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]');
   if (!existingMembers || existingMembers.length === 0) {
     localStorage.setItem('LM_MEMBERS', JSON.stringify([
-      { member_no: 'M001', member_name: '홍길동', hp: '010-1234-5678', member_grade: '정회원', status_cd: 'ACTIVE' },
-      { member_no: 'M002', member_name: '이골프', hp: '010-9988-7766', member_grade: '정회원', status_cd: 'ACTIVE' },
-      { member_no: 'M003', member_name: '박프로', hp: '010-5544-3322', member_grade: 'VIP', status_cd: 'ACTIVE' },
+      { member_no: 'M001', member_name: '홍길동', hp: '010-1234-5678', member_grade: '일반', grade_cd: 'GENERAL', status_cd: 'ACTIVE', total_point: 5000, discount_rate: 0.0 },
+      { member_no: 'M002', member_name: '이골프', hp: '010-9988-7766', member_grade: '우수', grade_cd: 'GOLD', status_cd: 'ACTIVE', total_point: 12000, discount_rate: 5.0 },
+      { member_no: 'M003', member_name: '박프로', hp: '010-5544-3322', member_grade: 'VIP', grade_cd: 'VIP', status_cd: 'ACTIVE', total_point: 35000, discount_rate: 10.0 },
     ]));
   }
 
@@ -741,6 +745,32 @@ class HybridAPIClient {
 
   async getMemberByHp(hp: string): Promise<Member | null> {
     return this.getMember(hp);
+  }
+
+  // 1-B. 약관 정보 조회 (개인정보 및 마케팅 약관)
+  async getTerms(): Promise<{ privacy_title: string; privacy_content: string; marketing_title: string; marketing_content: string }> {
+    const defaultTerms = {
+      privacy_title: "개인정보 수집 및 이용 약관",
+      privacy_content: "본 매장은 무인 타석 배정, 예약 알림톡 발송 및 회원 관리를 위해 필수적인 최소한의 개인정보(이름, 휴대폰 번호)를 수집 및 이용합니다.",
+      marketing_title: "마케팅 정보 수신 동의 (선택)",
+      marketing_content: "할인 쿠폰, 이벤트 혜택, 대회 안내 등의 마케팅 소식을 SMS 및 카카오 알림톡으로 받아보실 수 있습니다."
+    };
+
+    try {
+      const res = await fetch(`${BASE_URL}/v1/public/stores/${STORE_CODE}/terms`);
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          privacy_title: defaultTerms.privacy_title,
+          privacy_content: data.privacy || defaultTerms.privacy_content,
+          marketing_title: defaultTerms.marketing_title,
+          marketing_content: data.marketing || defaultTerms.marketing_content
+        };
+      }
+    } catch {
+      // Offline fallback
+    }
+    return defaultTerms;
   }
 
   // 2. 타석 목록 및 상태 조회
@@ -1385,7 +1415,8 @@ class HybridAPIClient {
     email: string,
     faceRegistered: boolean = false,
     faceVectorId: string | null = null,
-    gender: 'M' | 'F' = 'M'
+    gender: 'M' | 'F' = 'M',
+    marketingAgree: boolean = false
   ): Promise<{ success: boolean; member?: Member; message: string }> {
     const isConnected = await this.checkConnection();
     const cleanHp = hp.replace(/[^0-9]/g, '');
@@ -1398,8 +1429,11 @@ class HybridAPIClient {
       hp: hp,
       email: email,
       gender: gender,
-      member_grade: 'GENERAL',
+      member_grade: '일반',
+      grade_cd: 'GENERAL',
       status_cd: '10',
+      total_point: 0,
+      discount_rate: 0.0,
       recent_product_nm: null,
       expiry_date: null,
       remain_days: 0,
@@ -1423,7 +1457,8 @@ class HybridAPIClient {
             email: email,
             store_cd: STORE_CODE,
             gender: gender,
-            face_auth_yn: faceRegistered ? 'Y' : 'N'
+            face_auth_yn: faceRegistered ? 'Y' : 'N',
+            marketing_agree_yn: marketingAgree ? 'Y' : 'N'
           })
         });
         if (res.ok) {

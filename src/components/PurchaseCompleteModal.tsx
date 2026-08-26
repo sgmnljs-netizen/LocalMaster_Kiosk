@@ -35,6 +35,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
   const [printStatus, setPrintStatus] = useState<string | null>(null);
   const { settings } = useKioskSettings();
   const storeName = settings.deviceName || '골포스 스마트 키오스크';
+  const autoPrintReceipt = settings.autoPrintReceipt ?? true;
 
   const handlePrint = useCallback(async () => {
     setIsPrinting(true);

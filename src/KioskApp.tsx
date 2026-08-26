@@ -822,6 +822,11 @@ export default function KioskApp() {
       // 통합 API(POST /api/v1/kiosk/allocate-bay)로 단일 처리 (CoreEngine 2회 호출 방지)
       if (purpose === 'ALLOCATE_DAILY' && selectedBayNo && selectedProduct) {
         hasCustomModal = true;
+        const actualPaidAmount = payResult?.amount ?? (
+          authMember?.discount_rate && authMember.discount_rate > 0
+            ? Math.max(0, selectedProduct.standard_price - Math.round(selectedProduct.standard_price * (authMember.discount_rate / 100)))
+            : selectedProduct.standard_price
+        );
         try {
           const finalDuration = selectedProduct.duration_min ?? (selectedProduct as any).durationMin ?? 60;
           const allocResult = await api.allocateBay(
@@ -832,7 +837,7 @@ export default function KioskApp() {
             authMember?.hp || '010-0000-0000',
             undefined,       // member_item_id — 일일권은 null
             'CARD',          // [BUG-3 FIX] payment_method 명시
-            selectedProduct.standard_price,  // [BUG-3 FIX] 매출 금액 전달
+            actualPaidAmount, // [SSOT] 등급 할인 반영 실제 결제 금액 전달
             payResult?.cardApproval          // [VAN Financial Integration] 승인 메타데이터 전달
           );
           if (allocResult) {
@@ -841,7 +846,7 @@ export default function KioskApp() {
               // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소)
               let cancelInfo = '';
               if (payResult?.cardApproval) {
-                const cancelRes = await executeAutoReversal(payResult.cardApproval, selectedProduct.standard_price, allocResult.message || '타석 배정 실패');
+                const cancelRes = await executeAutoReversal(payResult.cardApproval, actualPaidAmount, allocResult.message || '타석 배정 실패');
                 cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
               }
               showErrorModal(
@@ -870,7 +875,7 @@ export default function KioskApp() {
                 endTime: (allocResult as any).end_time || (allocResult as any).endTime,
                 resId: allocResult.res_id,
                 memberName: authMember?.member_name || '비회원',
-                payAmount: selectedProduct.standard_price
+                payAmount: actualPaidAmount
               });
             }
           }
@@ -880,7 +885,7 @@ export default function KioskApp() {
           // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소)
           let cancelInfo = '';
           if (payResult?.cardApproval) {
-            const cancelRes = await executeAutoReversal(payResult.cardApproval, selectedProduct.standard_price, err?.message || '통신 오류');
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualPaidAmount, err?.message || '통신 오류');
             cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
           }
           showErrorModal(
@@ -956,8 +961,13 @@ export default function KioskApp() {
       // 일반 회원권 구매 성공인 경우
       if (purpose === 'PURCHASE_PRODUCT' && authMember && selectedProduct) {
         hasCustomModal = true;
+        const actualProductPaid = payResult?.amount || (
+          authMember?.discount_rate && authMember.discount_rate > 0
+            ? Math.max(0, selectedProduct.standard_price - Math.round(selectedProduct.standard_price * (authMember.discount_rate / 100)))
+            : selectedProduct.standard_price
+        );
         try {
-          const res: any = await api.purchaseProduct(authMember.member_no, selectedProduct.prod_cd, selectedProduct.standard_price);
+          const res: any = await api.purchaseProduct(authMember.member_no, selectedProduct.prod_cd, actualProductPaid);
           if (res && res.success === false) {
             throw new Error(res.message || '회원권 전산 등록에 실패했습니다.');
           }
@@ -965,7 +975,7 @@ export default function KioskApp() {
             memberName: authMember.member_name,
             memberHp: authMember.hp,
             productName: selectedProduct.prod_nm,
-            amount: payResult?.amount || selectedProduct.standard_price,
+            amount: actualProductPaid,
             apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
             tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
             purchaseType: 'MEMBERSHIP'
@@ -975,7 +985,7 @@ export default function KioskApp() {
           hasCustomModal = false;
           let cancelInfo = '';
           if (payResult?.cardApproval) {
-            const cancelRes = await executeAutoReversal(payResult.cardApproval, selectedProduct.standard_price, err?.message || '회원권 등록 실패');
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualProductPaid, err?.message || '회원권 등록 실패');
             cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
           }
           showErrorModal(
@@ -1611,6 +1621,8 @@ export default function KioskApp() {
                     <ProductShop
                       memberNo={authMember?.member_no}
                       memberName={authMember?.member_name}
+                      discountRate={authMember?.discount_rate}
+                      gradeName={authMember?.member_grade || authMember?.grade_cd}
                       purposeType={purpose as 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT'}
                       onProductSelected={handleProductSelected}
                       onCancel={() => setStep('PRACTICE_SELECT')}
@@ -1621,6 +1633,8 @@ export default function KioskApp() {
                 <ProductShop
                   memberNo={authMember?.member_no}
                   memberName={authMember?.member_name}
+                  discountRate={authMember?.discount_rate}
+                  gradeName={authMember?.member_grade || authMember?.grade_cd}
                   purposeType={purpose as 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT'}
                   onProductSelected={handleProductSelected}
                   onCancel={handleGoHome}
@@ -1690,6 +1704,9 @@ export default function KioskApp() {
                       resId={currentHoldResId || checkinResId}
                       memberName={authMember?.member_name}
                       memberNo={authMember?.member_no}
+                      memberPoint={authMember?.total_point || 0}
+                      discountRate={authMember?.discount_rate || 0}
+                      gradeName={authMember?.member_grade || authMember?.grade_cd}
                       onPaymentSuccess={handlePaymentCompleted}
                       onCancel={handlePaymentCancel}
                     />
@@ -1713,6 +1730,9 @@ export default function KioskApp() {
                   resId={currentHoldResId || checkinResId}
                   memberName={authMember?.member_name}
                   memberNo={authMember?.member_no}
+                  memberPoint={authMember?.total_point || 0}
+                  discountRate={authMember?.discount_rate || 0}
+                  gradeName={authMember?.member_grade || authMember?.grade_cd}
                   onPaymentSuccess={handlePaymentCompleted}
                   onCancel={handlePaymentCancel}
                 />
