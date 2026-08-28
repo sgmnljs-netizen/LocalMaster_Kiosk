@@ -272,7 +272,8 @@ export default function KioskApp() {
 
   // 실시간 타석 데이터 상태
   const [bays, setBays] = useState<Bay[]>([]);
-
+  const [photoUrl, setPhotoUrl] = useState<string | undefined>(undefined);
+  const [logoUrl, setLogoUrl] = useState<string | undefined>(undefined);
 
   const loadBays = async () => {
     try {
@@ -290,6 +291,8 @@ export default function KioskApp() {
       const info = await api.getStoreInfo();
       setStoreName(info.store_nm);
       setCheckinPolicy(info.checkin_policy);
+      setLogoUrl(info.logo_url);
+      setPhotoUrl(info.photo_url);
 
       if (info.meta_data) {
         try {
@@ -1132,7 +1135,13 @@ export default function KioskApp() {
 
       {/* A. 인트로 광고 화면 단계 */}
       {step === 'INTRO' && (
-        <IntroScreen onStart={handleStartKiosk} storeName={storeName} bays={bays} />
+        <IntroScreen
+          onStart={handleStartKiosk}
+          storeName={storeName}
+          bays={bays}
+          photoUrl={photoUrl}
+          logoUrl={logoUrl}
+        />
       )}
 
       {/* B. 본격 조작 화면 템플릿 */}

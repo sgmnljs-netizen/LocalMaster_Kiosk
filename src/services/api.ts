@@ -653,7 +653,15 @@ class HybridAPIClient {
   }
 
   // 가맹점 상호명 및 동적 체크인 정책 종합 정보 조회 (Local Fallback 포함)
-  async getStoreInfo(): Promise<{ store_nm: string; checkin_policy: string; address: string; tel: string; meta_data?: any }> {
+  async getStoreInfo(): Promise<{
+    store_nm: string;
+    checkin_policy: string;
+    address: string;
+    tel: string;
+    logo_url?: string;
+    photo_url?: string;
+    meta_data?: any;
+  }> {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
@@ -666,6 +674,8 @@ class HybridAPIClient {
             checkin_policy: data.checkin_policy || 'CHECKIN_REQUIRED',
             address: data.address || '서울특별시 광진구 워커힐로 177',
             tel: data.tel || '02-450-4500',
+            logo_url: data.logo_url || undefined,
+            photo_url: data.photo_url || undefined,
             meta_data: data.meta_data
           };
         }
@@ -680,6 +690,8 @@ class HybridAPIClient {
       checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED',
       address: cached.address || '서울특별시 강남구 테헤란로 123',
       tel: cached.tel || '1566-8705',
+      logo_url: cached.logo_url || undefined,
+      photo_url: cached.photo_url || undefined,
       meta_data: cached.meta_data || { integration: { face_terminal_yn: true } }
     };
   }

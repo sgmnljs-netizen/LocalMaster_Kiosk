@@ -6,9 +6,11 @@ interface IntroScreenProps {
   onStart: () => void;
   storeName: string;
   bays?: any[];
+  photoUrl?: string;
+  logoUrl?: string;
 }
 
-const ADS = [
+const DEFAULT_ADS = [
   {
     type: 'image',
     url: 'https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=1080&q=80',
@@ -29,17 +31,38 @@ const ADS = [
   }
 ];
 
-export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName, bays = [] }) => {
+export const IntroScreen: React.FC<IntroScreenProps> = ({
+  onStart,
+  storeName,
+  bays = [],
+  photoUrl,
+  logoUrl
+}) => {
   const [currentAdIdx, setCurrentAdIdx] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
+
+  const slides = React.useMemo(() => {
+    if (photoUrl && photoUrl.trim().length > 0) {
+      return [
+        {
+          type: 'image',
+          url: photoUrl,
+          title: storeName || 'PREMIUM GOLF CLUB',
+          subtitle: '국내 최고 수준의 프리미엄 골프 아카데미'
+        },
+        ...DEFAULT_ADS.slice(1)
+      ];
+    }
+    return DEFAULT_ADS;
+  }, [photoUrl, storeName]);
 
   // 5초 간격으로 상단 FHD 광고 이미지 슬라이드 롤링
   useEffect(() => {
     const timer = setInterval(() => {
-      setCurrentAdIdx((prev) => (prev + 1) % ADS.length);
+      setCurrentAdIdx((prev) => (prev + 1) % slides.length);
     }, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [slides.length]);
 
   // 백엔드 통신 상태 실시간 모니터링
   useEffect(() => {
@@ -56,7 +79,7 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName, ba
     <div className="kiosk-container" style={{ position: 'relative' }} onClick={onStart}>
       {/* 1. 상단 FHD 광고 영역 (16:9) */}
       <div className="kiosk-ad-area">
-        {ADS.map((ad, idx) => (
+        {slides.map((ad, idx) => (
           <div
             key={idx}
             style={{
@@ -214,6 +237,21 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({ onStart, storeName, ba
 
         {/* 거대한 상호명 타이포그래피 (High Contrast) */}
         <div style={{ textAlign: 'center', width: '100%', marginBottom: '60px' }}>
+          {logoUrl && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+              <img
+                src={logoUrl}
+                alt={storeName}
+                style={{
+                  maxHeight: '80px',
+                  maxWidth: '260px',
+                  objectFit: 'contain',
+                  filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))',
+                  borderRadius: '12px'
+                }}
+              />
+            </div>
+          )}
           <h1 style={{ fontSize: '64px', letterSpacing: '-2px', color: '#fff', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 900, background: 'linear-gradient(135deg, #ffffff 0%, #a7f3d0 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
               로컬마스터
