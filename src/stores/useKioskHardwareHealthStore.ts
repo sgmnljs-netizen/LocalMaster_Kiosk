@@ -29,8 +29,17 @@ export function getKioskHardwareHealth(): KioskHardwareHealthState {
 }
 
 export function setKioskHardwareHealth(partial: Partial<KioskHardwareHealthState>) {
-  healthState = { ...healthState, ...partial };
-  notify();
+  let changed = false;
+  for (const key of Object.keys(partial) as (keyof KioskHardwareHealthState)[]) {
+    if (healthState[key] !== partial[key]) {
+      changed = true;
+      break;
+    }
+  }
+  if (changed) {
+    healthState = { ...healthState, ...partial };
+    notify();
+  }
 }
 
 export function setKioskHealthStatus(
@@ -39,16 +48,26 @@ export function setKioskHealthStatus(
   vcatError: string | null = null,
   printerError: string | null = null
 ) {
-  healthState = {
-    ...healthState,
+  setKioskHardwareHealth({
     vcatStatus,
     printerStatus,
     vcatErrorMessage: vcatError,
     printerErrorMessage: printerError,
     lastCheckedAt: Date.now(),
-  };
-  notify();
+  });
 }
+
+export const setVcatStatus = (status: DeviceHealthStatus, error: string | null = null) => {
+  setKioskHardwareHealth({ vcatStatus: status, vcatErrorMessage: error });
+};
+
+export const setPrinterStatus = (status: DeviceHealthStatus, error: string | null = null) => {
+  setKioskHardwareHealth({ printerStatus: status, printerErrorMessage: error });
+};
+
+export const setLastCheckedAt = (timestamp: number) => {
+  setKioskHardwareHealth({ lastCheckedAt: timestamp });
+};
 
 export function useKioskHardwareHealthStore() {
   const [state, setState] = useState<KioskHardwareHealthState>(healthState);
@@ -62,14 +81,8 @@ export function useKioskHardwareHealthStore() {
 
   return {
     ...state,
-    setVcatStatus: (status: DeviceHealthStatus, error: string | null = null) => {
-      setKioskHardwareHealth({ vcatStatus: status, vcatErrorMessage: error });
-    },
-    setPrinterStatus: (status: DeviceHealthStatus, error: string | null = null) => {
-      setKioskHardwareHealth({ printerStatus: status, printerErrorMessage: error });
-    },
-    setLastCheckedAt: (timestamp: number) => {
-      setKioskHardwareHealth({ lastCheckedAt: timestamp });
-    },
+    setVcatStatus,
+    setPrinterStatus,
+    setLastCheckedAt,
   };
 }

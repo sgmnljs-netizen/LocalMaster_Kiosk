@@ -582,7 +582,19 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                     hp: '010-1234-5678',
                     email: 'golf@example.com',
                     member_grade: 'REGULAR',
-                    status_cd: 'ACTIVE'
+                    status_cd: 'ACTIVE',
+                    expiry_date: '2029-12-31',
+                    remain_days: 999,
+                    assets: [
+                      {
+                        member_item_id: '1',
+                        item_name: '정기 타석 60분 회원권',
+                        duration_min: 60,
+                        expiry_date: '2029-12-31',
+                        logic_type: 'PERIOD',
+                        is_assignable: true
+                      }
+                    ]
                   })}
                   style={{ 
                     fontSize: '15px', 

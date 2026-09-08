@@ -13,20 +13,28 @@
     "build": "npm run audit:hardcode && tsc && vite build",
     "build:demo": "vite build --base=/demo/apps/kiosk/ --outDir ../localmaster-homepage/public/demo/apps/kiosk --emptyOutDir",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:unit": "vitest run",
+    "test:smoke": "playwright test tests/e2e/kiosk-smoke.spec.ts",
+    "test:golden": "playwright test tests/e2e/kiosk-golden-paths.spec.ts --workers=1",
+    "test:e2e": "playwright test",
+    "test:qa": "npm run test:unit && npm run test:golden"
   },
   "dependencies": {
+    "lucide-react": "^0.395.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "lucide-react": "^0.395.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@typescript-eslint/eslint-plugin": "^7.13.1",
     "@typescript-eslint/parser": "^7.13.1",
     "@vitejs/plugin-react": "^4.3.1",
     "typescript": "^5.2.2",
-    "vite": "^5.3.1"
+    "vite": "^5.3.1",
+    "vitest": "^2.1.9"
   }
 }
