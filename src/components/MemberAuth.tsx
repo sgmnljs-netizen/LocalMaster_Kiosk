@@ -61,6 +61,22 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     }
   }, []);
 
+  // 🛡️ E2E 테스트 및 외부 하드웨어 브릿지용 전역 헬퍼 및 이벤트 리스너
+  useEffect(() => {
+    (window as any).__LM_TRIGGER_SMART_AUTH__ = (tokenOrUid: string) => handleSmartTagDetected(tokenOrUid);
+    const handleCustomTagEvent = (e: any) => {
+      const target = e.detail?.member_no || e.detail?.query || e.detail?.hp;
+      if (target) {
+        handleSmartTagDetected(target);
+      }
+    };
+    window.addEventListener('lm-nfc-tag', handleCustomTagEvent);
+    return () => {
+      delete (window as any).__LM_TRIGGER_SMART_AUTH__;
+      window.removeEventListener('lm-nfc-tag', handleCustomTagEvent);
+    };
+  }, [handleSmartTagDetected]);
+
   // 안면 인식 트리거 (15초 대기 타이머 & 백엔드 안면 식별 API 동기 연동)
   const triggerFaceScan = useCallback(async () => {
     setFaceScanning(true);
