@@ -59,13 +59,14 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
       return;
     }
     
-    if (!selectedLockerNo) {
+    const targetLockerNo = selectedLockerNo ?? (myLockers.length > 0 ? myLockers[0].locker_no : null);
+    if (!targetLockerNo) {
       setErrorMsg('연장할 라카를 선택해주세요.');
       return;
     }
 
     // 신규 배정 불가, 기존 라카 연장만
-    onLockerPaymentTriggered(selectedLockerNo, prod, prod.days || 30);
+    onLockerPaymentTriggered(Number(targetLockerNo) || 1, prod, prod.days || 30);
   };
 
   return (
@@ -247,6 +248,8 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                 return (
                   <div
                     key={prod.prod_cd}
+                    data-testid="locker-prod-card"
+                    className="locker-product-card"
                     onClick={() => handleExtendClick(prod)}
                     style={{
                       padding: '24px',

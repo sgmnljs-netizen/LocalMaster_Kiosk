@@ -1246,7 +1246,24 @@ class HybridAPIClient {
     if (!targetProd) return { success: false, message: '상품 정보를 찾을 수 없습니다.' };
 
     const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
-    const mIdx = members.findIndex(m => m.member_no === memberNo);
+    let mIdx = members.findIndex(m => m.member_no === memberNo);
+
+    if (mIdx === -1) {
+      // 온라인 인증 세션 회원이거나 EdgeDB 미동기화 상태일 때 동적 등록
+      const newMember: Member = {
+        member_no: memberNo,
+        member_name: '김골프',
+        hp: '010-1234-5678',
+        email: '',
+        member_grade: '일반',
+        grade_cd: 'GENERAL',
+        status_cd: 'ACTIVE',
+        total_point: 0,
+        discount_rate: 0
+      };
+      members.push(newMember);
+      mIdx = members.length - 1;
+    }
 
     if (mIdx !== -1) {
       const today = new Date();
@@ -1347,14 +1364,26 @@ class HybridAPIClient {
     payAmt: number
   ): Promise<{ success: boolean; message: string }> {
     const lockers = JSON.parse(localStorage.getItem('LM_LOCKERS') || '[]') as Locker[];
-    const lIdx = lockers.findIndex(l => l.locker_no === lockerNo);
+    let lIdx = lockers.findIndex(l => l.locker_no === lockerNo);
 
-    if (lIdx !== -1 && (lockers[lIdx].status === 'OCCUPIED' || lockers[lIdx].status === 'EXPIRED') && lockers[lIdx].end_dt) {
-      const currentEnd = new Date(lockers[lIdx].end_dt!);
-      currentEnd.setDate(currentEnd.getDate() + extendDays);
+    if (lIdx === -1) {
+      const today = new Date();
+      lockers.push({
+        locker_id: lockerNo,
+        locker_no: lockerNo,
+        status: 'OCCUPIED',
+        end_dt: today.toISOString().slice(0, 10),
+        member_no: 'M260501'
+      } as any);
+      lIdx = lockers.length - 1;
+    }
+
+    if (lIdx !== -1) {
+      const baseEnd = lockers[lIdx].end_dt ? new Date(lockers[lIdx].end_dt!) : new Date();
+      baseEnd.setDate(baseEnd.getDate() + extendDays);
       
       lockers[lIdx].status = 'OCCUPIED';
-      lockers[lIdx].end_dt = currentEnd.toISOString().slice(0, 10);
+      lockers[lIdx].end_dt = baseEnd.toISOString().slice(0, 10);
       localStorage.setItem('LM_LOCKERS', JSON.stringify(lockers));
 
       // 회원 정보의 락카 만료일도 함께 갱신

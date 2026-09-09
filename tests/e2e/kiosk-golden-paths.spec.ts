@@ -9,12 +9,14 @@ function resetDatabaseForTests() {
     execSync(`sqlite3 "${DB_PATH}" "UPDATE usage_master SET status_cd = 'FINISHED' WHERE facility_type = 'BAY' AND facility_no IN (11, 14, 18) AND status_cd IN ('RUN', 'ACTIVE', 'IN_USE');"`);
     execSync(`sqlite3 "${DB_PATH}" "UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no IN (11, 14, 18);"`);
     execSync(`sqlite3 "${DB_PATH}" "UPDATE member_items SET status = 'ACTIVE', rem_count = 99, end_dt = '2029-12-31' WHERE item_id = 1;"`);
+    execSync(`sqlite3 "${DB_PATH}" "INSERT OR REPLACE INTO members (id, member_no, store_cd, member_name, hp, grade_id, status_cd, total_point, unpaid_amt, is_group_leader, privacy_agree_yn, marketing_agree_yn, face_auth_yn, finger_auth_yn, use_yn) VALUES ('MEM-M260501', 'M260501', 'H01-SE-001', '김골프', '010-1234-5678', 'MANAGER', '10', 0, 0, 0, 'Y', 'Y', 'N', 'N', 'Y');"`);
+    execSync(`sqlite3 "${DB_PATH}" "UPDATE lockers SET member_no = 'M260501', status = 'OCCUPIED', start_dt = '2026-01-01', end_dt = '2026-12-31' WHERE locker_no = 3;"`);
   } catch (e) {
     console.error('Failed to reset DB for tests:', e);
   }
 }
 
-test.describe('Layer 2: 키오스크 P0 4대 골든 패스 (Golden Paths E2E)', () => {
+test.describe('Layer 2: 키오스크 P0 6대 골든 패스 (Golden Paths E2E)', () => {
 
   test.beforeAll(() => {
     resetDatabaseForTests();
@@ -212,6 +214,124 @@ test.describe('Layer 2: 키오스크 P0 4대 골든 패스 (Golden Paths E2E)', 
     await page.locator('button:has-text("등록 건너뛰기")').click();
 
     // 8. 신규 회원가입 완료 및 메인 대시보드 복귀 확인!
+    await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
+  });
+
+  test('Pass 5: 회원권/이용권 상품 매대 탐색 및 결제 플로우 (Product Shop & Membership Purchase)', async ({ page }) => {
+    // 1. 대기 화면 진입
+    await page.goto('/');
+    await page.locator('text=화면을 터치하여 시작하세요').click();
+
+    // 2. 메인 대시보드에서 [회원권/상품 구매] 클릭
+    await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 5000 });
+    const shopMenuCard = page.locator('div.apple-card-hover:has-text("회원권")')
+      .or(page.locator('text=회원권/상품 구매'))
+      .first();
+    await expect(shopMenuCard).toBeVisible({ timeout: 5000 });
+    await shopMenuCard.click();
+
+    // 3. 회원 인증 화면 -> 스마트폰 태그(김골프)
+    const smartTagBtn = page.locator('button:has-text("스마트폰 태그")').first();
+    if (await smartTagBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await smartTagBtn.click();
+    }
+    const debugNfcBtn = page.locator('button:has-text("안드로이드 NFC (김골프)")');
+    await expect(debugNfcBtn).toBeVisible({ timeout: 5000 });
+    await debugNfcBtn.click();
+
+    // 4. 본인 확인 다이얼로그 -> [예, 맞습니다!]
+    await expect(page.locator('text=본인이 맞으신가요?')).toBeVisible({ timeout: 5000 });
+    await page.locator('button:has-text("예, 맞습니다!")').click();
+
+    // 5. ProductShop 상품 매대 화면 표출 확인
+    await expect(
+      page.locator('text=회원권 및 정기 서비스 구매')
+        .or(page.locator('button:has-text("선택 및 결제")'))
+    ).toBeVisible({ timeout: 10000 });
+
+    // 첫 번째 상품 [선택 및 결제] 버튼 클릭
+    const buyBtn = page.locator('button:has-text("선택 및 결제")').first();
+    await expect(buyBtn).toBeVisible({ timeout: 5000 });
+    await buyBtn.click();
+
+    // 6. 가상 결제 단말기 자동 승인 및 완료 모달 표출 확인
+    const modalConfirmBtn = page.locator('button:has-text("확인")').last();
+    await expect(
+      page.getByRole('heading', { name: '결제 및 등록이 완료되었습니다!' })
+        .or(page.getByRole('heading', { name: '결제 완료 & 영수증 발행' }))
+        .or(modalConfirmBtn)
+        .first()
+    ).toBeVisible({ timeout: 15000 });
+
+    if (await modalConfirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await modalConfirmBtn.click({ force: true });
+    }
+
+    // 7. 메인 대시보드 안전 복귀 확인
+    await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
+  });
+
+  test('Pass 6: 라카 연장 선택 및 결제 플로우 (Locker Extend & Rental)', async ({ page }) => {
+    // 1. 대기 화면 진입
+    await page.goto('/');
+    await page.locator('text=화면을 터치하여 시작하세요').click();
+
+    // 2. 메인 대시보드에서 [라카 대여/연장] 클릭
+    await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 5000 });
+    const lockerMenuCard = page.locator('div.apple-card-hover:has(h3:has-text("라카"))')
+      .or(page.locator('h3:has-text("라카")'))
+      .first();
+    await expect(lockerMenuCard).toBeVisible({ timeout: 5000 });
+    await lockerMenuCard.click();
+
+    // 3. 회원 인증 화면 -> 스마트폰 태그(김골프)
+    const smartTagBtn = page.locator('button:has-text("스마트폰 태그")').first();
+    if (await smartTagBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await smartTagBtn.click();
+    }
+    const debugNfcBtn = page.locator('button:has-text("안드로이드 NFC (김골프)")');
+    await expect(debugNfcBtn).toBeVisible({ timeout: 5000 });
+    await debugNfcBtn.click();
+
+    // 4. 본인 확인 다이얼로그 -> [예, 맞습니다!]
+    await expect(page.locator('text=본인이 맞으신가요?')).toBeVisible({ timeout: 5000 });
+    await page.locator('button:has-text("예, 맞습니다!")').click();
+
+    // 5. LockerExtend 화면 표출 확인
+    await expect(page.locator('text=개인 사물함 연장')).toBeVisible({ timeout: 10000 });
+
+    // 3번 라카 카드 명시적 선택
+    const lockerTile = page.locator('div:has-text("3")').filter({ hasText: '만료일' }).first();
+    if (await lockerTile.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await lockerTile.click({ force: true });
+    }
+
+    // 3번 라카 연장 상품 카드 클릭
+    const extendProdCard = page.locator('.locker-product-card').first();
+    await expect(extendProdCard).toBeVisible({ timeout: 5000 });
+    await extendProdCard.click();
+
+    // 포인트 결제 화면 등 결제 시작 버튼이 표출될 경우 클릭
+    const startPayBtn = page.locator('button:has-text("결제 시작")')
+      .or(page.locator('button:has-text("카드 결제")'))
+      .first();
+    if (await startPayBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await startPayBtn.click({ force: true });
+    }
+
+    // 6. 가상 결제 단말기 자동 승인 및 완료 모달 표출 확인
+    const lockerModalConfirmBtn = page.locator('button:has-text("확인")').last();
+    await expect(
+      page.getByRole('heading', { name: '결제 및 등록이 완료되었습니다!' })
+        .or(page.getByRole('heading', { name: '결제 완료 & 영수증 발행' }))
+        .or(lockerModalConfirmBtn)
+        .first()
+    ).toBeVisible({ timeout: 15000 });
+
+    if (await lockerModalConfirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await lockerModalConfirmBtn.click({ force: true });
+    }
+
     await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
   });
 
