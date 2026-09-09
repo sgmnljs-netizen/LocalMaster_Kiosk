@@ -1467,7 +1467,15 @@ export default function KioskApp() {
                     setCheckinResId(resId);
                     setPurpose('CHECKIN_RESERVATION');
                     showToast(lang === 'KO' ? `${bayNo}번 타석 체크인이 완료되었습니다.` : `Bay ${bayNo} check-in completed.`);
-                    setStep('PAYMENT');
+                    setCompletedAllocationInfo({
+                      bayNo: bayNo,
+                      durationMin: 60,
+                      resId: resId,
+                      memberName: authMember?.member_name || '회원',
+                      payAmount: 0
+                    });
+                    setAuthMember(null);
+                    setStep('MAIN_DASHBOARD');
                   }}
                   onCancel={handleGoHome}
                 />

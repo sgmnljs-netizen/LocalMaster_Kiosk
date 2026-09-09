@@ -6,6 +6,7 @@ const DB_PATH = '/Users/sgmnljs/workspace/Python/LocalMaster_Backend/local_maste
 function resetDatabaseForTests() {
   try {
     execSync(`sqlite3 "${DB_PATH}" "DELETE FROM reservation_master WHERE res_id LIKE 'KSK_%' OR (resource_type = 'BAY' AND resource_no IN ('11', '14', '18'));"`);
+    execSync(`sqlite3 "${DB_PATH}" "DELETE FROM checkin_master WHERE res_id LIKE 'KSK_%' OR resource_no IN ('11', '14', '18');"`);
     execSync(`sqlite3 "${DB_PATH}" "UPDATE usage_master SET status_cd = 'FINISHED' WHERE facility_type = 'BAY' AND facility_no IN (11, 14, 18) AND status_cd IN ('RUN', 'ACTIVE', 'IN_USE');"`);
     execSync(`sqlite3 "${DB_PATH}" "UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no IN (11, 14, 18);"`);
     execSync(`sqlite3 "${DB_PATH}" "UPDATE member_items SET status = 'ACTIVE', rem_count = 99, end_dt = '2029-12-31' WHERE item_id = 1;"`);
@@ -16,7 +17,7 @@ function resetDatabaseForTests() {
   }
 }
 
-test.describe('Layer 2: 키오스크 P0 6대 골든 패스 (Golden Paths E2E)', () => {
+test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', () => {
 
   test.beforeAll(() => {
     resetDatabaseForTests();
@@ -90,6 +91,10 @@ test.describe('Layer 2: 키오스크 P0 6대 골든 패스 (Golden Paths E2E)', 
 
     // 9. 배정 모달이 닫히고 복귀 확인
     await expect(page.locator('text=골프 타석 배정표')).not.toBeVisible({ timeout: 5000 });
+
+    // 10. 백엔드 DB 상태 교차 검증 (Zero-Assumption: 11번 타석이 M260501 회원에게 배정되었는지 확인)
+    const bayCheck11 = execSync(`sqlite3 "${DB_PATH}" "SELECT current_member_no FROM bays WHERE bay_no = 11;"`).toString().trim();
+    expect(bayCheck11).toBe('M260501');
   });
 
   test('Pass 2: 비회원 일일 타석권 선택 및 가상 결제 배정 완료 (Daily Pass Checkout)', async ({ page }) => {
@@ -333,6 +338,135 @@ test.describe('Layer 2: 키오스크 P0 6대 골든 패스 (Golden Paths E2E)', 
     }
 
     await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
+  });
+
+  test('Pass 7: 모바일 사전 예약 타석 무인 체크인 전체 라이프사이클 (Check-in Golden Path)', async ({ page }) => {
+    // 0. 당일 예약 레코드 DB 세팅 및 이전 테스트 영향 완전 격리 (단일 트랜잭션 일괄 처리)
+    const todayKst = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' })
+      .format(new Date()).replace(/[^0-9]/g, '');
+
+    execSync(`sqlite3 "${DB_PATH}" "
+      DELETE FROM reservation_master WHERE res_id LIKE 'KSK_%' OR (resource_type = 'BAY' AND resource_no IN ('11', '14', '15', '18'));
+      DELETE FROM checkin_master WHERE res_id LIKE 'KSK_%' OR resource_no IN ('11', '14', '15', '18');
+      UPDATE usage_master SET status_cd = 'FINISHED' WHERE facility_type = 'BAY' AND facility_no IN (11, 14, 15, 18) AND status_cd IN ('RUN', 'ACTIVE', 'IN_USE');
+      UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no IN (11, 14, 15, 18);
+      INSERT INTO reservation_master (res_id, store_cd, resource_type, resource_no, member_no, guest_nm, hp_no, res_date, start_time, end_time, duration_min, prepare_min, lesson_type, max_capacity, res_type, status_cd, payment_status, payment_mode, companion_count, transfer_cnt, created_at, updated_at) VALUES ('KSK_CHK_001', 'H01-SE-001', 'BAY', '11', 'M260501', '김골프', '010-1234-5678', '${todayKst}', '2300', '2350', 50, 0, 'PRIVATE', 1, 'SLOT', 'RSV', 'PAID', 'OFFLINE', 0, 0, datetime('now'), datetime('now'));
+    "`);
+
+    // 1. 대기 화면 진입
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('text=화면을 터치하여 시작하세요')).toBeVisible({ timeout: 10000 });
+    await page.locator('text=화면을 터치하여 시작하세요').click();
+
+    // 2. 메인 대시보드에서 [예약 타석 체크인] 클릭
+    await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 5000 });
+    const checkinBtn = page.locator('text=예약 타석 체크인').first();
+    await expect(checkinBtn).toBeVisible({ timeout: 5000 });
+    await checkinBtn.click();
+
+    // 3. 회원 인증: [출입 QR 스캔] 탭 전환 및 QR 코드 인식 검증
+    const qrTab = page.locator('button:has-text("출입 QR 스캔")').first();
+    if (await qrTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await qrTab.click();
+      await expect(page.locator('text=모바일 출입 QR을 스캐너에 비춰주세요')).toBeVisible({ timeout: 5000 });
+    }
+
+    // 시뮬레이터 출입 QR 스캔 버튼 클릭 (또는 window 이벤트)
+    const qrSimBtn = page.locator('button:has-text("출입 QR 스캔 시뮬레이션")').first();
+    if (await qrSimBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await qrSimBtn.click();
+    } else {
+      await page.evaluate(() => {
+        if ((window as any).__LM_TRIGGER_SMART_AUTH__) {
+          (window as any).__LM_TRIGGER_SMART_AUTH__('QR-M260501');
+        }
+      });
+    }
+
+    // 4. 본인 확인 다이얼로그 -> [예, 맞습니다!]
+    await expect(page.locator('text=본인이 맞으신가요?')).toBeVisible({ timeout: 5000 });
+    await page.locator('button:has-text("예, 맞습니다!")').click();
+
+    // 5. 사전 예약 타석 체크인 화면 (CheckinSelect) 표출 확인
+    await expect(page.locator('text=사전 예약 타석 체크인')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=11번 타석')).toBeVisible({ timeout: 5000 });
+
+    // 6. [체크인] 클릭
+    const doCheckinBtn = page.locator('button:has-text("체크인")').first();
+    await expect(doCheckinBtn).toBeVisible({ timeout: 5000 });
+    await doCheckinBtn.click();
+
+    // 7. 배정 완료 배정표 모달 표출 확인
+    await expect(page.locator('text=골프 타석 배정표')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=배정 타석')).toBeVisible();
+
+    const confirmBtn = page.locator('button:has-text("확인")').last();
+    if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await confirmBtn.click({ force: true });
+    }
+
+    // 8. 메인 대시보드 복귀 확인
+    await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
+
+    // 9. 백엔드 DB 상태 교차 검증 (Zero-Assumption: reservation_master status_cd = 'CHK'/'PREPARE', checkin_master COMPLETED)
+    const resStatus = execSync(`sqlite3 "${DB_PATH}" "SELECT status_cd FROM reservation_master WHERE res_id = 'KSK_CHK_001';"`)
+      .toString().trim();
+    expect(['CHK', 'PREPARE', 'USE']).toContain(resStatus);
+
+    const checkinStatus = execSync(`sqlite3 "${DB_PATH}" "SELECT status_cd FROM checkin_master WHERE res_id = 'KSK_CHK_001';"`)
+      .toString().trim();
+    expect(checkinStatus).toBe('COMPLETED');
+  });
+
+  test('Pass 8: 키패드 전화번호 조회 및 취소/예외 방어 (Keypad Search & Safe Cancel Guard)', async ({ page }) => {
+    // 0. 타석 15번 상태 초기화 (이전 테스트 영향 격리)
+    execSync(`sqlite3 "${DB_PATH}" "UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no = 15;"`);
+
+    // 1. 대기 화면 진입
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('text=화면을 터치하여 시작하세요')).toBeVisible({ timeout: 10000 });
+    await page.locator('text=화면을 터치하여 시작하세요').click();
+
+    // 2. 메인 대시보드에서 [연습타석 배정] 클릭
+    await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 5000 });
+    await page.locator('text=연습타석 배정').first().click();
+
+    // 3. 15번 빈 타석 카드 클릭 후 보유 회원권 배정 진입
+    await expect(page.getByRole('button', { name: '1F' })).toBeVisible({ timeout: 10000 });
+    const bayTile15 = page.locator('span:text-is("15")').first();
+    await expect(bayTile15).toBeVisible({ timeout: 5000 });
+    await bayTile15.click();
+
+    await expect(page.locator('text=배정 방식을 선택해 주세요')).toBeVisible({ timeout: 5000 });
+    await page.locator('text=보유 회원권으로 배정').click();
+
+    // 4. 회원 인증 모달에서 [전화번호 입력] 탭 전환
+    const keypadTab = page.locator('button:has-text("전화번호 입력")').first();
+    await expect(keypadTab).toBeVisible({ timeout: 5000 });
+    await keypadTab.click();
+
+    // 5. 가상 키패드로 미등록 번호(010-0000-9999) 입력 테스트
+    for (const char of ['0', '1', '0', '0', '0', '0', '0', '9', '9', '9', '9']) {
+      await page.locator(`button.keypad-num-btn:text-is("${char}")`).first().click();
+    }
+    
+    // [회원 조회하기] 클릭 -> 에러 메세지 표출 확인
+    const submitBtn = page.locator('button:has-text("회원 조회하기")');
+    await expect(submitBtn).toBeEnabled({ timeout: 3000 });
+    await submitBtn.click();
+
+    await expect(page.locator('text=등록되지 않은 모바일 회원 또는 NFC 카드입니다.')).toBeVisible({ timeout: 5000 });
+
+    // 6. [돌아가기] 클릭 시 크래시 없이 타석 맵 또는 배정 선택 모달로 안전 복귀
+    const backBtn = page.locator('button:has-text("돌아가기")').first();
+    await expect(backBtn).toBeVisible();
+    await backBtn.click();
+
+    await expect(
+      page.locator('text=원하시는 서비스를 선택해 주세요')
+        .or(page.locator('text=배정 방식을 선택해 주세요'))
+        .or(page.getByRole('button', { name: '1F' }))
+    ).toBeVisible({ timeout: 10000 });
   });
 
 });

@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, User, X, Sparkles, Smartphone, Radio } from 'lucide-react';
+import { Camera, User, X, Sparkles, Smartphone, Radio, QrCode, Delete } from 'lucide-react';
 import { api, Member, WS_BASE_URL, STORE_CODE } from '../services/api';
+import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
+
+export type AuthMode = 'SMART_TAG' | 'PHONE_KEYPAD' | 'QR_SCAN' | 'FACE';
 
 interface MemberAuthProps {
-  initialAuthMode?: 'SMART_TAG' | 'FACE';
+  initialAuthMode?: AuthMode;
   faceTerminalEnabled?: boolean;
   isSubModal?: boolean;
   onAuthSuccess: (member: Member) => void;
@@ -22,10 +25,11 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   onSignUpClick,
   onAuthError
 }) => {
-  const effectiveInitialMode = (!faceTerminalEnabled && initialAuthMode === 'FACE') ? 'SMART_TAG' : initialAuthMode;
-  const [authMode, setAuthMode] = useState<'SMART_TAG' | 'FACE'>(effectiveInitialMode);
+  const effectiveInitialMode: AuthMode = (!faceTerminalEnabled && initialAuthMode === 'FACE') ? 'SMART_TAG' : initialAuthMode;
+  const [authMode, setAuthMode] = useState<AuthMode>(effectiveInitialMode);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [phoneDigits, setPhoneDigits] = useState('');
   
   // 1초 본인 확인 팝업용 회원 감지 상태 (3번 방어책)
   const [detectedMember, setDetectedMember] = useState<Member | null>(null);
@@ -76,6 +80,46 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       window.removeEventListener('lm-nfc-tag', handleCustomTagEvent);
     };
   }, [handleSmartTagDetected]);
+
+  // 🛡️ 바코드/QR 하드웨어 스캐너 전역 자동 감지 (USB HID 및 브릿지 데몬)
+  useHardwareScanner({
+    onScan: (scanned) => {
+      console.log('[MemberAuth] Hardware QR/Barcode scanned:', scanned);
+      handleSmartTagDetected(scanned);
+    },
+    enabled: true,
+  });
+
+  // 전화번호 키패드 입력 제어 핸들러
+  const handleKeypadDigit = (digit: string) => {
+    if (phoneDigits.length >= 11) return;
+    setPhoneDigits(prev => prev + digit);
+    setErrorMsg('');
+  };
+
+  const handleKeypadClear = () => {
+    setPhoneDigits('');
+    setErrorMsg('');
+  };
+
+  const handleKeypadBackspace = () => {
+    setPhoneDigits(prev => prev.slice(0, -1));
+    setErrorMsg('');
+  };
+
+  const handleKeypadSubmit = async () => {
+    if (phoneDigits.length < 4) {
+      setErrorMsg('휴대폰 번호 4자리 이상을 입력해 주세요.');
+      return;
+    }
+    await handleSmartTagDetected(phoneDigits);
+  };
+
+  const formatHpDisplay = (raw: string) => {
+    if (raw.length <= 3) return raw;
+    if (raw.length <= 7) return `${raw.slice(0, 3)}-${raw.slice(3)}`;
+    return `${raw.slice(0, 3)}-${raw.slice(3, 7)}-${raw.slice(7, 11)}`;
+  };
 
   // 안면 인식 트리거 (15초 대기 타이머 & 백엔드 안면 식별 API 동기 연동)
   const triggerFaceScan = useCallback(async () => {
@@ -266,26 +310,26 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         </button>
       </div>
 
-      {/* 인증 모드 전환 탭 (스마트 태그 vs 안면 인식) */}
+      {/* 인증 모드 전환 탭 (스마트폰 태그, 전화번호 입력, QR 스캔, 안면 인식) */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: faceTerminalEnabled ? 'repeat(2, 1fr)' : '1fr', 
-        gap: '12px',
+        gridTemplateColumns: faceTerminalEnabled ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', 
+        gap: '8px',
         background: 'rgba(0, 0, 0, 0.04)',
-        padding: '8px',
+        padding: '6px',
         borderRadius: '20px'
       }}>
         <button
           onClick={() => { setAuthMode('SMART_TAG'); setErrorMsg(''); }}
           style={{
-            padding: isSubModal ? '16px' : '24px',
-            fontSize: isSubModal ? '18px' : '22px',
+            padding: isSubModal ? '12px 8px' : '18px 10px',
+            fontSize: isSubModal ? '15px' : '17px',
             fontWeight: 800,
             borderRadius: '14px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '12px',
+            gap: '8px',
             border: '0.5px solid',
             cursor: 'pointer',
             transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -295,22 +339,70 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             boxShadow: authMode === 'SMART_TAG' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
           }}
         >
-          <Sparkles size={26} style={{ color: authMode === 'SMART_TAG' ? 'var(--neon-green)' : 'inherit' }} />
-          📱 스마트폰 태그 (NFC / BLE)
+          <Smartphone size={20} style={{ color: authMode === 'SMART_TAG' ? '#059669' : 'inherit' }} />
+          스마트폰 태그
+        </button>
+
+        <button
+          onClick={() => { setAuthMode('PHONE_KEYPAD'); setErrorMsg(''); }}
+          style={{
+            padding: isSubModal ? '12px 8px' : '18px 10px',
+            fontSize: isSubModal ? '15px' : '17px',
+            fontWeight: 800,
+            borderRadius: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            border: '0.5px solid',
+            cursor: 'pointer',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            color: authMode === 'PHONE_KEYPAD' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            background: authMode === 'PHONE_KEYPAD' ? '#ffffff' : 'transparent',
+            borderColor: authMode === 'PHONE_KEYPAD' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+            boxShadow: authMode === 'PHONE_KEYPAD' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
+          }}
+        >
+          <span style={{ fontSize: '18px' }}>🔢</span>
+          전화번호 입력
+        </button>
+
+        <button
+          onClick={() => { setAuthMode('QR_SCAN'); setErrorMsg(''); }}
+          style={{
+            padding: isSubModal ? '12px 8px' : '18px 10px',
+            fontSize: isSubModal ? '15px' : '17px',
+            fontWeight: 800,
+            borderRadius: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            border: '0.5px solid',
+            cursor: 'pointer',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            color: authMode === 'QR_SCAN' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            background: authMode === 'QR_SCAN' ? '#ffffff' : 'transparent',
+            borderColor: authMode === 'QR_SCAN' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+            boxShadow: authMode === 'QR_SCAN' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
+          }}
+        >
+          <QrCode size={20} style={{ color: authMode === 'QR_SCAN' ? '#2563eb' : 'inherit' }} />
+          출입 QR 스캔
         </button>
 
         {faceTerminalEnabled && (
           <button
             onClick={() => { setAuthMode('FACE'); setErrorMsg(''); }}
             style={{
-              padding: isSubModal ? '16px' : '24px',
-              fontSize: isSubModal ? '18px' : '22px',
+              padding: isSubModal ? '12px 8px' : '18px 10px',
+              fontSize: isSubModal ? '15px' : '17px',
               fontWeight: 800,
               borderRadius: '14px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '12px',
+              gap: '8px',
               border: '0.5px solid',
               cursor: 'pointer',
               transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -320,8 +412,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               boxShadow: authMode === 'FACE' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
             }}
           >
-            <Camera size={26} style={{ color: authMode === 'FACE' ? 'var(--neon-green)' : 'inherit' }} />
-            안면 인식 인증
+            <Camera size={20} style={{ color: authMode === 'FACE' ? '#7c3aed' : 'inherit' }} />
+            안면 인식
           </button>
         )}
       </div>
@@ -661,6 +753,196 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   <Radio size={18} color="#059669" /> 아이폰 BLE (이프로)
                 </button>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 2. 전화번호 직접 입력 텐키 키패드 패널 */}
+      {authMode === 'PHONE_KEYPAD' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center', padding: '10px 0', width: '100%' }}>
+          <div 
+            style={{
+              width: isSubModal ? '480px' : '560px',
+              background: 'linear-gradient(145deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.85) 100%)',
+              borderRadius: '28px',
+              border: '1.5px solid rgba(16, 185, 129, 0.3)',
+              padding: '24px 28px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              boxShadow: '0 20px 40px rgba(16, 185, 129, 0.08), inset 0 1px 0 rgba(255, 255, 255, 1)',
+              gap: '16px'
+            }}
+          >
+            {/* 휴대폰 번호 디스플레이 창 */}
+            <div style={{
+              width: '100%',
+              background: '#ffffff',
+              borderRadius: '18px',
+              border: '2px solid #10b981',
+              padding: '16px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.04)'
+            }}>
+              <span style={{ fontSize: '15px', color: '#64748b', fontWeight: 700 }}>휴대폰 번호</span>
+              <span style={{ fontSize: '28px', fontWeight: 900, color: '#0f172a', letterSpacing: '2px' }}>
+                {phoneDigits ? formatHpDisplay(phoneDigits) : '010-____-____'}
+              </span>
+            </div>
+
+            {/* 3x4 텐키 키패드 */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '10px',
+              width: '100%'
+            }}>
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'DEL'].map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className="keypad-num-btn"
+                  onClick={() => {
+                    if (k === 'C') handleKeypadClear();
+                    else if (k === 'DEL') handleKeypadBackspace();
+                    else handleKeypadDigit(k);
+                  }}
+                  style={{
+                    height: '52px',
+                    fontSize: k === 'C' || k === 'DEL' ? '18px' : '24px',
+                    fontWeight: 800,
+                    borderRadius: '14px',
+                    border: '1px solid #cbd5e1',
+                    background: k === 'C' ? '#fef2f2' : k === 'DEL' ? '#f1f5f9' : '#ffffff',
+                    color: k === 'C' ? '#ef4444' : '#0f172a',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+                    transition: 'all 0.1s ease'
+                  }}
+                  onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
+                  onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                  {k === 'DEL' ? <Delete size={22} /> : k}
+                </button>
+              ))}
+            </div>
+
+            {/* 회원 조회 확인 버튼 */}
+            <button
+              type="button"
+              onClick={handleKeypadSubmit}
+              disabled={isSearching || phoneDigits.length < 4}
+              style={{
+                width: '100%',
+                height: '56px',
+                borderRadius: '16px',
+                background: phoneDigits.length >= 4 ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : '#cbd5e1',
+                color: '#ffffff',
+                fontSize: '20px',
+                fontWeight: 800,
+                border: 'none',
+                cursor: phoneDigits.length >= 4 ? 'pointer' : 'not-allowed',
+                boxShadow: phoneDigits.length >= 4 ? '0 8px 20px rgba(16, 185, 129, 0.3)' : 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px'
+              }}
+            >
+              {isSearching ? '조회 중...' : '회원 조회하기'}
+            </button>
+          </div>
+
+          {/* 테스트 및 시뮬레이션용 빠른 태그 도구 (개발 환경) */}
+          {import.meta.env.DEV && (
+            <div style={{ width: isSubModal ? '480px' : '560px', padding: '14px 18px', borderRadius: '18px', background: 'rgba(241, 245, 249, 0.9)', border: '1px solid #cbd5e1' }}>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#64748b' }}>SIMULATOR: </span>
+              <button
+                type="button"
+                onClick={() => { setPhoneDigits('01012345678'); handleSmartTagDetected('010-1234-5678'); }}
+                style={{ marginLeft: '8px', padding: '6px 14px', borderRadius: '8px', background: '#fff', border: '1px solid #cbd5e1', fontWeight: 800, cursor: 'pointer', fontSize: '13px' }}
+              >
+                010-1234-5678 즉시 입력 및 조회 (김골프)
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3. 모바일 출입 QR / 바코드 스캐너 패널 */}
+      {authMode === 'QR_SCAN' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center', padding: '10px 0', width: '100%' }}>
+          <div 
+            style={{
+              width: isSubModal ? '480px' : '560px',
+              height: isSubModal ? '340px' : '380px',
+              background: 'linear-gradient(145deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.85) 100%)',
+              borderRadius: '28px',
+              border: '1.5px solid rgba(37, 99, 235, 0.3)',
+              padding: '24px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 20px 40px rgba(37, 99, 235, 0.08), inset 0 1px 0 rgba(255, 255, 255, 1)',
+              gap: '18px',
+              position: 'relative',
+              overflow: 'hidden'
+            }}
+          >
+            {/* 스캐너 가이드 프레임 */}
+            <div style={{
+              width: '160px',
+              height: '160px',
+              borderRadius: '24px',
+              border: '3px dashed #2563eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(37, 99, 235, 0.04)',
+              position: 'relative'
+            }}>
+              <QrCode size={80} style={{ color: '#2563eb', opacity: 0.8 }} />
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '10%',
+                right: '10%',
+                height: '3px',
+                background: '#ef4444',
+                boxShadow: '0 0 12px #ef4444',
+                animation: 'pulse 1.5s infinite'
+              }} />
+            </div>
+
+            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#0f172a', margin: 0 }}>
+                모바일 출입 QR을 스캐너에 비춰주세요
+              </h3>
+              <p style={{ fontSize: '15px', color: '#64748b', margin: 0, fontWeight: 500 }}>
+                골포스 회원 전용 앱의 <b>[출입용 QR 티켓]</b> 또는 카카오톡 알림톡 QR을 하단 리더기에 인식시켜 주세요.
+              </p>
+            </div>
+          </div>
+
+          {/* 테스트 및 시뮬레이션용 빠른 태그 도구 (개발 환경) */}
+          {import.meta.env.DEV && (
+            <div style={{ width: isSubModal ? '480px' : '560px', padding: '14px 18px', borderRadius: '18px', background: 'rgba(241, 245, 249, 0.9)', border: '1px solid #cbd5e1' }}>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#64748b' }}>SIMULATOR: </span>
+              <button
+                type="button"
+                onClick={() => handleSmartTagDetected('QR-M260501')}
+                style={{ marginLeft: '8px', padding: '6px 14px', borderRadius: '8px', background: '#fff', border: '1px solid #cbd5e1', fontWeight: 800, cursor: 'pointer', fontSize: '13px' }}
+              >
+                <QrCode size={14} style={{ display: 'inline', marginRight: '4px', verticalAlign: 'middle' }} />
+                출입 QR 스캔 시뮬레이션 (김골프)
+              </button>
             </div>
           )}
         </div>

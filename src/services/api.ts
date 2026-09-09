@@ -726,10 +726,14 @@ class HybridAPIClient {
     const isConnected = await this.checkConnection();
     console.log(`[LM_KIOSK] Auth Query: "${query}". Network Connection: ${isConnected ? 'ONLINE' : 'OFFLINE(EdgeDB)'}`);
     
+    // Normalize QR prefix if present (e.g. QR-M260501 -> M260501)
+    const normalizedQuery = query.replace(/^(QR[-_]?|MEMBER[-_]?)/i, '');
+    const searchTarget = normalizedQuery || query;
+
     if (isConnected) {
       try {
         // 백엔드 키오스크 전용 익명 회원 조회 API 호출 (/v1/kiosk/member 경로 매핑)
-        const res = await fetch(`${BASE_URL}/v1/kiosk/member?store_cd=${STORE_CODE}&query=${encodeURIComponent(query)}`);
+        const res = await fetch(`${BASE_URL}/v1/kiosk/member?store_cd=${STORE_CODE}&query=${encodeURIComponent(searchTarget)}`);
         if (res.ok) {
           const member = await res.json();
           if (member) {
@@ -743,13 +747,13 @@ class HybridAPIClient {
 
     // Edge DB 모드
     const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
-    const cleanSearch = query.replace(/[^0-9]/g, '');
+    const cleanSearch = searchTarget.replace(/[^0-9]/g, '');
     
     const found = members.find(m => 
-      m.member_no.toUpperCase() === query.toUpperCase() ||
-      m.member_name === query ||
-      m.hp.replace(/[^0-9]/g, '') === cleanSearch ||
-      m.hp.includes(query)
+      m.member_no.toUpperCase() === searchTarget.toUpperCase() ||
+      m.member_name === searchTarget ||
+      (cleanSearch && m.hp.replace(/[^0-9]/g, '') === cleanSearch) ||
+      m.hp.includes(searchTarget)
     );
 
     return found || null;
