@@ -357,8 +357,9 @@ export default function KioskApp() {
   }, [toast]);
 
   // 2. 무인기기 비활성 세션 아웃 (40초간 조작이 없으면 자동으로 광고 인트로로 복귀)
+  // [Payment Guard] 결제 진행 중(PAYMENT)에는 단말기 승인 대기 시간이 필요하므로 40초 세션 아웃 일시 중지
   useEffect(() => {
-    if (step === 'INTRO') return;
+    if (step === 'INTRO' || step === 'PAYMENT') return;
 
     const resetTimer = () => {
       clearTimeout(sessionTimeout);
@@ -549,8 +550,19 @@ export default function KioskApp() {
 
     // 회원인증의 목적에 따라 다음 단계로 지능형 라우팅
     if (purpose === 'ALLOCATE_MEMBERSHIP') {
-      // 회원권 타석 배정 검증
-      if (!member.expiry_date || member.remain_days === undefined || member.remain_days <= 0) {
+      // 회원권 타석 배정 검증: 유효 기간(remain_days > 0)이거나 유효 이용권(잔여 횟수/쿠폰)이 존재하는 경우 허용
+      const hasValidDays = Boolean(member.expiry_date && member.remain_days !== undefined && member.remain_days > 0);
+      const hasValidAsset = Boolean(
+        member.assets && member.assets.length > 0 && member.assets.some(a => 
+          (a.is_assignable !== false) && (
+            (a.rem_count !== undefined && a.rem_count > 0) || 
+            (a.remain_cnt !== undefined && a.remain_cnt > 0) || 
+            (a.remain_days !== undefined && a.remain_days > 0)
+          )
+        )
+      );
+
+      if (!hasValidDays && !hasValidAsset) {
         // [ErrorMaster-First 예시] 회원권 만료 에러
         const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
         await api.writeKioskLog('AUTH_ERROR', `회원권 만료 제약 차단 (Trace ID: ${trace})`, member.member_no);
@@ -751,9 +763,20 @@ export default function KioskApp() {
   };
 
   // 4. 라카 연장/대여 상품 선택 및 결제 트리거
-  const handleLockerPaymentTriggered = (lockerNo: number, prod: Product, extendDays: number) => {
+  const handleLockerPaymentTriggered = async (lockerNo: number, prod: Product, extendDays: number) => {
     setSelectedLockerNo(lockerNo);
     setSelectedProduct(prod);
+    setSelectedBayNo(null);
+    setSelectedBayNos([]);
+    setPurpose('EXTEND_LOCKER');
+    try {
+      const holdRes = await api.holdLockerExtension(lockerNo, prod.standard_price, prod.prod_cd);
+      if (holdRes?.res_id) {
+        setCurrentHoldResId(holdRes.res_id);
+      }
+    } catch (e) {
+      console.warn('Locker hold failed, fallback to local flow:', e);
+    }
     setStep('PAYMENT');
   };
 
@@ -970,7 +993,13 @@ export default function KioskApp() {
             : selectedProduct.standard_price
         );
         try {
-          const res: any = await api.purchaseProduct(authMember.member_no, selectedProduct.prod_cd, actualProductPaid);
+          const res: any = await api.purchaseProduct(
+            authMember.member_no, 
+            selectedProduct.prod_cd, 
+            actualProductPaid,
+            payResult?.apprNo,
+            payResult?.cardApproval?.van_tr_no
+          );
           if (res && res.success === false) {
             throw new Error(res.message || '회원권 전산 등록에 실패했습니다.');
           }
@@ -1006,7 +1035,12 @@ export default function KioskApp() {
       if (purpose === 'EXTEND_LOCKER' && selectedLockerNo && selectedProduct && authMember) {
         hasCustomModal = true;
         try {
-          const res: any = await api.extendLocker(selectedLockerNo, selectedProduct.days || 30, selectedProduct.standard_price);
+          const res: any = await api.extendLocker(
+            selectedLockerNo, 
+            selectedProduct.days || 30, 
+            selectedProduct.standard_price,
+            currentHoldResId || undefined
+          );
           if (res && res.success === false) {
             throw new Error(res.message || '라카 연장 전산 등록에 실패했습니다.');
           }
@@ -2054,7 +2088,7 @@ export default function KioskApp() {
               <button
                 onClick={() => {
                   api.writeKioskLog('STAFF_CALL', '미들웨어 점검 장애 화면에서 직원을 호출함');
-                  alert('안내 데스크로 직원 호출 알림이 전송되었습니다.');
+                  showToast('안내 데스크로 직원 호출 알림이 전송되었습니다.');
                 }}
                 style={{
                   padding: '16px 36px',

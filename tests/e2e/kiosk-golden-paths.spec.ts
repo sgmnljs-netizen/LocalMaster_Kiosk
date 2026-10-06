@@ -5,13 +5,18 @@ const DB_PATH = '/Users/sgmnljs/workspace/Python/LocalMaster_Backend/local_maste
 
 function resetDatabaseForTests() {
   try {
-    execSync(`sqlite3 "${DB_PATH}" "DELETE FROM reservation_master WHERE res_id LIKE 'KSK_%' OR (resource_type = 'BAY' AND resource_no IN ('11', '14', '18'));"`);
-    execSync(`sqlite3 "${DB_PATH}" "DELETE FROM checkin_master WHERE res_id LIKE 'KSK_%' OR resource_no IN ('11', '14', '18');"`);
-    execSync(`sqlite3 "${DB_PATH}" "UPDATE usage_master SET status_cd = 'FINISHED' WHERE facility_type = 'BAY' AND facility_no IN (11, 14, 18) AND status_cd IN ('RUN', 'ACTIVE', 'IN_USE');"`);
-    execSync(`sqlite3 "${DB_PATH}" "UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no IN (11, 14, 18);"`);
-    execSync(`sqlite3 "${DB_PATH}" "UPDATE member_items SET status = 'ACTIVE', rem_count = 99, end_dt = '2029-12-31' WHERE item_id = 1;"`);
-    execSync(`sqlite3 "${DB_PATH}" "INSERT OR REPLACE INTO members (id, member_no, store_cd, member_name, hp, grade_id, status_cd, total_point, unpaid_amt, is_group_leader, privacy_agree_yn, marketing_agree_yn, face_auth_yn, finger_auth_yn, use_yn) VALUES ('MEM-M260501', 'M260501', 'H01-SE-001', '김골프', '010-1234-5678', 'MANAGER', '10', 0, 0, 0, 'Y', 'Y', 'N', 'N', 'Y');"`);
-    execSync(`sqlite3 "${DB_PATH}" "UPDATE lockers SET member_no = 'M260501', status = 'OCCUPIED', start_dt = '2026-01-01', end_dt = '2026-12-31' WHERE locker_no = 3;"`);
+    const sql = `
+      PRAGMA busy_timeout = 5000;
+      DELETE FROM reservation_master WHERE res_id LIKE 'KSK_%' OR (resource_type = 'BAY' AND resource_no IN ('11', '14', '18'));
+      DELETE FROM checkin_master WHERE res_id LIKE 'KSK_%' OR resource_no IN ('11', '14', '18');
+      UPDATE usage_master SET status_cd = 'FINISHED' WHERE facility_type = 'BAY' AND facility_no IN (11, 14, 18) AND status_cd IN ('RUN', 'ACTIVE', 'IN_USE');
+      UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no IN (11, 14, 18);
+      UPDATE member_items SET status = 'ACTIVE', rem_count = 99, end_dt = '2029-12-31' WHERE item_id = 1;
+      INSERT OR REPLACE INTO members (id, member_no, store_cd, member_name, hp, grade_id, status_cd, total_point, unpaid_amt, is_group_leader, privacy_agree_yn, marketing_agree_yn, face_auth_yn, finger_auth_yn, use_yn) VALUES ('MEM-M260501', 'M260501', 'H01-SE-001', '김골프', '010-1234-5678', 'MANAGER', '10', 0, 0, 0, 'Y', 'Y', 'N', 'N', 'Y');
+      UPDATE lockers SET member_no = 'M260501', status = 'OCCUPIED', start_dt = '2026-01-01', end_dt = '2026-12-31' WHERE locker_no = 3;
+      UPDATE store_info SET close_time = '05:00' WHERE store_cd = 'H01-SE-001';
+    `.replace(/\n/g, ' ').trim();
+    execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "${sql}"`);
   } catch (e) {
     console.error('Failed to reset DB for tests:', e);
   }
@@ -115,10 +120,18 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(page.locator('text=배정 방식을 선택해 주세요')).toBeVisible({ timeout: 5000 });
     await page.locator('text=일일권 즉시 결제').click();
 
-    // 5. 일일권 상품 매대 표출 확인 -> 첫 번째 상품 [선택 및 결제] 버튼 클릭
+    // 5. 일일권 상품 매대 표출 확인 -> 비동기 상품 목록 로드 대기 후 60분 상품(야간 마감시각 가드 준수) 선택
     await expect(page.locator('text=일일 타석권 선택 및 결제')).toBeVisible({ timeout: 5000 });
-    const checkoutBtn = page.locator('button:has-text("선택 및 결제")').first();
-    await expect(checkoutBtn).toBeVisible({ timeout: 5000 });
+    const anyCheckoutBtn = page.locator('button:has-text("선택 및 결제")').first();
+    await anyCheckoutBtn.waitFor({ state: 'visible', timeout: 10000 });
+
+    const btn15k = page.locator('button:has-text("15,000")').first();
+    const btn60Min = page.locator('div').filter({ hasText: '60분' }).locator('button:has-text("선택 및 결제")').first();
+    const checkoutBtn = (await btn15k.isVisible({ timeout: 2000 }).catch(() => false))
+      ? btn15k
+      : (await btn60Min.isVisible({ timeout: 2000 }).catch(() => false))
+        ? btn60Min
+        : anyCheckoutBtn;
     await checkoutBtn.click();
 
     // 6. 가상 결제 단말기 자동 승인 및 배정 완료 티켓/대시보드 복귀 확인
@@ -128,8 +141,8 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     ).toBeVisible({ timeout: 15000 });
 
     // 7. 배정표 팝업이 표출되어 있으면 [확인] 닫기 클릭
-    const confirmBtn = page.locator('button:has-text("확인")').last();
-    if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    const confirmBtn = page.locator('button').filter({ hasText: /확인/ }).last();
+    if (await confirmBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await confirmBtn.click({ force: true });
     }
 
@@ -333,8 +346,14 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
         .first()
     ).toBeVisible({ timeout: 15000 });
 
-    if (await lockerModalConfirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    // 영수증/등록 완료 모달의 확인 버튼 안전 대기 및 클릭
+    if (await lockerModalConfirmBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await lockerModalConfirmBtn.click({ force: true });
+    } else {
+      const anyConfirmBtn = page.locator('button').filter({ hasText: /확인/ }).last();
+      if (await anyConfirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await anyConfirmBtn.click({ force: true });
+      }
     }
 
     await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });

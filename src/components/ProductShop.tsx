@@ -35,6 +35,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   const [displayCategories, setDisplayCategories] = useState<DisplayCategoryItem[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
+  const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const loadKioskShopData = async () => {
@@ -104,7 +105,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   // 비회원의 장기 회원권 탭 진입 차단 처리
   const handleTabClick = (tabId: number | 'DAILY_PASS', tabName: string) => {
     if (tabId !== 'DAILY_PASS' && !memberNo && (tabName.includes('회원') || tabName.includes('정기') || tabName.includes('라카'))) {
-      alert('장기 정기권 및 지정 시설 상품 구매는 회원 인증이 필요합니다. 처음 화면으로 돌아가 회원 조회를 먼저 완료해 주십시오.');
+      setWarningMessage('장기 정기권 및 지정 시설 상품 구매는 회원 인증이 필요합니다.\n처음 화면으로 돌아가 회원 조회를 먼저 완료해 주십시오.');
       return;
     }
     setActiveTab(tabId);
@@ -259,6 +260,8 @@ export const ProductShop: React.FC<ProductShopProps> = ({
             return (
               <div
                 key={prod.prod_cd}
+                data-testid={`product-card-${prod.prod_cd}`}
+                data-duration={durationMin}
                 onClick={() => onProductSelected(prod)}
                 style={{
                   padding: '36px 30px',
@@ -402,6 +405,59 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         • 일일 타석권은 결제 즉시 타석 선택창으로 전환되며, 10분 내로 타석에 입장하여 주셔야 이용이 개시됩니다.<br />
         • 모든 결제는 신용카드만 가능하며, 현금 결제나 환불은 파트너센터 및 주간 관리 데스크로 문의해 주세요.
       </div>
+
+      {/* 회원 전용 상품 인증 안내 모달 (동기식 alert 대체) */}
+      {warningMessage && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.72)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '24px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '24px',
+            padding: '36px 32px',
+            maxWidth: '440px',
+            width: '100%',
+            textAlign: 'center',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+            border: '1px solid #e2e8f0'
+          }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
+            <h3 style={{ fontSize: '22px', fontWeight: 800, color: '#1e293b', marginBottom: '12px' }}>회원 인증 필요</h3>
+            <p style={{ fontSize: '16px', color: '#64748b', lineHeight: '1.6', whiteSpace: 'pre-line', marginBottom: '28px' }}>
+              {warningMessage}
+            </p>
+            <button
+              onClick={() => setWarningMessage(null)}
+              style={{
+                width: '100%',
+                padding: '16px 0',
+                borderRadius: '16px',
+                background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                color: '#ffffff',
+                fontSize: '18px',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 8px 16px rgba(37, 99, 235, 0.3)'
+              }}
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

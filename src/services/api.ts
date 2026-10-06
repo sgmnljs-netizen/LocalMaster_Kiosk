@@ -1242,18 +1242,58 @@ class HybridAPIClient {
   async purchaseProduct(
     memberNo: string, 
     prodCd: string, 
-    payAmt: number
-  ): Promise<{ success: boolean; message: string }> {
+    payAmt: number,
+    apprNo?: string,
+    vanTrNo?: string
+  ): Promise<{ success: boolean; message: string; sale_id?: string; item_id?: number }> {
     const products = await this.getProducts();
     const targetProd = products.find(p => p.prod_cd === prodCd);
     
     if (!targetProd) return { success: false, message: '상품 정보를 찾을 수 없습니다.' };
 
+    // [Online Sync] 백엔드 연결 가능 시 실제 원장 및 MemberItem 동기화
+    const isConnected = await this.checkConnection();
+    if (isConnected) {
+      try {
+        const res = await fetch(`${BASE_URL}/v1/kiosk/products/purchase?store_cd=${STORE_CODE}`, {
+          method: 'POST',
+          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            member_no: memberNo,
+            prod_cd: prodCd,
+            pay_amt: payAmt,
+            pay_method: 'CARD',
+            store_cd: STORE_CODE,
+            appr_no: apprNo,
+            van_tr_no: vanTrNo
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          // EdgeDB 동기화
+          this.syncLocalMemberProduct(memberNo, targetProd, payAmt);
+          return {
+            success: true,
+            sale_id: data.sale_id,
+            item_id: data.item_id,
+            message: data.message || `${targetProd.prod_nm} 구매 및 결제가 완료되었습니다.`
+          };
+        }
+      } catch (err) {
+        console.warn('[Kiosk Purchase] 백엔드 구매 API 실패, EdgeDB 폴백 진행:', err);
+      }
+    }
+
+    // [Offline EdgeDB Fallback]
+    this.syncLocalMemberProduct(memberNo, targetProd, payAmt);
+    return { success: true, message: `${targetProd.prod_nm} 구매 및 결제가 완료되었습니다.` };
+  }
+
+  private syncLocalMemberProduct(memberNo: string, targetProd: Product, payAmt: number) {
     const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
     let mIdx = members.findIndex(m => m.member_no === memberNo);
 
     if (mIdx === -1) {
-      // 온라인 인증 세션 회원이거나 EdgeDB 미동기화 상태일 때 동적 등록
       const newMember: Member = {
         member_no: memberNo,
         member_name: '김골프',
@@ -1271,7 +1311,6 @@ class HybridAPIClient {
 
     if (mIdx !== -1) {
       const today = new Date();
-      // 회원 상태 업데이트
       members[mIdx].recent_product_nm = targetProd.prod_nm;
       
       if (targetProd.days) {
@@ -1280,10 +1319,8 @@ class HybridAPIClient {
         members[mIdx].expiry_date = exp.toISOString().slice(0, 10);
         members[mIdx].remain_days = targetProd.days;
       }
-      
       localStorage.setItem('LM_MEMBERS', JSON.stringify(members));
 
-      // 결제 내역 저장
       const sales = JSON.parse(localStorage.getItem('LM_SALES') || '[]') as unknown[];
       sales.push({
         sale_id: `S-${Date.now()}`,
@@ -1295,11 +1332,7 @@ class HybridAPIClient {
         status: 'COMPLETED'
       });
       localStorage.setItem('LM_SALES', JSON.stringify(sales));
-
-      return { success: true, message: `${targetProd.prod_nm} 구매 및 결제가 완료되었습니다.` };
     }
-
-    return { success: false, message: '회원 정보를 찾을 수 없습니다.' };
   }
 
   // 9. 라카 목록 가져오기 (특정 회원의 라카만 가져오는 것도 필요하지만, 기존 호환을 위해 유지)
@@ -1365,8 +1398,31 @@ class HybridAPIClient {
   async extendLocker(
     lockerNo: number, 
     extendDays: number, 
-    payAmt: number
+    payAmt: number,
+    resId?: string
   ): Promise<{ success: boolean; message: string }> {
+    // [Online Sync] 백엔드 HOLD 예약 결제 확정 웹훅 전송
+    const isConnected = await this.checkConnection();
+    if (isConnected && resId) {
+      try {
+        const webhookRes = await fetch(`${BASE_URL}/v1/kiosk/payment-webhook?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+          method: 'POST',
+          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            res_id: resId,
+            amount: payAmt,
+            payment_method: 'CARD',
+            terminal_id: this.getTerminalId()
+          })
+        });
+        if (!webhookRes.ok) {
+          console.warn('[Locker Webhook] 백엔드 결제 웹훅 응답 비정상:', webhookRes.status);
+        }
+      } catch (err) {
+        console.warn('[Locker Webhook] 백엔드 웹훅 전송 실패, EdgeDB 폴백 진행:', err);
+      }
+    }
+
     const lockers = JSON.parse(localStorage.getItem('LM_LOCKERS') || '[]') as Locker[];
     let lIdx = lockers.findIndex(l => l.locker_no === lockerNo);
 
@@ -1383,11 +1439,18 @@ class HybridAPIClient {
     }
 
     if (lIdx !== -1) {
-      const baseEnd = lockers[lIdx].end_dt ? new Date(lockers[lIdx].end_dt!) : new Date();
-      baseEnd.setDate(baseEnd.getDate() + extendDays);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const existingEnd = lockers[lIdx].end_dt ? new Date(lockers[lIdx].end_dt!) : today;
+      existingEnd.setHours(0, 0, 0, 0);
+      
+      // 만료일이 이미 지난 경우 오늘 기준으로 연장, 아직 유효한 경우 기존 만료일에 가산
+      const baseDate = existingEnd > today ? existingEnd : today;
+      const newEnd = new Date(baseDate);
+      newEnd.setDate(newEnd.getDate() + extendDays);
       
       lockers[lIdx].status = 'OCCUPIED';
-      lockers[lIdx].end_dt = baseEnd.toISOString().slice(0, 10);
+      lockers[lIdx].end_dt = newEnd.toISOString().slice(0, 10);
       localStorage.setItem('LM_LOCKERS', JSON.stringify(lockers));
 
       // 회원 정보의 락카 만료일도 함께 갱신

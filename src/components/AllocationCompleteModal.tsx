@@ -3,6 +3,7 @@ import { Check, Printer, ArrowRight, RefreshCw } from 'lucide-react';
 import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { TimeMaster } from '../utils/timeMaster';
+import { api } from '../services/api';
 
 interface AllocationCompleteModalProps {
   bayNo: number | string;
@@ -29,9 +30,16 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
 }) => {
   const [countdown, setCountdown] = useState(6);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
+  const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string } | null>(null);
   const { settings } = useKioskSettings();
   const storeName = settings.deviceName || '골포스 스마트 키오스크';
   const autoPrintReceipt = true;
+
+  useEffect(() => {
+    api.getStoreInfo().then((info) => {
+      if (info) setStoreInfo(info);
+    }).catch(console.error);
+  }, []);
 
   const handlePrint = useCallback(async () => {
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
@@ -47,11 +55,11 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
       member_name: memberName || '회원',
       pay_method: payAmount > 0 ? 'CARD' : 'SERVICE',
       store_info: {
-        store_name: storeName,
-        biz_no: '123-45-67890',
-        ceo_name: '대표자',
-        tel: '02-0000-0000',
-        address: '서울시 강남구',
+        store_name: storeInfo?.store_nm || storeName,
+        biz_no: (storeInfo as any)?.biz_no || '123-45-67890',
+        ceo_name: (storeInfo as any)?.ceo_name || '대표자',
+        tel: storeInfo?.tel || '02-0000-0000',
+        address: storeInfo?.address || '서울시 강남구',
       },
       items: [
         {
@@ -129,6 +137,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
 
   return (
     <div 
+      onClick={onClose}
       style={{
         position: 'fixed',
         top: 0,
@@ -142,11 +151,13 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 9999,
-        padding: '24px'
+        padding: '24px',
+        cursor: 'pointer'
       }}
     >
       {/* Apple Snow White Ticket Card */}
       <div 
+        onClick={(e) => e.stopPropagation()}
         style={{
           width: '100%',
           maxWidth: '620px',

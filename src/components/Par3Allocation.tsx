@@ -4,6 +4,7 @@ import { api, Par3Slot, Product, KioskZone, Member, MemberAsset, KioskCompanionI
 import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
 import { MemberAuth } from './MemberAuth';
 import { TimeMaster } from '../utils/timeMaster';
+import { kioskVanClient } from '../services/van/van_client';
 
 interface Par3AllocationProps {
   memberNo?: string;
@@ -414,8 +415,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       );
 
       if (res.success && res.res_id) {
-        // 예약 선점 성공 -> 가상 단말기 승인 파이프라인 진입
-        runPaymentSimulation(res.res_id, totalAmount);
+        // 예약 선점 성공 -> 실물 VAN 단말기 승인 파이프라인 진입
+        runRealCardPayment(res.res_id, totalAmount);
       } else {
         setErrorMsg(res.message);
         setLoading(false);
@@ -426,49 +427,62 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }
   };
 
-  // 3단계 가상 결제 승인 시뮬레이션
-  const runPaymentSimulation = (resId: string, amount: number) => {
+  // 3단계 실물 VAN 카드 결제 승인 연동
+  const runRealCardPayment = async (resId: string, amount: number) => {
     // 만약 전원 이용권 사용 등으로 최종 결제금액이 ₩0 이라면 카드 리더기 연출 생략하고 즉시 승인!
     if (amount === 0) {
       setPaymentState('DISPATCHING');
       setAuthProgress(50);
       setTimeout(async () => {
         setAuthProgress(100);
-        await executeConfirmWebhook(resId, 0);
-      }, 800);
+        await executeConfirmWebhook(resId, 0, 'MEMBERSHIP_TICKET');
+      }, 500);
       return;
     }
 
     setPaymentState('INSERT_WAIT');
-    setAuthProgress(0);
+    setAuthProgress(20);
 
-    // 1단계: 카드 삽입 대기 (1.5초)
-    setTimeout(() => {
-      setPaymentState('READING');
-      setAuthProgress(30);
+    try {
+      const approval = await kioskVanClient.requestCardPayment(
+        { amount, timeoutSeconds: 30 },
+        (vanState) => {
+          if (vanState === 'READY' || vanState === 'WAITING_CARD') {
+            setPaymentState('INSERT_WAIT');
+            setAuthProgress(20);
+          } else if (vanState === 'REQUESTING') {
+            setPaymentState('READING');
+            setAuthProgress(60);
+          } else if (vanState === 'APPROVED') {
+            setPaymentState('DISPATCHING');
+            setAuthProgress(90);
+          }
+        }
+      );
 
-      // 2단계: IC 칩 정보 리딩 (1.5초)
-      setTimeout(() => {
-        setPaymentState('DISPATCHING');
-        setAuthProgress(70);
+      if (!approval.success) {
+        setErrorMsg(approval.error_message || '카드 결제가 거절되었습니다.');
+        resetPaymentState();
+        return;
+      }
 
-        // 3단계: 백엔드 승인 웹훅 처리 및 최종 RSV 변환 (1초)
-        setTimeout(async () => {
-          setAuthProgress(100);
-          await executeConfirmWebhook(resId, amount);
-        }, 1000);
-      }, 1500);
-    }, 1500);
+      setAuthProgress(100);
+      await executeConfirmWebhook(resId, amount, approval.auth_code, approval.card_no_masked);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : '단말기 통신 오류가 발생했습니다.';
+      setErrorMsg(`[결제 실패]: ${errMsg}`);
+      resetPaymentState();
+    }
   };
 
-  const executeConfirmWebhook = async (resId: string, amount: number) => {
+  const executeConfirmWebhook = async (resId: string, amount: number, authNo?: string, cardMasked?: string) => {
     try {
       const isSuccess = await api.confirmKioskPaymentWebhook(resId, amount, amount === 0 ? 'TICKET' : 'OFFLINE_CARD');
 
       if (isSuccess) {
         const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
         const formattedDate = TimeMaster.formatKstDateTime(new Date());
-        const mockApprNo = amount === 0 ? 'MEMBERSHIP_TICKET' : `APPR_${Math.floor(10000000 + Math.random() * 90000000)}`;
+        const validApprNo = authNo || (amount === 0 ? 'MEMBERSHIP_TICKET' : `APPR_${Math.floor(10000000 + Math.random() * 90000000)}`);
 
         // 영수증 DTO 주입 (api.getStoreInfo 동적 데이터 사용)
         setCreatedReceipt({
@@ -476,7 +490,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           address: storeInfo?.address || '서울특별시 광진구 워커힐로 177',
           tel: storeInfo?.tel || '02-450-4500',
           tradeDate: formattedDate,
-          apprNo: mockApprNo,
+          apprNo: validApprNo,
+          cardNo: cardMasked,
           prodNm: `Par3 ${selectedZoneName} 코스 [${selectedSlot?.time}]`,
           partySize: players.length,
           totalAmount: amount,

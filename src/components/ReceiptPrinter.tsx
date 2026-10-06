@@ -7,6 +7,7 @@ export interface ReceiptData {
   tel: string;
   tradeDate: string;
   apprNo: string;
+  cardNo?: string;
   prodNm: string;
   partySize: number;
   totalAmount: number;
