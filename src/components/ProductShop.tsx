@@ -94,9 +94,10 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       const matchedCat = displayCategories.find(c => c.category_id === activeTab);
       if (!matchedCat) return [];
       
-      // 해당 카테고리에 매핑된 prod_cd 리스트에 대응되는 실제 Product 객체 빌드
-      const catProdCodes = matchedCat.items.map(item => item.prod_cd);
-      return allProducts.filter(p => catProdCodes.includes(p.prod_cd));
+      // 해당 카테고리에 매핑된 prod_cd 리스트에 대응되는 실제 Product 객체 빌드 (어드민 지정 정렬 순서 100% 보장)
+      return matchedCat.items
+        .map(item => allProducts.find(p => p.prod_cd === item.prod_cd))
+        .filter((p): p is Product => !!p);
     }
   };
 
@@ -192,9 +193,10 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       {purposeType !== 'ALLOCATE_DAILY' && (
         <div 
           style={{ 
-            display: 'grid', 
-            gridTemplateColumns: `repeat(${displayCategories.length}, 1fr)`, 
-            gap: '12px' 
+            display: 'flex', 
+            overflowX: 'auto',
+            gap: '12px',
+            paddingBottom: '4px'
           }}
         >
           {/* 어드민에서 설정한 동적 카테고리 탭 렌더링 (회원권, 쿠폰, 라카, 파3 등) */}
@@ -207,6 +209,8 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 key={cat.category_id}
                 onClick={() => handleTabClick(cat.category_id, cat.name)}
                 style={{
+                  flex: displayCategories.length <= 4 ? '1' : '0 0 auto',
+                  minWidth: '140px',
                   padding: '20px 10px',
                   fontSize: '18px',
                   fontWeight: 800,
