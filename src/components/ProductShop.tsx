@@ -7,7 +7,7 @@ interface ProductShopProps {
   memberName?: string;
   discountRate?: number;
   gradeName?: string;
-  purposeType?: 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT';
+  purposeType?: 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT' | 'SELECT_DAILY_PASS';
   onProductSelected: (product: Product) => void;
   onCancel: () => void;
 }
@@ -28,9 +28,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   onProductSelected,
   onCancel
 }) => {
+  const isDailyPurpose = purposeType === 'ALLOCATE_DAILY' || purposeType === 'SELECT_DAILY_PASS';
+
   // activeTab: number(동적 카테고리 ID) 또는 'DAILY_PASS'(일일 타석 배정 모드 전용 탭)
   const [activeTab, setActiveTab] = useState<number | 'DAILY_PASS'>(
-    purposeType === 'ALLOCATE_DAILY' ? 'DAILY_PASS' : 0
+    isDailyPurpose ? 'DAILY_PASS' : 0
   );
   const [displayCategories, setDisplayCategories] = useState<DisplayCategoryItem[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -50,13 +52,14 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         setAllProducts(products);
 
         // 기본 활성 탭 설정
-        if (purposeType === 'ALLOCATE_DAILY') {
+        if (purposeType === 'ALLOCATE_DAILY' || purposeType === 'SELECT_DAILY_PASS') {
           setActiveTab('DAILY_PASS');
         } else if (categories.length > 0) {
           // 회원권 구매 모드: 무조건 첫 번째 전시 카테고리(예: 회원권) 기본 선택
           setActiveTab(categories[0].category_id);
         } else {
-          setActiveTab('DAILY_PASS');
+          // 전시 카테고리가 미설정된 오프라인/폴백 상태에서도 PURCHASE_PRODUCT일 때는 DAILY_PASS로 빠지지 않도록 0 유지
+          setActiveTab(0);
         }
       } catch (err) {
         console.error('Failed to load kiosk shop data:', err);
@@ -69,9 +72,16 @@ export const ProductShop: React.FC<ProductShopProps> = ({
 
   // 일일 타석 배정권 여부 판별 헬퍼 (상품 DB 속성 직접 참조)
   const checkIfDaily = (prod: Product) => {
-    const isDailyLogic = (prod.logic_type as string) === 'DAILY' || (prod.logic_type as string) === 'DAY' || (prod.logic_type as string) === 'FACILITY';
+    const logicUpper = (prod.logic_type || '').toUpperCase();
+    if (logicUpper === 'PERIOD' || logicUpper === 'COUNT' || logicUpper === 'COUPON') {
+      return false;
+    }
+    if (logicUpper === 'DAILY' || logicUpper === 'DAY') {
+      return true;
+    }
+    const isDailyLogic = logicUpper === 'FACILITY';
     const isDailyCd = prod.prod_cd.startsWith('D') || prod.prod_cd.startsWith('P01') || prod.prod_cd.startsWith('P02');
-    const isDailyName = prod.prod_nm.includes('일일') || prod.prod_nm.includes('타석권') || prod.prod_nm.includes('60분') || prod.prod_nm.includes('90분');
+    const isDailyName = prod.prod_nm.includes('일일') || prod.prod_nm.includes('당일');
     const hasDuration = prod.duration_min != null && prod.duration_min > 0;
     return (isDailyLogic || isDailyCd || isDailyName) && hasDuration;
   };
@@ -79,25 +89,33 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB 물리 컬럼 ➔ JSON access_rules/rules_detail 직접 참조)
   const getDurationMin = (prod: Product) => {
     if (prod.duration_min != null && prod.duration_min > 0) return prod.duration_min;
-    const jsonDuration = (prod as any).access_rules?.duration_min || (prod as any).rules_detail?.duration_min;
+    const jsonDuration = prod.access_rules?.duration_min || prod.rules_detail?.duration_min;
     if (jsonDuration != null && jsonDuration > 0) return jsonDuration;
     return 60;
   };
 
-  // 현재 탭에 맞는 노출 상품 목록 필터링
+  // 현재 탭 및 목적(purposeType)에 맞는 노출 상품 목록 필터링
   const getFilteredProducts = (): Product[] => {
-    if (activeTab === 'DAILY_PASS') {
-      // 일일 타석 배정권 전용 필터링 (checkIfDaily 사용)
+    if (isDailyPurpose || activeTab === 'DAILY_PASS') {
+      // 일일 타석 배정권 전용 필터링 (DAILY 상품만 노출)
       return allProducts.filter(checkIfDaily);
     } else {
+      // PURCHASE_PRODUCT(회원권/정기권/횟수권 구매) 모드: DAILY(일일 현장권) 상품 혼입 원천 차단
+      const nonDailyFilter = (p: Product) => (p.logic_type || '').toUpperCase() !== 'DAILY' && !checkIfDaily(p);
+
       // 동적 전시 카테고리 상품 매핑
       const matchedCat = displayCategories.find(c => c.category_id === activeTab);
-      if (!matchedCat) return [];
+      if (!matchedCat) {
+        if (displayCategories.length === 0) {
+          return allProducts.filter(nonDailyFilter);
+        }
+        return [];
+      }
       
-      // 해당 카테고리에 매핑된 prod_cd 리스트에 대응되는 실제 Product 객체 빌드 (어드민 지정 정렬 순서 100% 보장)
+      // 해당 카테고리에 매핑된 prod_cd 리스트에 대응되는 실제 Product 객체 빌드 (어드민 지정 정렬 순서 100% 보장 + DAILY 제외)
       return matchedCat.items
         .map(item => allProducts.find(p => p.prod_cd === item.prod_cd))
-        .filter((p): p is Product => !!p);
+        .filter((p): p is Product => !!p && nonDailyFilter(p));
     }
   };
 
@@ -148,7 +166,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           </div>
           <div>
             <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.5px' }}>
-              {purposeType === 'ALLOCATE_DAILY' ? '일일 타석권 선택 및 결제' : '회원권 및 정기 서비스 구매'}
+              {isDailyPurpose ? '일일 타석권 선택 및 결제' : '회원권 및 정기 서비스 구매'}
             </h2>
             {memberName ? (
               <p style={{ fontSize: '15px', color: '#86868b', marginTop: '4px', margin: 0 }}>
@@ -156,7 +174,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
               </p>
             ) : (
               <p style={{ fontSize: '15px', color: '#d97706', fontWeight: 700, marginTop: '4px', margin: 0 }}>
-                {purposeType === 'ALLOCATE_DAILY' 
+                {isDailyPurpose 
                   ? '※ 원하시는 이용 시간(N분)을 선택하여 결제를 진행해 주세요.'
                   : '※ 회원 전용 상품으로 정기 회원권 및 부가 서비스를 구매하실 수 있습니다.'}
               </p>
@@ -190,7 +208,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       </div>
 
       {/* 동적 카테고리 탭 목록 (회원권 구매 전용 매대) */}
-      {purposeType !== 'ALLOCATE_DAILY' && (
+      {!isDailyPurpose && (
         <div 
           style={{ 
             display: 'flex', 
@@ -255,11 +273,33 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           filteredProducts.map((prod) => {
             const isDaily = checkIfDaily(prod);
             const durationMin = getDurationMin(prod);
-            const basePrice = prod.standard_price;
-            const hasDiscount = Boolean(discountRate && discountRate > 0);
-            const discountAmt = hasDiscount ? Math.round(basePrice * (discountRate! / 100)) : 0;
-            const finalPrice = Math.max(0, basePrice - discountAmt);
+            const rawLogicType = (prod.logic_type || '').toUpperCase();
+            const totalCount = prod.total_count ?? prod.access_rules?.total_count ?? prod.rules_detail?.total_count ?? 0;
+            const days = prod.days ?? prod.access_rules?.days ?? prod.rules_detail?.days ?? 0;
+
+            const resolvedLogicType: 'COUNT' | 'PERIOD' | 'DAILY' =
+              rawLogicType === 'COUNT' || rawLogicType === 'COUPON' || (!isDaily && totalCount > 0)
+                ? 'COUNT'
+                : isDaily
+                  ? 'DAILY'
+                  : 'PERIOD';
+
+            // 1. 실제 판매 기준 가격 (sale_price 우선 참조) 및 정상가 취소선 계산
+            const effectiveSalePrice =
+              prod.sale_price !== undefined && prod.sale_price !== null && prod.sale_price > 0
+                ? prod.sale_price
+                : prod.standard_price;
+            const hasSaleDiscount = prod.standard_price > effectiveSalePrice;
+            const hasGradeDiscount = Boolean(discountRate && discountRate > 0);
+            const gradeDiscountAmt = hasGradeDiscount ? Math.round(effectiveSalePrice * (discountRate! / 100)) : 0;
+            const finalPrice = Math.max(0, effectiveSalePrice - gradeDiscountAmt);
+            const hasAnyDiscount = hasSaleDiscount || hasGradeDiscount;
             const priceFormatted = finalPrice.toLocaleString();
+
+            // 2. 배지(badge) 및 노출 상품명(display_nm) 동적 반영 (하드코딩 제거)
+            const customBadge = prod.meta_data?.pos_button?.badge || prod.meta_data?.badges?.[0] || null;
+            const badgeText = customBadge ? customBadge : `${durationMin}분 이용`;
+            const displayName = prod.meta_data?.display_nm || prod.prod_nm;
 
             return (
               <div
@@ -296,33 +336,61 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 {/* 상단 뱃지 및 헤더 */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '13px', color: '#86868b', fontWeight: 700, letterSpacing: '0.5px' }}>
-                    {isDaily ? 'DAILY PASS' : 'MEMBERSHIP'}
+                    {resolvedLogicType === 'DAILY'
+                      ? 'DAILY PASS'
+                      : resolvedLogicType === 'COUNT'
+                        ? 'COUNT PASS'
+                        : 'MEMBERSHIP'}
                   </span>
                   <span style={{
                     fontSize: '12px',
                     fontWeight: 800,
                     padding: '6px 14px',
                     borderRadius: '999px',
-                    background: durationMin === 60 ? '#34c759' : '#0071e3',
+                    background: customBadge ? '#34c759' : '#0071e3',
                     color: '#ffffff',
-                    boxShadow: durationMin === 60 ? '0 4px 12px rgba(52, 199, 89, 0.25)' : '0 4px 12px rgba(0, 113, 227, 0.25)'
+                    boxShadow: customBadge ? '0 4px 12px rgba(52, 199, 89, 0.25)' : '0 4px 12px rgba(0, 113, 227, 0.25)'
                   }}>
-                    {durationMin === 60 ? '★ BEST 60분' : `${durationMin}분 이용`}
+                    {badgeText}
                   </span>
                 </div>
 
-                {/* 48px SF Pro Display 대형 이용시간 표출 */}
+                {/* 48px SF Pro Display 대형 스펙 표출 (COUNT / PERIOD / DAILY 분기) */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <h3 style={{ fontSize: '26px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '-0.8px' }}>
-                    {prod.prod_nm}
+                    {displayName}
                   </h3>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '6px' }}>
-                    <span style={{ fontSize: '48px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-1.5px' }}>
-                      {durationMin}
-                    </span>
-                    <span style={{ fontSize: '20px', fontWeight: 700, color: '#86868b' }}>
-                      분 타석 이용권
-                    </span>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '6px' }}>
+                    {resolvedLogicType === 'COUNT' ? (
+                      <>
+                        <span style={{ fontSize: '48px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-1.5px' }}>
+                          {totalCount}회
+                        </span>
+                        <span style={{ fontSize: '20px', fontWeight: 700, color: '#86868b' }}>
+                          1회 {durationMin}분
+                        </span>
+                      </>
+                    ) : resolvedLogicType === 'PERIOD' ? (
+                      <>
+                        <span style={{ fontSize: '48px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-1.5px' }}>
+                          {days > 0 ? `${days}일` : `1회 ${durationMin}분`}
+                        </span>
+                        {days > 0 && (
+                          <span style={{ fontSize: '20px', fontWeight: 700, color: '#86868b' }}>
+                            1회 {durationMin}분
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: '48px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-1.5px' }}>
+                          {durationMin}분
+                        </span>
+                        <span style={{ fontSize: '20px', fontWeight: 700, color: '#86868b' }}>
+                          타석 이용권
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -330,7 +398,15 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #e5e5ea', paddingTop: '16px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1d1d1f', fontSize: '15px', fontWeight: 600 }}>
                     <CheckCircle2 size={18} style={{ color: '#0071e3' }} />
-                    <span>{isDaily ? `타석 지정 후 즉시 입장 (${durationMin}분)` : `정기 기간 적용 (${prod.days}일 이용)`}</span>
+                    <span>
+                      {resolvedLogicType === 'COUNT'
+                        ? (days > 0
+                            ? `유효기간 ${days}일 (1회 ${durationMin}분)`
+                            : `횟수 차감형 이용권 (1회 ${durationMin}분)`)
+                        : resolvedLogicType === 'PERIOD'
+                          ? `기간제 이용권 (${days}일 / 1일 ${durationMin}분)`
+                          : '당일 1회 즉시 배정 전용'}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#86868b', fontSize: '14px', fontWeight: 500 }}>
                     <CheckCircle2 size={18} style={{ color: '#34c759' }} />
@@ -343,18 +419,24 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                       <span style={{ fontSize: '13px', color: '#86868b', fontWeight: 600 }}>이용요금</span>
-                      {hasDiscount && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {hasAnyDiscount && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                           <span style={{ fontSize: '14px', color: '#86868b', textDecoration: 'line-through' }}>
-                            {basePrice.toLocaleString()}원
+                            {prod.standard_price.toLocaleString()}원
                           </span>
-                          <span style={{ fontSize: '11px', fontWeight: 900, color: '#059669', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px' }}>
-                            {gradeName || 'VIP'} {discountRate}% 할인
-                          </span>
+                          {hasGradeDiscount ? (
+                            <span style={{ fontSize: '11px', fontWeight: 900, color: '#059669', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px' }}>
+                              {gradeName || 'VIP'} {discountRate}% 할인
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '11px', fontWeight: 900, color: '#059669', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px' }}>
+                              할인가 적용
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
-                    <span style={{ fontSize: '28px', fontWeight: 900, color: hasDiscount ? '#059669' : '#1d1d1f', letterSpacing: '-0.8px' }}>
+                    <span style={{ fontSize: '28px', fontWeight: 900, color: hasAnyDiscount ? '#059669' : '#1d1d1f', letterSpacing: '-0.8px' }}>
                       {priceFormatted}원
                     </span>
                   </div>
@@ -379,7 +461,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                       transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
                     }}
                   >
-                    <Hand size={18} className="animate-hand-tap" style={{ color: durationMin === 60 ? '#34c759' : '#2997ff' }} />
+                    <Hand size={18} className="animate-hand-tap" style={{ color: customBadge ? '#34c759' : '#2997ff' }} />
                     <span>{priceFormatted}원 선택 및 결제</span>
                   </button>
                 </div>

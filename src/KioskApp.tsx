@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { 
-  ArrowLeftRight, Calendar, Compass, CreditCard, 
+  ArrowLeftRight, Calendar, Compass, CreditCard, Clock,
   KeyRound, RefreshCw, LogOut, ShieldAlert, Sparkles, UserCheck, UserPlus
 } from 'lucide-react';
 import { IntroScreen } from './components/IntroScreen';
@@ -184,8 +184,18 @@ export default function KioskApp() {
   const [errorMasterCard, setErrorMasterCard] = useState<{ code: string; detail: string; traceId: string } | null>(null);
   const [errorModal, setErrorModal] = useState<ErrorModalData>({ isVisible: false, message: '' });
   const [storeName, setStoreName] = useState<string>('SGM Golf Academy');
+  const [storeCloseTime, setStoreCloseTime] = useState<string>('24:00');
   const [checkinPolicy, setCheckinPolicy] = useState<string>('CHECKIN_REQUIRED');
   const [hwFailAlert, setHwFailAlert] = useState<{ bayNo: number; resId: string } | null>(null);
+  const [closingPromptModal, setClosingPromptModal] = useState<{
+    isVisible: boolean;
+    maxMin: number;
+    closeTime: string;
+    message?: string;
+    noticeText?: string;
+    onConfirm: () => void;
+    onCancel: () => void;
+  } | null>(null);
   const [completedAllocationInfo, setCompletedAllocationInfo] = useState<{
     bayNo: number | string;
     durationMin: number;
@@ -290,6 +300,9 @@ export default function KioskApp() {
       await api.getKioskMasterData();
       const info = await api.getStoreInfo();
       setStoreName(info.store_nm);
+      if ((info as any).close_time) {
+        setStoreCloseTime((info as any).close_time);
+      }
       setCheckinPolicy(info.checkin_policy);
       setLogoUrl(info.logo_url);
       setPhotoUrl(info.photo_url);
@@ -408,6 +421,7 @@ export default function KioskApp() {
     setSelectedProduct(null);
     setPurpose(null);
     setErrorMasterCard(null);
+    setClosingPromptModal(null);
     setStep('INTRO');
   };
 
@@ -435,6 +449,7 @@ export default function KioskApp() {
     setSelectedProduct(null);
     setPurpose(null);
     setErrorMasterCard(null);
+    setClosingPromptModal(null);
     setStep('MAIN_DASHBOARD');
   };
 
@@ -472,6 +487,7 @@ export default function KioskApp() {
     setSelectedProduct(null);
     setSelectedAssetId(null);
     setCheckinResId(null);
+    setClosingPromptModal(null);
     if (purpose === 'PURCHASE_PRODUCT' || purpose === 'EXTEND_LOCKER') {
       setStep('PRODUCT_SHOP');
     } else {
@@ -504,6 +520,7 @@ export default function KioskApp() {
     setSelectedProduct(null);
     setPurpose(null);
     setErrorMasterCard(null);
+    setClosingPromptModal(null);
     
     // 🔒 [4차 방어막] 이탈/타임아웃 시 잔존 배정 상태 100% 클리어
     setSelectedAssetId(null);
@@ -645,20 +662,20 @@ export default function KioskApp() {
   };
 
   // 2.5 선택한 이용권으로 타석 배정 최종 승인 처리
-  const handleAssetSelected = async (memberItemId: number) => {
+  const handleAssetSelected = async (memberItemId: number, overrideDurationMin?: number) => {
     if (isAllocatingRef.current) return;
     if (selectedBayNo !== null && authMember) {
       isAllocatingRef.current = true;
       try {
         const targetAsset = (authMember.assets || []).find(a => String(a.member_item_id) === String(memberItemId));
-        const passDuration = targetAsset?.duration_min ?? 60;
+        const passDuration = overrideDurationMin ?? (targetAsset?.duration_min ?? 60);
         const res = await api.allocateBay(
           selectedBayNo, passDuration, authMember.member_no,
           undefined, undefined, memberItemId,
           'TICKET', 0
         );
         if (res.success) {
-          await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId})`, authMember.member_no);
+          await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId}, ${passDuration}분)`, authMember.member_no);
           await loadBays();
           if (res.hardware_success === false) {
             showErrorModal(`${selectedBayNo}번 타석 배정은 완료되었으나, 센서/타석 기기 시작에 실패했습니다. 직원을 호출해 주세요.`, '타석 기기 가동 미완료', true);
@@ -678,6 +695,25 @@ export default function KioskApp() {
             endTime: (res as any).end_time || (res as any).endTime
           });
         } else {
+          // ⏰ [영업 마감 단축 승낙 룰 (SSOT)]: 10분 이상 잔여 시 단축 배정 확인 모달 표출
+          if (res.closingPrompt && res.closingPrompt.max_available_min >= 10) {
+            const prompt = res.closingPrompt;
+            setClosingPromptModal({
+              isVisible: true,
+              maxMin: prompt.max_available_min,
+              closeTime: prompt.close_time,
+              message: prompt.message,
+              noticeText: '※ 이용권 1회가 정상 차감되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다.',
+              onConfirm: async () => {
+                setClosingPromptModal(null);
+                await handleAssetSelected(memberItemId, prompt.max_available_min);
+              },
+              onCancel: () => {
+                setClosingPromptModal(null);
+              }
+            });
+            return;
+          }
           showErrorModal(res.message || '회원 이용권 타석 배정에 실패했습니다.');
         }
       } catch (err: any) {
@@ -758,6 +794,65 @@ export default function KioskApp() {
 
   // 3. 상품 매대에서 구매 상품 선택 완료
   const handleProductSelected = async (prod: Product) => {
+    if (purpose === 'ALLOCATE_DAILY' && selectedBayNo) {
+      // ⏰ [일일권 결제 전 마감시간 사전 점검 (SSOT)]
+      const now = new Date();
+      const cleanClose = (storeCloseTime || '24:00').replace(':', '').padStart(4, '0');
+      const closeH = parseInt(cleanClose.slice(0, 2), 10);
+      const closeM = parseInt(cleanClose.slice(2, 4), 10);
+      const closeDt = new Date();
+      closeDt.setHours(closeH === 24 ? 0 : closeH, closeM, 0, 0);
+      if (closeH === 24 || closeDt <= now) {
+        closeDt.setDate(closeDt.getDate() + 1);
+      }
+      const diffMin = Math.floor((closeDt.getTime() - now.getTime()) / 60000);
+
+      // 대기 타석 잔여시간(waitMin) 계산: 선택한 타석이 사용 중이면 종료 시각부터 계산
+      const selectedBay = bays.find(b => b.bay_no === selectedBayNo);
+      let waitMin = 0;
+      if (selectedBay && (selectedBay.status === 'OCCUPIED' || selectedBay.status === 'PREPARE')) {
+        if (selectedBay.end_time) {
+          const bayEndDt = new Date(selectedBay.end_time);
+          if (bayEndDt > now) {
+            waitMin = Math.ceil((bayEndDt.getTime() - now.getTime()) / 60000);
+          }
+        }
+      }
+
+      // 결제 소요 버퍼: 카드 투입 및 통신에 약 1~2분 소요되므로 백엔드 409 및 망취소 방어를 위해 2분 버퍼 확보
+      const PAYMENT_BUFFER_MIN = 2;
+      const prepareMin = 3;
+      const totalOffsetMin = waitMin + prepareMin + PAYMENT_BUFFER_MIN;
+      const maxUserMin = Math.max(0, diffMin - totalOffsetMin);
+      const prodDuration = prod.duration_min ?? 60;
+
+      if (diffMin < prodDuration + waitMin + prepareMin) {
+        if (maxUserMin < 10) {
+          showErrorModal(`영업 마감시간(${storeCloseTime}) 임박(최소 이용시간 10분 미만)으로 일일권을 구매하여 배정할 수 없습니다.`);
+          return;
+        }
+        setClosingPromptModal({
+          isVisible: true,
+          maxMin: maxUserMin,
+          closeTime: storeCloseTime,
+          message: `영업 마감시각(${storeCloseTime})까지 이용 가능한 시간은 [${maxUserMin}분]입니다.\n\n${maxUserMin}분으로 단축하여 결제 및 배정을 진행하시겠습니까?`,
+          noticeText: '※ 결제 금액은 정상 요금으로 결제되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다.',
+          onConfirm: () => {
+            setClosingPromptModal(null);
+            setSelectedProduct({
+              ...prod,
+              duration_min: maxUserMin
+            });
+            setStep('PAYMENT');
+          },
+          onCancel: () => {
+            setClosingPromptModal(null);
+          }
+        });
+        return;
+      }
+    }
+
     setSelectedProduct(prod);
     setStep('PAYMENT');
   };
@@ -769,8 +864,12 @@ export default function KioskApp() {
     setSelectedBayNo(null);
     setSelectedBayNos([]);
     setPurpose('EXTEND_LOCKER');
+    const effectiveLockerPrice =
+      prod.sale_price !== undefined && prod.sale_price !== null && prod.sale_price > 0
+        ? prod.sale_price
+        : prod.standard_price;
     try {
-      const holdRes = await api.holdLockerExtension(lockerNo, prod.standard_price, prod.prod_cd);
+      const holdRes = await api.holdLockerExtension(lockerNo, effectiveLockerPrice, prod.prod_cd);
       if (holdRes?.res_id) {
         setCurrentHoldResId(holdRes.res_id);
       }
@@ -857,10 +956,14 @@ export default function KioskApp() {
       // 통합 API(POST /api/v1/kiosk/allocate-bay)로 단일 처리 (CoreEngine 2회 호출 방지)
       if (purpose === 'ALLOCATE_DAILY' && selectedBayNo && selectedProduct) {
         hasCustomModal = true;
+        const effectiveDailyBasePrice =
+          selectedProduct.sale_price !== undefined && selectedProduct.sale_price !== null && selectedProduct.sale_price > 0
+            ? selectedProduct.sale_price
+            : selectedProduct.standard_price;
         const actualPaidAmount = payResult?.amount ?? (
           authMember?.discount_rate && authMember.discount_rate > 0
-            ? Math.max(0, selectedProduct.standard_price - Math.round(selectedProduct.standard_price * (authMember.discount_rate / 100)))
-            : selectedProduct.standard_price
+            ? Math.max(0, effectiveDailyBasePrice - Math.round(effectiveDailyBasePrice * (authMember.discount_rate / 100)))
+            : effectiveDailyBasePrice
         );
         try {
           const finalDuration = selectedProduct.duration_min ?? (selectedProduct as any).durationMin ?? 60;
@@ -998,10 +1101,14 @@ export default function KioskApp() {
       // 일반 회원권 구매 성공인 경우
       if (purpose === 'PURCHASE_PRODUCT' && authMember && selectedProduct) {
         hasCustomModal = true;
+        const effectiveProductBasePrice =
+          selectedProduct.sale_price !== undefined && selectedProduct.sale_price !== null && selectedProduct.sale_price > 0
+            ? selectedProduct.sale_price
+            : selectedProduct.standard_price;
         const actualProductPaid = payResult?.amount || (
           authMember?.discount_rate && authMember.discount_rate > 0
-            ? Math.max(0, selectedProduct.standard_price - Math.round(selectedProduct.standard_price * (authMember.discount_rate / 100)))
-            : selectedProduct.standard_price
+            ? Math.max(0, effectiveProductBasePrice - Math.round(effectiveProductBasePrice * (authMember.discount_rate / 100)))
+            : effectiveProductBasePrice
         );
         try {
           const res: any = await api.purchaseProduct(
@@ -1019,7 +1126,7 @@ export default function KioskApp() {
           setCompletedPurchaseInfo({
             memberName: authMember.member_name,
             memberHp: authMember.hp,
-            productName: selectedProduct.prod_nm,
+            productName: selectedProduct.meta_data?.display_nm || selectedProduct.prod_nm,
             amount: actualProductPaid,
             apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
             tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
@@ -1047,7 +1154,11 @@ export default function KioskApp() {
       // 라카 연장/대여 결제 완료 시점에 반영
       if (purpose === 'EXTEND_LOCKER' && selectedLockerNo && selectedProduct && authMember) {
         hasCustomModal = true;
-        const actualLockerPaid = payResult?.cardApproval?.amount || payResult?.amount || (selectedProduct.standard_price - (payResult?.couponDiscount || 0));
+        const effectiveLockerBasePrice =
+          selectedProduct.sale_price !== undefined && selectedProduct.sale_price !== null && selectedProduct.sale_price > 0
+            ? selectedProduct.sale_price
+            : selectedProduct.standard_price;
+        const actualLockerPaid = payResult?.cardApproval?.amount || payResult?.amount || (effectiveLockerBasePrice - (payResult?.couponDiscount || 0));
         try {
           const res: any = await api.extendLocker(
             selectedLockerNo, 
@@ -1757,14 +1868,20 @@ export default function KioskApp() {
                     <PaymentTerminal
                       productName={
                         selectedProduct
-                          ? selectedProduct.prod_nm
+                          ? (selectedProduct.meta_data?.display_nm || selectedProduct.prod_nm)
                           : ((purpose as string) === 'ALLOCATE_MEMBERSHIP'
                             ? '회원권 타석 배정'
                             : ((purpose as string) === 'CHECKIN_RESERVATION'
                               ? '사전 예약 타석 체크인'
                               : '라카 연장 대여'))
                       }
-                      amount={selectedProduct ? selectedProduct.standard_price : 0}
+                      amount={
+                        selectedProduct
+                          ? (selectedProduct.sale_price !== undefined && selectedProduct.sale_price !== null && selectedProduct.sale_price > 0
+                              ? selectedProduct.sale_price
+                              : selectedProduct.standard_price)
+                          : 0
+                      }
                       assignedBayNo={selectedBayNo}
                       assignedBayNos={selectedBayNos}
                       assignedLockerNo={selectedLockerNo}
@@ -1783,14 +1900,20 @@ export default function KioskApp() {
                 <PaymentTerminal
                   productName={
                     selectedProduct
-                      ? selectedProduct.prod_nm
+                      ? (selectedProduct.meta_data?.display_nm || selectedProduct.prod_nm)
                       : ((purpose as string) === 'ALLOCATE_MEMBERSHIP'
                         ? '회원권 타석 배정'
                         : ((purpose as string) === 'CHECKIN_RESERVATION'
                           ? '사전 예약 타석 체크인'
                           : '라카 연장 대여'))
                   }
-                  amount={selectedProduct ? selectedProduct.standard_price : 0}
+                  amount={
+                    selectedProduct
+                      ? (selectedProduct.sale_price !== undefined && selectedProduct.sale_price !== null && selectedProduct.sale_price > 0
+                          ? selectedProduct.sale_price
+                          : selectedProduct.standard_price)
+                      : 0
+                  }
                   assignedBayNo={selectedBayNo}
                   assignedBayNos={selectedBayNos}
                   assignedLockerNo={selectedLockerNo}
@@ -2188,6 +2311,64 @@ export default function KioskApp() {
             >
               확인 및 닫기
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ⏰ 영업 마감시간 임박 단축 배정 승낙 모달 (SSOT) */}
+      {closingPromptModal && closingPromptModal.isVisible && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(12px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
+        }}>
+          <div style={{
+            background: '#ffffff', borderRadius: '28px', padding: '40px', maxWidth: '560px', width: '100%',
+            textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)', border: '2px solid #f59e0b'
+          }}>
+            <div style={{
+              width: '72px', height: '72px', borderRadius: '50%', background: 'rgba(245, 158, 11, 0.15)',
+              color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 20px', border: '1px solid rgba(245, 158, 11, 0.3)'
+            }}>
+              <Clock style={{ width: '40px', height: '40px' }} />
+            </div>
+            <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#111827', marginBottom: '16px', letterSpacing: '-0.5px' }}>
+              ⏰ 영업 마감 이용시간 안내
+            </h3>
+            <p style={{ fontSize: '19px', color: '#374151', lineHeight: 1.6, marginBottom: '20px', fontWeight: 600, whiteSpace: 'pre-line' }}>
+              {closingPromptModal.message || `영업 마감시각(${closingPromptModal.closeTime})까지 이용 가능한 시간은 [${closingPromptModal.maxMin}분]입니다.\n\n${closingPromptModal.maxMin}분으로 단축하여 배정을 진행하시겠습니까?`}
+            </p>
+            {closingPromptModal.noticeText && (
+              <div style={{
+                padding: '14px 18px', background: '#fef3c7', borderRadius: '14px',
+                marginBottom: '28px', fontSize: '14px', color: '#92400e', fontWeight: 600,
+                border: '1px solid #fde68a', textAlign: 'center'
+              }}>
+                {closingPromptModal.noticeText}
+              </div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              <button
+                onClick={closingPromptModal.onCancel}
+                style={{
+                  padding: '18px', borderRadius: '16px', background: '#e5e7eb', color: '#374151',
+                  fontSize: '18px', fontWeight: 800, border: 'none', cursor: 'pointer'
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={closingPromptModal.onConfirm}
+                style={{
+                  padding: '18px', borderRadius: '16px', background: '#d97706', color: '#ffffff',
+                  fontSize: '18px', fontWeight: 900, border: 'none', cursor: 'pointer',
+                  boxShadow: '0 10px 20px rgba(217, 119, 6, 0.3)'
+                }}
+              >
+                {closingPromptModal.maxMin}분으로 배정 진행
+              </button>
+            </div>
           </div>
         </div>
       )}

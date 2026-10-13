@@ -133,10 +133,22 @@ export interface Product {
   prod_nm: string;
   standard_price: number;
   sale_price?: number;
-  logic_type: 'MEMBERSHIP' | 'LESSON' | 'RETAIL' | 'FACILITY' | 'RENTAL' | string;
+  logic_type: 'MEMBERSHIP' | 'PERIOD' | 'COUNT' | 'DAILY' | 'LESSON' | 'RETAIL' | 'FACILITY' | 'RENTAL' | string;
   duration_min?: number;
   days?: number;
+  total_count?: number;
   res_id?: string;
+  access_rules?: Record<string, any> | null;
+  rules_detail?: Record<string, any> | null;
+  meta_data?: {
+    display_nm?: string;
+    badges?: string[];
+    pos_button?: {
+      badge?: string;
+      color?: string;
+    };
+    [key: string]: any;
+  } | null;
 }
 
 export interface KioskMasterResponse {
@@ -232,7 +244,7 @@ const initializeEdgeDB = () => {
   if (!localStorage.getItem('LM_STORE_INFO') || localStorage.getItem('LM_STORE_INFO') === '{}') {
     localStorage.setItem('LM_STORE_INFO', JSON.stringify({
       store_cd: STORE_CODE,
-      store_nm: '로컬마스터 강남 1호점 (체험관)',
+      store_nm: '골포스 강남 1호점 (체험관)',
       business_no: '721-81-04039',
       ceo_name: '대표이사',
       address: '서울특별시 강남구 테헤란로 123',
@@ -686,7 +698,7 @@ class HybridAPIClient {
     // Offline Fallback
     const cached = JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}');
     return {
-      store_nm: cached.store_nm || '로컬마스터 강남 1호점 (체험관)',
+      store_nm: cached.store_nm || '골포스 강남 1호점 (체험관)',
       checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED',
       address: cached.address || '서울특별시 강남구 테헤란로 123',
       tel: cached.phone_no || cached.tel || '1566-8705',
@@ -1082,7 +1094,23 @@ class HybridAPIClient {
     paymentApproval?: Partial<CardApprovalResult>,
     couponNo?: string,
     discountAmount?: number
-  ): Promise<{ success: boolean; res_id?: string; message: string; hardware_success?: boolean; start_time?: string; end_time?: string; is_chained?: boolean }> {
+  ): Promise<{ 
+    success: boolean; 
+    res_id?: string; 
+    message: string; 
+    hardware_success?: boolean; 
+    start_time?: string; 
+    end_time?: string; 
+    is_chained?: boolean;
+    closingPrompt?: {
+      code: string;
+      max_available_min: number;
+      total_gap_min?: number;
+      prepare_min?: number;
+      close_time: string;
+      message: string;
+    };
+  }> {
     const isConnected = await this.checkConnection();
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
@@ -1146,13 +1174,38 @@ class HybridAPIClient {
           };
         } else {
           const errData = await res.json().catch(() => ({ detail: `HTTP ${res.status} 오류가 발생했습니다.` }));
-          let errMsg: string;
-          if (errData.detail && typeof errData.detail === 'object') {
-            errMsg = String(errData.detail.message || errData.detail.detail || JSON.stringify(errData.detail));
-          } else {
+          let errMsg: string = '';
+          let closingPromptData = undefined;
+
+          // CLOSING_TRUNCATE_PROMPT 응답 파싱
+          if (typeof errData.detail === 'string') {
+            try {
+              const parsed = JSON.parse(errData.detail);
+              if (parsed && parsed.code === 'CLOSING_TRUNCATE_PROMPT') {
+                closingPromptData = parsed;
+                errMsg = parsed.message;
+              }
+            } catch {
+              // 일반 문자열 detail
+            }
+          } else if (errData.detail && typeof errData.detail === 'object') {
+            if (errData.detail.code === 'CLOSING_TRUNCATE_PROMPT') {
+              closingPromptData = errData.detail;
+              errMsg = errData.detail.message;
+            } else {
+              errMsg = String(errData.detail.message || errData.detail.detail || JSON.stringify(errData.detail));
+            }
+          }
+          
+          if (!errMsg) {
             errMsg = String(errData.detail || errData.message || `타석 배정에 실패했습니다. (코드: ${res.status})`);
           }
-          return { success: false, message: errMsg };
+
+          return { 
+            success: false, 
+            message: errMsg,
+            closingPrompt: closingPromptData
+          };
         }
       } catch (err) {
         console.error('[BUG-1 FIX] 통합 배정 API 호출 실패, Edge DB 폴백:', err);

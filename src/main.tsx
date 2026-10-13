@@ -9,7 +9,7 @@ function initDemoEnvironment() {
   if (!localStorage.getItem('LM_STORE_INFO')) {
     localStorage.setItem('LM_STORE_INFO', JSON.stringify({
       store_cd: 'H01-SE-001',
-      store_nm: '로컬마스터 강남 1호점 (체험관)',
+      store_nm: '골포스 강남 1호점 (체험관)',
       business_no: '721-81-04039',
       ceo_name: '대표이사',
       address: '서울특별시 강남구 테헤란로 123',

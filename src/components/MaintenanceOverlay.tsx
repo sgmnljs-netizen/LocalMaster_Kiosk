@@ -104,7 +104,7 @@ export const MaintenanceOverlay: React.FC<MaintenanceOverlayProps> = ({
         </div>
 
         <div style={{ paddingTop: '32px', fontSize: '12px', color: '#4b5563', fontFamily: 'monospace' }}>
-          LocalMaster Kiosk Engine v0.3.0
+          GOLFOS Kiosk Engine v0.3.0
         </div>
       </div>
     </div>
