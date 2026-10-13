@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { CreditCard, Printer, ShieldAlert, Sparkles, ShieldCheck, RefreshCw } from 'lucide-react';
+import { CreditCard, Printer, ShieldAlert, Sparkles, ShieldCheck, RefreshCw, Ticket, CheckCircle2 } from 'lucide-react';
 import { api, STORE_CODE } from '../services/api';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { useKioskVanPayment } from '../hooks/useKioskVanPayment';
@@ -19,7 +19,16 @@ interface PaymentTerminalProps {
   memberPoint?: number;
   discountRate?: number;
   gradeName?: string;
-  onPaymentSuccess: (payResult?: { apprNo: string; tradeDate: string; amount: number; usedPoints?: number; discountAmount?: number; cardApproval?: CardApprovalResult }) => void;
+  onPaymentSuccess: (payResult?: { 
+    apprNo: string; 
+    tradeDate: string; 
+    amount: number; 
+    usedPoints?: number; 
+    discountAmount?: number; 
+    couponNo?: string;
+    couponDiscount?: number;
+    cardApproval?: CardApprovalResult 
+  }) => void;
   onCancel: () => void;
 }
 
@@ -50,10 +59,136 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const isPayRequested = useRef(false);
 
-  // 등급 할인 및 최종 카드 결제 금액 실시간 산출
+  // 🎟️ 쿠폰 관련 상태
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+  const [couponError, setCouponError] = useState('');
+  const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
+
+  // 등급 할인 및 쿠폰 할인 실시간 산출
   const gradeDiscountAmt = discountRate > 0 ? Math.round(amount * (discountRate / 100)) : 0;
-  const targetPayAmt = Math.max(0, amount - gradeDiscountAmt);
+  
+  const isPercentCoupon = appliedCoupon && (appliedCoupon.benefit_type === 'RATE' || appliedCoupon.coupon_type === 'PERCENT');
+  const couponBenefitVal = appliedCoupon ? (appliedCoupon.benefit_val ?? (isPercentCoupon ? appliedCoupon.discount_rate : appliedCoupon.discount_amount) ?? 0) : 0;
+
+  const couponDiscountAmt = appliedCoupon ? (
+    isPercentCoupon
+      ? Math.min(
+          Math.round(amount * (couponBenefitVal / 100)),
+          appliedCoupon.max_discount_amt && appliedCoupon.max_discount_amt > 0 ? appliedCoupon.max_discount_amt : 999999999
+        )
+      : Math.min(couponBenefitVal, amount)
+  ) : 0;
+
+  const targetPayAmt = Math.max(0, amount - gradeDiscountAmt - couponDiscountAmt);
   const finalCardAmt = Math.max(0, targetPayAmt - usedPoints);
+
+  // 🎟️ 쿠폰 검증 핸들러
+  const handleVerifyCoupon = async (codeToVerify?: string) => {
+    const targetCode = (codeToVerify || couponCode).trim();
+    if (!targetCode) {
+      setCouponError('쿠폰 번호를 입력해 주세요.');
+      return;
+    }
+    setCouponError('');
+    setIsVerifyingCoupon(true);
+    try {
+      let coupon: any;
+      try {
+        coupon = await api.verifyCoupon(targetCode);
+      } catch (verifyErr: any) {
+        // 🎯 일반 쿠폰 조회가 실패한 경우, 시리얼 쿠폰 자동 등록 시도
+        if (memberNo) {
+          try {
+            const serialRes = await api.registerSerialCoupon(targetCode, memberNo);
+            if (serialRes.success || serialRes.coupon_no) {
+              coupon = serialRes;
+            }
+          } catch (serialErr: any) {
+            throw new Error(serialErr.message || verifyErr.message);
+          }
+        } else {
+          if (!targetCode.startsWith('CPN-')) {
+            throw new Error('시리얼 쿠폰은 회원 전용입니다. 회원 로그인 후 이용해 주세요.');
+          }
+          throw verifyErr;
+        }
+      }
+
+      if (!coupon) {
+        throw new Error('유효하지 않은 쿠폰입니다.');
+      }
+
+      if (coupon.min_order_amt && amount < coupon.min_order_amt) {
+        throw new Error(`최소 주문 금액(${coupon.min_order_amt.toLocaleString()}원) 이상일 때만 사용 가능합니다.`);
+      }
+      if (coupon.target_categories && Array.isArray(coupon.target_categories) && coupon.target_categories.length > 0) {
+        const allowedCategories = assignedLockerNo 
+          ? ['LOCKER', 'RENTAL', 'ALL'] 
+          : (assignedBayNo 
+              ? ['DAILY', 'BAY', 'ALL'] 
+              : ['PERIOD', 'COUNT', 'PASS', 'BAY', 'ALL']);
+        
+        const isMatched = coupon.target_categories.some((cat: string) => allowedCategories.includes(cat));
+        if (!isMatched) {
+          const catLabels: Record<string, string> = {
+            PERIOD: '정액(회원)권',
+            COUNT: '쿠폰(횟수)권',
+            DAILY: '일일권',
+            LESSON: '레슨',
+            LOCKER: '라카',
+            GOODS: '매장상품',
+            BAY: '타석전체',
+          };
+          const targetLabels = coupon.target_categories.map((c: string) => catLabels[c] || c).join(', ');
+          throw new Error(`해당 쿠폰은 [${targetLabels}] 전용 쿠폰입니다.`);
+        }
+      }
+      setAppliedCoupon(coupon);
+      setCouponCode('');
+      setCouponError('');
+    } catch (err: any) {
+      setAppliedCoupon(null);
+      setCouponError(err.message || '유효하지 않거나 이미 사용된 쿠폰입니다.');
+    } finally {
+      setIsVerifyingCoupon(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError('');
+  };
+
+  // 📟 USB HID 바코드 스캐너 리스너 (키보드 쐐기형 스캔 감지)
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTime = Date.now();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 인풋 요소에 포커스 중일 때는 기본 입력 허용
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+
+      const now = Date.now();
+      if (now - lastKeyTime > 120) {
+        buffer = '';
+      }
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        const scannedCode = buffer.trim();
+        buffer = '';
+        if (scannedCode.length >= 2) {
+          handleVerifyCoupon(scannedCode);
+        }
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // 포인트 전액 사용 퀵 핸들러 (가맹점 최대 한도 적용)
   const handleUseAllPoints = () => {
@@ -75,22 +210,26 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     if (isPayRequested.current) return;
     isPayRequested.current = true;
 
+    const totalDiscount = gradeDiscountAmt + couponDiscountAmt;
+
     if (actualPayAmt === 0) {
       setPayStep('PRINT_RECEIPT');
       const now = new Date();
       const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
         `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-      const generatedAppNo = `POINT-${String(Math.floor(10000000 + Math.random() * 90000000))}`;
+      const generatedAppNo = `FREE-${String(Math.floor(10000000 + Math.random() * 90000000))}`;
       setReceiptDate(generatedTradeDate);
       setAppNo(generatedAppNo);
-      setCardIssuer('포인트 전액 결제');
-      setMaskedCard('100% 포인트 차감');
+      setCardIssuer(appliedCoupon ? '할인쿠폰 감면 결제' : '포인트 전액 결제');
+      setMaskedCard(appliedCoupon ? '100% 할인 적용' : '100% 포인트 차감');
       onPaymentSuccess({ 
         apprNo: generatedAppNo, 
         tradeDate: generatedTradeDate, 
         amount: 0,
         usedPoints: ptsUsed,
-        discountAmount: gradeDiscountAmt 
+        discountAmount: totalDiscount,
+        couponNo: appliedCoupon?.coupon_no,
+        couponDiscount: couponDiscountAmt
       });
       return;
     }
@@ -127,7 +266,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           tradeDate: res.approved_at, 
           amount: actualPayAmt, 
           usedPoints: ptsUsed,
-          discountAmount: gradeDiscountAmt,
+          discountAmount: totalDiscount,
+          couponNo: appliedCoupon?.coupon_no,
+          couponDiscount: couponDiscountAmt,
           cardApproval: res 
         });
       } catch (err: any) {
@@ -154,12 +295,12 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       setErrorMsg(res.error_message || '결제가 승인되지 않았습니다. 카드를 다시 확인해 주세요.');
       isPayRequested.current = false;
     }
-  }, [productName, memberName, resId, gradeDiscountAmt, startPayment, onPaymentSuccess]);
+  }, [productName, memberName, resId, gradeDiscountAmt, couponDiscountAmt, appliedCoupon, startPayment, onPaymentSuccess]);
 
   // 포인트 보유 회원의 경우 사용자가 포인트를 선택하고 결제를 시작할 수 있도록 제어
   const [isReadyToPay, setIsReadyToPay] = useState<boolean>(!memberNo || memberPoint === 0);
 
-  // 비회원이거나 포인트가 0인 경우 기존처럼 바로 카드 결제 요청
+  // 비회원이거나 포인트가 0인 경우 자동 결제 시작
   useEffect(() => {
     if (!memberNo || memberPoint === 0) {
       handleExecutePayment(finalCardAmt, 0);
@@ -240,6 +381,14 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               </div>
             )}
 
+            {/* 🎟️ 쿠폰 할인 행 (쿠폰 적용 시 노출) */}
+            {couponDiscountAmt > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '15px', color: '#7c3aed' }}>
+                <span style={{ fontWeight: 700 }}>🎟️ 쿠폰 할인 ({appliedCoupon?.coupon_nm || appliedCoupon?.coupon_name || appliedCoupon?.coupon_no})</span>
+                <strong style={{ fontWeight: 800 }}>- {couponDiscountAmt.toLocaleString()} 원</strong>
+              </div>
+            )}
+
             {/* 포인트 사용 행 (포인트 차감 시 노출) */}
             {usedPoints > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '15px', color: '#0284c7' }}>
@@ -254,6 +403,76 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 {finalCardAmt.toLocaleString()} 원
               </strong>
             </div>
+          </div>
+
+          {/* 🎟️ [할인쿠폰 등록 패널] (바코드 스캔 또는 직접 입력) */}
+          <div style={{ width: '100%', padding: '16px 20px', background: '#f5f3ff', borderRadius: '20px', border: '1.5px solid #ddd6fe', display: 'flex', flexDirection: 'column', gap: '10px', boxSizing: 'border-box' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '14px', fontWeight: 800, color: '#6d28d9', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Ticket size={18} /> 할인쿠폰 등록
+              </span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#7c3aed' }}>
+                바코드 스캔 또는 쿠폰번호 입력
+              </span>
+            </div>
+
+            {appliedCoupon ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '12px 16px', borderRadius: '14px', border: '1.5px solid #c4b5fd' }}>
+                <div>
+                  <div style={{ fontSize: '15px', fontWeight: 800, color: '#5b21b6' }}>
+                    {appliedCoupon.coupon_nm || appliedCoupon.coupon_name || '할인 쿠폰'} ({appliedCoupon.coupon_no})
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#7c3aed', marginTop: '2px', fontWeight: 600 }}>
+                    {isPercentCoupon
+                      ? `${couponBenefitVal}% 할인${appliedCoupon.max_discount_amt && appliedCoupon.max_discount_amt > 0 ? ` (최대 ${appliedCoupon.max_discount_amt.toLocaleString()}원)` : ''}`
+                      : `${couponBenefitVal.toLocaleString()}원 즉시 할인`}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRemoveCoupon}
+                  style={{ background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', borderRadius: '8px', padding: '6px 14px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}
+                >
+                  취소
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={couponCode}
+                  onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => e.key === 'Enter' && handleVerifyCoupon()}
+                  placeholder="쿠폰 번호 또는 시리얼 코드 입력"
+                  style={{ flex: 1, height: '44px', padding: '0 14px', borderRadius: '12px', border: '1.5px solid #c4b5fd', fontSize: '15px', fontWeight: 600, outline: 'none', background: '#ffffff' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleVerifyCoupon()}
+                  disabled={isVerifyingCoupon || !couponCode.trim()}
+                  style={{
+                    padding: '0 20px',
+                    height: '44px',
+                    borderRadius: '12px',
+                    background: couponCode.trim() ? '#7c3aed' : '#c4b5fd',
+                    color: '#ffffff',
+                    fontSize: '14px',
+                    fontWeight: 800,
+                    border: 'none',
+                    cursor: couponCode.trim() ? 'pointer' : 'default',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {isVerifyingCoupon ? '확인 중...' : '적용'}
+                </button>
+              </div>
+            )}
+
+            {couponError && (
+              <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: 700, paddingLeft: '4px' }}>
+                ⚠️ {couponError}
+              </div>
+            )}
           </div>
 
           {/* 👆 [원터치 포인트 사용 패널] (회원 인증 및 포인트 보유 시) */}
@@ -530,9 +749,27 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                       </>
                     );
                   })()}
+                  {gradeDiscountAmt > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#047857' }}>
+                      <span>등급할인:</span>
+                      <span>-{gradeDiscountAmt.toLocaleString()} 원</span>
+                    </div>
+                  )}
+                  {couponDiscountAmt > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6d28d9' }}>
+                      <span>쿠폰할인:</span>
+                      <span>-{couponDiscountAmt.toLocaleString()} 원</span>
+                    </div>
+                  )}
+                  {usedPoints > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0284c7' }}>
+                      <span>포인트사용:</span>
+                      <span>-{usedPoints.toLocaleString()} P</span>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: 800, borderTop: '1px solid #000', borderBottom: '1px solid #000', padding: '6px 0' }}>
-                    <span>합계금액:</span>
-                    <span>{amount.toLocaleString()} 원</span>
+                    <span>실결제금액:</span>
+                    <span>{finalCardAmt.toLocaleString()} 원</span>
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>

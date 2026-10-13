@@ -16,7 +16,10 @@ export default function EnvironmentNoticeWidget({ noticeText: initialNotice, wea
       try {
         const info = await api.getStoreInfo();
         if (!initialNotice) {
-          const metaNotice = info.meta_data?.notice || info.meta_data?.announcement;
+          const metaNotice =
+            info.meta_data?.operation?.notice ||
+            info.meta_data?.notice ||
+            info.meta_data?.announcement;
           if (metaNotice) {
             setNotice(metaNotice);
           } else if (info.store_nm) {

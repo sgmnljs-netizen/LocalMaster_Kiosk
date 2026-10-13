@@ -837,7 +837,16 @@ export default function KioskApp() {
     }
   };
 
-  const handlePaymentCompleted = async (payResult?: { apprNo: string; tradeDate: string; amount: number; cardApproval?: CardApprovalResult }) => {
+  const handlePaymentCompleted = async (payResult?: { 
+    apprNo: string; 
+    tradeDate: string; 
+    amount: number; 
+    usedPoints?: number;
+    discountAmount?: number;
+    couponNo?: string;
+    couponDiscount?: number;
+    cardApproval?: CardApprovalResult 
+  }) => {
     if (isAllocatingRef.current) return;
     isAllocatingRef.current = true;
     showToast('모든 처리가 안전하게 완료되었습니다. 이용권을 챙겨주세요!');
@@ -863,8 +872,10 @@ export default function KioskApp() {
             authMember?.hp || '010-0000-0000',
             undefined,       // member_item_id — 일일권은 null
             'CARD',          // [BUG-3 FIX] payment_method 명시
-            actualPaidAmount, // [SSOT] 등급 할인 반영 실제 결제 금액 전달
-            payResult?.cardApproval          // [VAN Financial Integration] 승인 메타데이터 전달
+            actualPaidAmount, // [SSOT] 등급 할인 및 쿠폰 할인 반영 실제 결제 금액 전달
+            payResult?.cardApproval,          // [VAN Financial Integration] 승인 메타데이터 전달
+            payResult?.couponNo,              // [COUPON] 적용 쿠폰 번호
+            payResult?.couponDiscount         // [COUPON] 쿠폰 할인액
           );
           if (allocResult) {
             if (!allocResult.success) {
@@ -998,7 +1009,9 @@ export default function KioskApp() {
             selectedProduct.prod_cd, 
             actualProductPaid,
             payResult?.apprNo,
-            payResult?.cardApproval?.van_tr_no
+            payResult?.cardApproval?.van_tr_no,
+            payResult?.couponNo,
+            payResult?.couponDiscount
           );
           if (res && res.success === false) {
             throw new Error(res.message || '회원권 전산 등록에 실패했습니다.');
@@ -1034,12 +1047,15 @@ export default function KioskApp() {
       // 라카 연장/대여 결제 완료 시점에 반영
       if (purpose === 'EXTEND_LOCKER' && selectedLockerNo && selectedProduct && authMember) {
         hasCustomModal = true;
+        const actualLockerPaid = payResult?.cardApproval?.amount || payResult?.amount || (selectedProduct.standard_price - (payResult?.couponDiscount || 0));
         try {
           const res: any = await api.extendLocker(
             selectedLockerNo, 
             selectedProduct.days || 30, 
-            selectedProduct.standard_price,
-            currentHoldResId || undefined
+            actualLockerPaid,
+            currentHoldResId || undefined,
+            payResult?.couponNo,
+            payResult?.couponDiscount
           );
           if (res && res.success === false) {
             throw new Error(res.message || '라카 연장 전산 등록에 실패했습니다.');
@@ -1048,7 +1064,7 @@ export default function KioskApp() {
             memberName: authMember.member_name,
             memberHp: authMember.hp,
             productName: `${selectedLockerNo}번 개인 사물함 (라카 ${selectedProduct.days || 30}일 대여)`,
-            amount: payResult?.amount || selectedProduct.standard_price,
+            amount: actualLockerPaid,
             apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
             tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
             purchaseType: 'LOCKER'
@@ -1058,7 +1074,7 @@ export default function KioskApp() {
           hasCustomModal = false;
           let cancelInfo = '';
           if (payResult?.cardApproval) {
-            const cancelRes = await executeAutoReversal(payResult.cardApproval, selectedProduct.standard_price, err?.message || '라카 연장 등록 실패');
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualLockerPaid, err?.message || '라카 연장 등록 실패');
             cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
           }
           showErrorModal(
@@ -1454,7 +1470,7 @@ export default function KioskApp() {
                   }
                 }}
                 onSignUp={() => setStep('MEMBER_REGISTER')}
-                onCheckin={checkinPolicy !== 'DISABLED' ? () => {
+                onCheckin={checkinPolicy === 'CHECKIN_REQUIRED' ? () => {
                   setPurpose('CHECKIN_RESERVATION');
                   setStep('MEMBER_AUTH');
                 } : undefined}

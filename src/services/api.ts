@@ -673,7 +673,7 @@ class HybridAPIClient {
             store_nm: data.store_nm || 'SGM Golf Academy',
             checkin_policy: data.checkin_policy || 'CHECKIN_REQUIRED',
             address: data.address || '서울특별시 광진구 워커힐로 177',
-            tel: data.tel || '02-450-4500',
+            tel: data.phone_no || data.tel || '02-450-4500',
             logo_url: data.logo_url || undefined,
             photo_url: data.photo_url || undefined,
             meta_data: data.meta_data
@@ -689,7 +689,7 @@ class HybridAPIClient {
       store_nm: cached.store_nm || '로컬마스터 강남 1호점 (체험관)',
       checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED',
       address: cached.address || '서울특별시 강남구 테헤란로 123',
-      tel: cached.tel || '1566-8705',
+      tel: cached.phone_no || cached.tel || '1566-8705',
       logo_url: cached.logo_url || undefined,
       photo_url: cached.photo_url || undefined,
       meta_data: cached.meta_data || { integration: { face_terminal_yn: true } }
@@ -1000,6 +1000,75 @@ class HybridAPIClient {
     localStorage.setItem('LM_BAYS', JSON.stringify(bays));
   }
 
+  // 쿠폰 실시간 검증 API
+  async verifyCoupon(couponNo: string): Promise<{
+    coupon_no: string;
+    coupon_name?: string;
+    coupon_nm?: string;
+    coupon_type?: 'PERCENT' | 'FIXED' | string;
+    benefit_type?: 'RATE' | 'FIX' | string;
+    benefit_val?: number;
+    discount_rate?: number;
+    discount_amount?: number;
+    min_order_amt?: number;
+    max_discount_amt?: number;
+    target_categories?: string[];
+    status?: string;
+    status_cd?: string;
+    valid_until?: string;
+    valid_to?: string;
+    valid_from?: string;
+  }> {
+    const cleanBase = BASE_URL.replace(/\/api$/, '');
+    const res = await fetch(`${cleanBase}/api/marketing/coupons/verify/${encodeURIComponent(couponNo)}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-store-cd': STORE_CODE
+      }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || '존재하지 않거나 유효하지 않은 쿠폰입니다.');
+    }
+    return res.json();
+  }
+
+  // 시리얼 쿠폰 등록 및 지갑 적재 API
+  async registerSerialCoupon(serialCode: string, memberNo: string): Promise<{
+    coupon_no: string;
+    coupon_name?: string;
+    coupon_nm?: string;
+    benefit_type?: 'RATE' | 'FIX' | string;
+    benefit_val?: number;
+    discount_rate?: number;
+    discount_amount?: number;
+    min_order_amt?: number;
+    max_discount_amt?: number;
+    target_categories?: string[];
+    valid_to?: string;
+    valid_from?: string;
+    success?: boolean;
+    message?: string;
+  }> {
+    const cleanBase = BASE_URL.replace(/\/api$/, '');
+    const res = await fetch(`${cleanBase}/api/marketing/coupons/register-serial`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-store-cd': STORE_CODE
+      },
+      body: JSON.stringify({
+        serial_code: serialCode.trim(),
+        member_no: memberNo
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || '시리얼 쿠폰 등록에 실패했습니다.');
+    }
+    return res.json();
+  }
+
   // 5. 타석 최종 배정 완료 — [BUG-1·2·3 FIX] 통합 API 단일 호출 (/v1/kiosk/allocate-bay)
   async allocateBay(
     bayNo: number, 
@@ -1010,7 +1079,9 @@ class HybridAPIClient {
     memberItemId?: number | string,
     paymentMethod: 'TICKET' | 'CARD' = 'TICKET',
     amount: number = 0,
-    paymentApproval?: Partial<CardApprovalResult>
+    paymentApproval?: Partial<CardApprovalResult>,
+    couponNo?: string,
+    discountAmount?: number
   ): Promise<{ success: boolean; res_id?: string; message: string; hardware_success?: boolean; start_time?: string; end_time?: string; is_chained?: boolean }> {
     const isConnected = await this.checkConnection();
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -1035,6 +1106,8 @@ class HybridAPIClient {
             payment_method: paymentMethod,     // TICKET(회원권) | CARD(일일권)
             terminal_id: this.terminalId,      // 선점 락 검증 필수값
             amount: amount,                    // 일일권 결제 금액
+            coupon_no: couponNo || null,       // 적용 쿠폰 번호
+            discount_amount: discountAmount || 0, // 쿠폰 할인액
             approval_no: paymentApproval?.auth_code || null,
             issuer_name: paymentApproval?.issuer_name || null,
             acquirer_name: paymentApproval?.acquirer_name || null,
@@ -1244,7 +1317,9 @@ class HybridAPIClient {
     prodCd: string, 
     payAmt: number,
     apprNo?: string,
-    vanTrNo?: string
+    vanTrNo?: string,
+    couponNo?: string,
+    discountAmount?: number
   ): Promise<{ success: boolean; message: string; sale_id?: string; item_id?: number }> {
     const products = await this.getProducts();
     const targetProd = products.find(p => p.prod_cd === prodCd);
@@ -1265,7 +1340,9 @@ class HybridAPIClient {
             pay_method: 'CARD',
             store_cd: STORE_CODE,
             appr_no: apprNo,
-            van_tr_no: vanTrNo
+            van_tr_no: vanTrNo,
+            coupon_no: couponNo || null,
+            discount_amount: discountAmount || 0
           })
         });
         if (res.ok) {
@@ -1399,7 +1476,9 @@ class HybridAPIClient {
     lockerNo: number, 
     extendDays: number, 
     payAmt: number,
-    resId?: string
+    resId?: string,
+    couponNo?: string,
+    couponDiscount?: number
   ): Promise<{ success: boolean; message: string }> {
     // [Online Sync] 백엔드 HOLD 예약 결제 확정 웹훅 전송
     const isConnected = await this.checkConnection();
@@ -1412,7 +1491,9 @@ class HybridAPIClient {
             res_id: resId,
             amount: payAmt,
             payment_method: 'CARD',
-            terminal_id: this.getTerminalId()
+            terminal_id: this.getTerminalId(),
+            coupon_no: couponNo,
+            coupon_discount: couponDiscount
           })
         });
         if (!webhookRes.ok) {
@@ -1524,7 +1605,8 @@ class HybridAPIClient {
     faceRegistered: boolean = false,
     faceVectorId: string | null = null,
     gender: 'M' | 'F' = 'M',
-    marketingAgree: boolean = false
+    marketingAgree: boolean = false,
+    referrerHp: string | null = null
   ): Promise<{ success: boolean; member?: Member; message: string }> {
     const isConnected = await this.checkConnection();
     const cleanHp = hp.replace(/[^0-9]/g, '');
@@ -1566,7 +1648,8 @@ class HybridAPIClient {
             store_cd: STORE_CODE,
             gender: gender,
             face_auth_yn: faceRegistered ? 'Y' : 'N',
-            marketing_agree_yn: marketingAgree ? 'Y' : 'N'
+            marketing_agree_yn: marketingAgree ? 'Y' : 'N',
+            referrer_hp: referrerHp || undefined
           })
         });
         if (res.ok) {
