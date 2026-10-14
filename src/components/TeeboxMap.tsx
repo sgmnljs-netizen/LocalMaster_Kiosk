@@ -150,18 +150,19 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     }
   }, [selectedBayNo, onBaySelected]);
 
-  // 🔄 [구역 카테고리 동적 격리] 파3(PAR3) 및 룸(ROOM) 구역 타석은 일반 연습타석 배치도에서 전면 동적 제외
+  // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출
   const floorBays = bays.filter(b => {
-    const zCode = (b as any).zone_code || (b as any).zoneCode || '';
-    const isPracticeZone = zCode !== 'PAR3' && zCode !== 'ROOM';
-    if (!isPracticeZone) return false;
+    const zCode = String((b as any).zone_code || (b as any).zoneCode || '');
+    if (zCode.toUpperCase() === 'PAR3') return false;
 
     if (selectedZoneIds && selectedZoneIds.length > 0) {
       const match = selectedZoneIds.some(zid => 
         String(zid).toUpperCase() === zCode.toUpperCase() || 
-        String(zid) === String((b as any).category_id)
+        String(zid).toUpperCase() === String((b as any).category_id || '').toUpperCase()
       );
       if (!match) return false;
+    } else if (zCode.toUpperCase() === 'ROOM') {
+      return false;
     }
 
     return b.floor_no === activeFloor;

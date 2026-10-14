@@ -124,6 +124,7 @@ export default function KioskMainDashboard({
           border: '1px solid rgba(52, 211, 153, 0.4)',
           badgeText: '⛳ BEST 야외 코스'
         };
+      case 'PURCHASE_PRODUCT':
       case 'PRODUCTS':
       case 'MEMBERSHIP':
         return {
@@ -139,6 +140,7 @@ export default function KioskMainDashboard({
           border: '1px solid rgba(217, 119, 6, 0.15)',
           badgeText: ''
         };
+      case 'MOVE_BAY':
       case 'CHANGE_BAY':
       default:
         return {
@@ -393,7 +395,7 @@ export default function KioskMainDashboard({
                           : '0 2px 6px rgba(0, 0, 0, 0.04), inset 0 1px 1px rgba(255, 255, 255, 0.6)'
                       }}
                     >
-                      <IconComp size={22} strokeWidth={2.4} style={{ color: '#ffffff' }} />
+                      <IconComp size={22} strokeWidth={2.4} style={{ color: isPar3 ? '#ffffff' : theme.iconColor }} />
                     </div>
 
                     {isPar3 ? (
@@ -490,85 +492,87 @@ export default function KioskMainDashboard({
           </div>
         )}
 
-        {/* Row 3: 하단 독립형 플로팅 신규 회원가입 배너 */}
-        <div 
-          className="animate-fade-up apple-card-hover"
-          onClick={() => signupMenu ? handleCardClick(signupMenu.menu_id, signupMenu.zone_ids || []) : onSignUp()}
-          style={{ 
-            animationDelay: '0.4s',
-            height: '96px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0 32px',
-            background: 'linear-gradient(145deg, #ffffff 0%, #fbfbfc 100%)',
-            borderRadius: '26px',
-            border: '1px solid rgba(0, 0, 0, 0.08)',
-            boxShadow: '0 10px 28px rgba(0, 0, 0, 0.035), inset 0 1px 1.5px rgba(255, 255, 255, 0.9), 0 1px 3px rgba(0, 0, 0, 0.04)',
-            cursor: 'pointer'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
-            <div 
-              style={{ 
-                width: '52px', 
-                height: '52px', 
-                borderRadius: '16px', 
-                background: 'linear-gradient(145deg, #f5f5f7 0%, #e5e5ea 100%)', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                border: '1px solid rgba(0, 0, 0, 0.06)',
-                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04), inset 0 1px 1px rgba(255, 255, 255, 0.8)'
-              }}
-            >
-              <UserPlus size={26} strokeWidth={2.4} style={{ color: '#1d1d1f' }} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
-                <span style={{ fontSize: '20px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
-                  {lang === 'KO' ? '신규 회원이신가요?' : 'New Member?'}
-                </span>
-                <span 
-                  style={{ 
-                    fontSize: '11px', 
-                    fontWeight: 900, 
-                    color: '#0071e3', 
-                    background: 'rgba(0, 113, 227, 0.08)', 
-                    padding: '3px 8px', 
-                    borderRadius: '999px',
-                    border: '1px solid rgba(0, 113, 227, 0.15)'
-                  }}
-                >
-                  {lang === 'KO' ? '⚡ 3초 간편등록' : 'Quick Join'}
-                </span>
-              </div>
-              <p style={{ fontSize: '14px', color: '#86868b', fontWeight: 600, margin: 0 }}>
-                {lang === 'KO' ? '휴대폰 번호로 3초 만에 간편 등록 후 즉시 타석을 배정받으세요.' : 'Register in 3 seconds to assign your teebox.'}
-              </p>
-            </div>
-          </div>
-
+        {/* Row 3: 하단 독립형 플로팅 신규 회원가입 배너 (is_active ON일 때만 노출, 메뉴명/설명 동적 바인딩) */}
+        {signupMenu && (
           <div 
+            className="animate-fade-up apple-card-hover"
+            onClick={() => handleCardClick(signupMenu.menu_id, signupMenu.zone_ids || [])}
             style={{ 
-              height: '48px',
-              padding: '0 22px',
-              borderRadius: '999px',
-              background: '#f5f5f7',
-              color: '#1d1d1f',
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '6px', 
-              fontWeight: 900, 
-              fontSize: '15px',
+              animationDelay: '0.4s',
+              height: '96px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '0 32px',
+              background: 'linear-gradient(145deg, #ffffff 0%, #fbfbfc 100%)',
+              borderRadius: '26px',
               border: '1px solid rgba(0, 0, 0, 0.08)',
-              boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04)'
+              boxShadow: '0 10px 28px rgba(0, 0, 0, 0.035), inset 0 1px 1.5px rgba(255, 255, 255, 0.9), 0 1px 3px rgba(0, 0, 0, 0.04)',
+              cursor: 'pointer'
             }}
           >
-            <span>{lang === 'KO' ? '회원가입 시작하기' : 'Sign Up'}</span>
-            <span style={{ fontSize: '16px', fontWeight: 900 }}>↗</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+              <div 
+                style={{ 
+                  width: '52px', 
+                  height: '52px', 
+                  borderRadius: '16px', 
+                  background: 'linear-gradient(145deg, #f5f5f7 0%, #e5e5ea 100%)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  border: '1px solid rgba(0, 0, 0, 0.06)',
+                  boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04), inset 0 1px 1px rgba(255, 255, 255, 0.8)'
+                }}
+              >
+                <UserPlus size={26} strokeWidth={2.4} style={{ color: '#1d1d1f' }} />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                  <span style={{ fontSize: '20px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
+                    {lang === 'KO' ? (signupMenu.menu_name || '신규 회원이신가요?') : 'New Member?'}
+                  </span>
+                  <span 
+                    style={{ 
+                      fontSize: '11px', 
+                      fontWeight: 900, 
+                      color: '#0071e3', 
+                      background: 'rgba(0, 113, 227, 0.08)', 
+                      padding: '3px 8px', 
+                      borderRadius: '999px',
+                      border: '1px solid rgba(0, 113, 227, 0.15)'
+                    }}
+                  >
+                    {lang === 'KO' ? '⚡ 3초 간편등록' : 'Quick Join'}
+                  </span>
+                </div>
+                <p style={{ fontSize: '14px', color: '#86868b', fontWeight: 600, margin: 0 }}>
+                  {lang === 'KO' ? (signupMenu.description || '휴대폰 번호로 3초 만에 간편 등록 후 즉시 타석을 배정받으세요.') : 'Register in 3 seconds to assign your teebox.'}
+                </p>
+              </div>
+            </div>
+
+            <div 
+              style={{ 
+                height: '48px',
+                padding: '0 22px',
+                borderRadius: '999px',
+                background: '#f5f5f7',
+                color: '#1d1d1f',
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontWeight: 900, 
+                fontSize: '15px',
+                border: '1px solid rgba(0, 0, 0, 0.08)',
+                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04)'
+              }}
+            >
+              <span>{lang === 'KO' ? '회원가입 시작하기' : 'Sign Up'}</span>
+              <span style={{ fontSize: '16px', fontWeight: 900 }}>↗</span>
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
     </div>

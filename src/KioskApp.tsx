@@ -220,8 +220,7 @@ export default function KioskApp() {
       (typeof window !== 'undefined' && (
         window.location.search.includes('demo=true') ||
         window.location.pathname.includes('/demo/') ||
-        window.location.hostname === 'segnet.co.kr' ||
-        window.location.hostname === 'localhost'
+        window.location.hostname === 'segnet.co.kr'
       ));
 
     const checkMw = async () => {
@@ -1840,6 +1839,7 @@ export default function KioskApp() {
                 memberNo={authMember?.member_no}
                 memberName={authMember?.member_name}
                 faceTerminalEnabled={faceTerminalEnabled}
+                selectedZoneIds={selectedZoneIds}
                 onBookingSelected={(prod) => {
                   setSelectedProduct(prod);
                   setStep('PAYMENT');

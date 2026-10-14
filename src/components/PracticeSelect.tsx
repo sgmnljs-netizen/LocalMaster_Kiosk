@@ -83,19 +83,19 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     };
   }, [selectedBayNo, selectedBayNos, allocMode]);
 
-  // 🔄 [구역 카테고리 동적 격리] 파3(PAR3) 및 룸(ROOM) 구역 타석은 연습타석배정 메뉴에서 전면 동적 제외
+  // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 커스텀 구역 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출
   const practiceBays = bays.filter(bay => {
-    const zCode = (bay as any).zone_code || (bay as any).zoneCode || '';
-    if (zCode === 'PAR3' || zCode === 'ROOM') return false;
+    const zCode = String((bay as any).zone_code || (bay as any).zoneCode || '');
+    if (zCode.toUpperCase() === 'PAR3') return false;
 
     if (selectedZoneIds && selectedZoneIds.length > 0) {
-      const match = selectedZoneIds.some(zid => 
+      return selectedZoneIds.some(zid => 
         String(zid).toUpperCase() === zCode.toUpperCase() || 
-        String(zid) === String((bay as any).category_id)
+        String(zid).toUpperCase() === String((bay as any).category_id || '').toUpperCase()
       );
-      if (!match) return false;
     }
 
+    if (zCode.toUpperCase() === 'ROOM') return false;
     return true;
   });
 
@@ -111,7 +111,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     if (floorList.length > 0 && !floorList.includes(activeFloor)) {
       setActiveFloor(floorList[0]);
     }
-  }, [bays]);
+  }, [bays, selectedZoneIds, floorList, activeFloor]);
 
   // 타석별 동반자 배정 허용 여부 체크 헬퍼
   const isCompanionAllowed = (bayObj: any) => {

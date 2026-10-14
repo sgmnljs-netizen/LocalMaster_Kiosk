@@ -10,6 +10,7 @@ interface Par3AllocationProps {
   memberNo?: string;
   memberName?: string;
   faceTerminalEnabled?: boolean;
+  selectedZoneIds?: (string | number)[];
   onBookingSelected: (prod: Product) => void;
   onCancel: () => void;
 }
@@ -31,6 +32,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   memberNo,
   memberName,
   faceTerminalEnabled = true,
+  selectedZoneIds = [],
   onBookingSelected,
   onCancel
 }) => {
@@ -78,18 +80,27 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         setProducts(kioskProducts);
         setStoreInfo(info);
 
-        // 1. 파3 전용 코스 구역 필터링
+        // 1. 관리자 구역 매칭(selectedZoneIds) 우선 적용 + 파3 전용 코스 구역 필터링
+        const mappedZones = selectedZoneIds.length > 0
+          ? kioskZones.filter(z =>
+              selectedZoneIds.some(zid => String(zid).toUpperCase() === z.zone_code.toUpperCase())
+            )
+          : [];
+
         const par3Zones = kioskZones.filter(z => 
           z.zone_name.includes('Par3') || 
           z.zone_name.includes('PAR3') || 
-          z.zone_code.includes('PAR3') ||
+          z.zone_code.toUpperCase().includes('PAR3') ||
           z.zone_code === 'EAST' || 
           z.zone_code === 'WEST' || 
           z.zone_code === 'COMPLEX'
         );
-        const displayZones = par3Zones.length > 0 ? par3Zones : kioskZones;
+        const displayZones = mappedZones.length > 0 ? mappedZones : (par3Zones.length > 0 ? par3Zones : kioskZones);
         
-        const mainCategory = kioskZones.find(z => z.zone_code === 'PAR3') || displayZones[0];
+        const mainCategory =
+          mappedZones[0] ||
+          kioskZones.find(z => z.zone_code.toUpperCase() === 'PAR3') ||
+          displayZones[0];
         setCategoryUuid(mainCategory ? mainCategory.zone_code : '');
         
         setZones(displayZones);
@@ -101,7 +112,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       }
     };
     initData();
-  }, []);
+  }, [selectedZoneIds]);
 
   const getTodayStr = () => {
     const d = new Date();
