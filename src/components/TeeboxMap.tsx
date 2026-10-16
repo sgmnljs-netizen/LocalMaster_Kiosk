@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer } from 'lucide-react';
-import { api, Bay } from '../services/api';
+import { api, Bay, Member } from '../services/api';
 import { TeeboxTileCard } from './TeeboxTileCard';
 import { TimeMaster } from '../utils/timeMaster';
 
 interface TeeboxMapProps {
+  member?: Member | null;
   memberNo?: string;
   memberName?: string;
   isMoveMode?: boolean; // 타석 이동 모드 여부
@@ -20,6 +21,7 @@ interface TeeboxMapProps {
 }
 
 export const TeeboxMap: React.FC<TeeboxMapProps> = ({
+  member,
   memberNo,
   memberName,
   isMoveMode = false,
@@ -39,15 +41,27 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [countdown, setCountdown] = useState<number>(60); // 선점 락 카운트다운 (1분)
 
+  const effMemberNo = member?.member_no || memberNo;
+  const effMemberName = (member?.member_name || memberName || '').trim();
+
   // 이동 모드 시 현재 회원이 점유 중인 타석 검색
   const currentBay = isMoveMode
-    ? bays.find(
-        b =>
-          b.status === 'OCCUPIED' &&
-          ((memberNo && b.current_user_name === memberNo) ||
-            (memberName && b.current_user_name === memberName) ||
-            (memberName && b.current_user_name && b.current_user_name.includes(memberName)))
-      )
+    ? bays.find(b => {
+        const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+        if (!['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(st)) return false;
+        if (
+          effMemberNo &&
+          (String((b as any).current_member_no || '') === String(effMemberNo) ||
+            b.current_user_name === effMemberNo)
+        ) {
+          return true;
+        }
+        const bayUserName = String((b as any).member_name || b.current_user_name || '').trim();
+        if (effMemberName !== '' && bayUserName !== '' && (bayUserName === effMemberName || bayUserName.includes(effMemberName))) {
+          return true;
+        }
+        return false;
+      })
     : null;
 
   // minutes_left 정밀 파싱 및 end_time/epoch SSOT fallback 계산
@@ -112,9 +126,13 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   // 타석 터치 - 원자적 선점(Pre-emption) 락 시도 (useCallback 가딩)
   const handleBayTouch = useCallback(async (bay: Bay) => {
     if (isTimeRestricted || hasNoActiveBay) return;
-    if (bay.status === 'UNDER_MAINTENANCE') return;
-    if (bay.status === 'OCCUPIED') return;
-    if (bay.status === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId()) {
+    const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+    const isBlocked =
+      (bay as any).is_active === false ||
+      ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
+    if (isBlocked) return;
+    if (['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus)) return;
+    if (canonicalStatus === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId()) {
       setErrorMsg(lang === 'KO' ? '이미 다른 고객님께서 선택 중인 타석입니다.' : 'Teebox selected by another user.');
       return;
     }
@@ -510,11 +528,14 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         }}
       >
         {floorBays.map((bay) => {
+          const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
           const isSelected = selectedBayNo === bay.bay_no;
-          const isPreOccupiedByOther = bay.status === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId();
-          const isOccupied = bay.status === 'OCCUPIED';
-          const isUnderMaintenance = (bay.status as string) === 'UNDER_MAINTENANCE' || (bay.status as string) === 'REPAIR' || (bay.status as string) === 'ERROR';
-          const isAvailable = bay.status === 'AVAILABLE';
+          const isPreOccupiedByOther = canonicalStatus === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId();
+          const isOccupied = ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus);
+          const isUnderMaintenance =
+            (bay as any).is_active === false ||
+            ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
+          const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance;
 
           // 1. 헤더 영역 스타일 (30% 높이)
           let headerBg = '#e5e5ea';

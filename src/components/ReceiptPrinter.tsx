@@ -1,17 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { Printer, CheckCircle, XCircle } from 'lucide-react';
+import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
+import { api } from '../services/api';
 
 export interface ReceiptData {
   branchNm: string;
   address: string;
   tel: string;
+  ownerNm?: string;
+  bizNo?: string;
   tradeDate: string;
   apprNo: string;
   cardNo?: string;
+  cardIssuer?: string;
+  terminalId?: string;
   prodNm: string;
   partySize: number;
   totalAmount: number;
   resId: string;
+  vatYn?: string;
 }
 
 interface ReceiptPrinterProps {
@@ -21,22 +28,85 @@ interface ReceiptPrinterProps {
 
 export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onClose }) => {
   const [isPrinting, setIsPrinting] = useState(true);
+  const [ownerNm, setOwnerNm] = useState(receiptData.ownerNm || '대표자');
 
   useEffect(() => {
+    let mounted = true;
+    const triggerHardwarePrint = async () => {
+      try {
+        const storeInfo = await api.getStoreInfo().catch(() => null);
+        const resolvedOwner = receiptData.ownerNm || storeInfo?.owner_nm || storeInfo?.ceo_nm || '대표자';
+        if (mounted) {
+          setOwnerNm(resolvedOwner);
+        }
+        const isTaxFree = receiptData.vatYn === 'N';
+        const supplyAmt = isTaxFree ? 0 : Math.round(receiptData.totalAmount / 1.1);
+        const vatAmt = isTaxFree ? 0 : receiptData.totalAmount - supplyAmt;
+        const taxFreeAmt = isTaxFree ? receiptData.totalAmount : 0;
+
+        await kioskHardwareBridge.printReceipt({
+          sale_id: receiptData.resId || `SALE-${Date.now()}`,
+          receipt_no: receiptData.resId || `REC-${Date.now()}`,
+          trade_dt: receiptData.tradeDate || new Date().toLocaleString('ko-KR'),
+          pay_method: receiptData.totalAmount > 0 ? 'CARD' : 'PASS',
+          store_info: {
+            store_name: receiptData.branchNm || storeInfo?.store_nm || 'GOLFOS',
+            biz_no: receiptData.bizNo || storeInfo?.biz_no || '000-00-00000',
+            ceo_name: resolvedOwner,
+            tel: receiptData.tel || storeInfo?.tel || storeInfo?.tel_no || '',
+            address: receiptData.address || storeInfo?.address || ''
+          },
+          tax_summary: {
+            supply_amt: supplyAmt,
+            tax_amt: vatAmt,
+            tax_free_amt: taxFreeAmt,
+            total_amt: receiptData.totalAmount,
+            discount_amt: 0,
+            pay_amt: receiptData.totalAmount
+          },
+          card_info: receiptData.totalAmount > 0 ? {
+            issuer_name: receiptData.cardIssuer || '신용카드',
+            card_no_masked: receiptData.cardNo || '****-****-****-****',
+            approval_no: receiptData.apprNo || '-',
+            installment_months: 0,
+            approval_dt: receiptData.tradeDate || new Date().toLocaleString('ko-KR'),
+            terminal_id: receiptData.terminalId || localStorage.getItem('LM_KIOSK_TERMINAL_ID') || 'KIOSK-01'
+          } : undefined,
+          items: [
+            {
+              name: receiptData.prodNm,
+              qty: receiptData.partySize || 1,
+              unit_price: receiptData.totalAmount,
+              amount: receiptData.totalAmount,
+              is_tax_free: isTaxFree
+            }
+          ]
+        });
+      } catch (err) {
+        console.warn('[ReceiptPrinter] Hardware print fallback:', err);
+      }
+    };
+
+    triggerHardwarePrint();
+
     // 3초간 영수증 지지직 인쇄 모션 작동
     const timer = setTimeout(() => {
-      setIsPrinting(false);
+      if (mounted) setIsPrinting(false);
     }, 3000);
-    return () => clearTimeout(timer);
-  }, []);
+    return () => {
+      mounted = false;
+      clearTimeout(timer);
+    };
+  }, [receiptData]);
 
   const formatAmount = (num: number) => {
     return num.toLocaleString();
   };
 
-  // 과세공급가액 90%, 부가세 10% 연산
-  const taxFreeAmount = Math.round(receiptData.totalAmount / 1.1);
-  const vatAmount = receiptData.totalAmount - taxFreeAmount;
+  // 과세/면세 공급가액 및 부가세 연산
+  const isTaxFree = receiptData.vatYn === 'N';
+  const taxFreeAmount = isTaxFree ? receiptData.totalAmount : Math.round(receiptData.totalAmount / 1.1);
+  const vatAmount = isTaxFree ? 0 : receiptData.totalAmount - taxFreeAmount;
 
   return (
     <div 
@@ -138,7 +208,7 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
           <div style={{ fontSize: '12px', color: '#555555', marginTop: '6px', lineHeight: 1.4 }}>
             주소: {receiptData.address}<br />
             전화: {receiptData.tel}<br />
-            대표자: sgmn (에스지엠엔)
+            대표자: {ownerNm}
           </div>
         </div>
 
@@ -150,7 +220,7 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>카드번호:</span>
-            <span>9410-****-****-****</span>
+            <span>{receiptData.cardNo || '****-****-****-****'}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>승인번호:</span>

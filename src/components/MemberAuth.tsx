@@ -52,14 +52,27 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     setIsSearching(true);
     setErrorMsg('');
     try {
-      const member = await api.getMember(tokenOrUid);
-      if (member) {
-        setDetectedMember(member);
+      const isShortPhone = /^[0-9]{4}$/.test(tokenOrUid.trim());
+      const member = !isShortPhone && (api as any).authenticateSmartTag
+        ? await (api as any).authenticateSmartTag(tokenOrUid)
+        : await api.getMember(tokenOrUid);
+      if (Array.isArray(member) && member.length > 1) {
+        setErrorMsg('동일한 뒷번호 회원이 여러 명 있습니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
+      } else if ((member as any)?.duplicate || (member as any)?.error === 'DUPLICATE_PHONE') {
+        setErrorMsg('동일한 뒷번호 회원이 여러 명 있습니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
+      } else if (member) {
+        setDetectedMember(Array.isArray(member) ? member[0] : member);
       } else {
         setErrorMsg('등록되지 않은 모바일 회원 또는 NFC 카드입니다.');
       }
-    } catch {
-      setErrorMsg('스마트 인증 처리 중 서버 통신 에러가 발생했습니다.');
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = String(err?.response?.data?.detail || err?.message || '');
+      if (status === 409 || detail.includes('DUPLICATE') || detail.includes('중복') || detail.includes('여러 명')) {
+        setErrorMsg('동일한 뒷번호 회원이 여러 명 있습니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
+      } else {
+        setErrorMsg('스마트 인증 처리 중 서버 통신 에러가 발생했습니다.');
+      }
     } finally {
       setIsSearching(false);
     }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Settings, X, Monitor, Wifi, Shield, Zap, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useKioskSettings, KioskSettings } from '../stores/kioskSettings';
 import { api } from '../services/api';
+import { kioskVanClient } from '../services/van/van_client';
 
 interface KioskSettingsModalProps {
   isOpen: boolean;
@@ -66,8 +67,11 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       // 백엔드 실시간 단말기 마스터 조회
       const fetchTerminals = async () => {
         try {
-          const res = await api.get('/v1/terminals').catch(() => null);
-          if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+          const res = (api as any).getKioskTerminals
+            ? await (api as any).getKioskTerminals().catch(() => null)
+            : await api.get('/v1/terminals').catch(() => null);
+          const list = Array.isArray(res) ? res : (res?.data && Array.isArray(res.data) ? res.data : null);
+          if (list && list.length > 0) {
             const customOpt: TerminalDeviceItem = {
               device_id: 'custom',
               device_name: '⚙️ 직접 입력 (커스텀 설정)',
@@ -76,7 +80,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
               van_provider: 'KCP',
               device_type: 'KIOSK',
             };
-            setTerminalList([...res.data, customOpt]);
+            setTerminalList([...list, customOpt]);
           }
         } catch {
           setTerminalList(FALLBACK_KIOSK_OPTIONS);
@@ -105,7 +109,12 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
     setIsPinging(true);
     setPingStatus(null);
     try {
-      await new Promise((res) => setTimeout(res, 600));
+      const res = await fetch(`http://127.0.0.1:${formVcatPort}/vcat/status`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
       setPingStatus(`[${formDeviceName}] VCAT 포트(${formVcatPort}) 통신 정상 확인!`);
     } catch {
       setPingStatus('VCAT 데몬 응답 없음. 포트와 프로그램을 확인해주세요.');
@@ -115,18 +124,37 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   };
 
   const handleSave = () => {
+    const cleanStoreCd = formStoreCode.trim();
+    const cleanDeviceId = formDeviceId.trim();
+    const cleanTerminalId = formTerminalId.trim();
+    const cleanVcatPort = formVcatPort.trim();
+
     const updated: Partial<KioskSettings> = {
-      deviceId: formDeviceId,
+      deviceId: cleanDeviceId,
       deviceName: formDeviceName,
       providerType: formProviderType,
-      terminalId: formTerminalId.trim(),
-      vcatPort: formVcatPort.trim(),
+      terminalId: cleanTerminalId,
+      vcatPort: cleanVcatPort,
       apiUrl: formApiUrl.trim(),
-      storeCode: formStoreCode.trim(),
+      storeCode: cleanStoreCd,
       deviceKey: formDeviceKey.trim(),
       adminPin: formAdminPin.trim() || '0000',
       isMaintenanceMode: formIsMaintenance,
     };
+
+    try {
+      if (cleanStoreCd) localStorage.setItem('LM_STORE_CD', cleanStoreCd);
+      if (cleanDeviceId) localStorage.setItem('LM_KIOSK_TERMINAL_ID', cleanDeviceId);
+    } catch (e) {
+      console.warn('[KioskSettingsModal] Failed to sync localStorage keys:', e);
+    }
+
+    kioskVanClient.setConfig({
+      provider: formProviderType.replace('_VAN', '') as any,
+      ...({ providerType: formProviderType } as any),
+      vcatPort: Number(cleanVcatPort) || 9099,
+      terminalId: cleanTerminalId,
+    });
 
     updateSettings(updated);
     setSaveSuccess(true);

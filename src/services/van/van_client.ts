@@ -18,12 +18,39 @@ import type {
 } from './van_types';
 import { VanAdapterFactory } from './adapters/VanAdapterFactory';
 import { DEFAULT_VAN_CONFIG } from './adapters/BaseVanAdapter';
+import { getKioskSettings } from '../../stores/kioskSettings';
+
+function resolveProviderType(providerType?: string): VanConfig['provider'] {
+  let raw = (providerType || DEFAULT_VAN_CONFIG.provider || 'KCP').toUpperCase();
+  if (raw.endsWith('_VAN')) {
+    raw = raw.replace('_VAN', '');
+  }
+  return raw as VanConfig['provider'];
+}
 
 export class KioskVanClient implements IVanTerminalAdapter {
   private currentConfig: VanConfig;
 
   constructor(customConfig?: Partial<VanConfig>) {
-    this.currentConfig = { ...DEFAULT_VAN_CONFIG, ...customConfig };
+    const settings = getKioskSettings();
+    this.currentConfig = {
+      ...DEFAULT_VAN_CONFIG,
+      provider: resolveProviderType(settings.providerType),
+      vcatPort: parseInt(settings.vcatPort, 10) || DEFAULT_VAN_CONFIG.vcatPort,
+      terminalId: settings.terminalId || DEFAULT_VAN_CONFIG.terminalId,
+      ...customConfig,
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('kiosk-settings-changed', () => {
+        const updated = getKioskSettings();
+        this.setConfig({
+          provider: resolveProviderType(updated.providerType),
+          vcatPort: parseInt(updated.vcatPort, 10) || DEFAULT_VAN_CONFIG.vcatPort,
+          terminalId: updated.terminalId || DEFAULT_VAN_CONFIG.terminalId,
+        });
+      });
+    }
   }
 
   private get currentAdapter(): IVanTerminalAdapter {

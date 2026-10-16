@@ -5,6 +5,7 @@ import { useKioskSettings } from '../stores/kioskSettings';
 import { useKioskVanPayment } from '../hooks/useKioskVanPayment';
 import { kioskVanClient } from '../services/van/van_client';
 import type { CardApprovalResult } from '../services/van/van_types';
+import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
 
 
 interface PaymentTerminalProps {
@@ -19,6 +20,9 @@ interface PaymentTerminalProps {
   memberPoint?: number;
   discountRate?: number;
   gradeName?: string;
+  vatYn?: string;
+  businessUnitType?: string;
+  businessMerchantId?: string;
   onPaymentSuccess: (payResult?: { 
     apprNo: string; 
     tradeDate: string; 
@@ -44,6 +48,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   memberPoint = 0,
   discountRate = 0,
   gradeName,
+  vatYn = 'Y',
+  businessUnitType = 'MAIN',
+  businessMerchantId = 'MAIN',
   onPaymentSuccess,
   onCancel
 }) => {
@@ -58,6 +65,15 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const [maskedCard, setMaskedCard] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const isPayRequested = useRef(false);
+  const hasCompletedRef = useRef(false);
+  const lastPayResultRef = useRef<any>(null);
+
+  const completePaymentOnce = useCallback((payload: any) => {
+    lastPayResultRef.current = payload;
+    if (hasCompletedRef.current) return;
+    hasCompletedRef.current = true;
+    onPaymentSuccess(payload);
+  }, [onPaymentSuccess]);
 
   // 🎟️ 쿠폰 관련 상태
   const [couponCode, setCouponCode] = useState('');
@@ -160,35 +176,15 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     setCouponError('');
   };
 
-  // 📟 USB HID 바코드 스캐너 리스너 (키보드 쐐기형 스캔 감지)
-  useEffect(() => {
-    let buffer = '';
-    let lastKeyTime = Date.now();
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // 인풋 요소에 포커스 중일 때는 기본 입력 허용
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
-
-      const now = Date.now();
-      if (now - lastKeyTime > 120) {
-        buffer = '';
-      }
-      lastKeyTime = now;
-
-      if (e.key === 'Enter') {
-        const scannedCode = buffer.trim();
-        buffer = '';
-        if (scannedCode.length >= 2) {
-          handleVerifyCoupon(scannedCode);
-        }
-      } else if (e.key.length === 1) {
-        buffer += e.key;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  // 📟 통합 하드웨어 바코드 스캐너 훅 (USB HID 및 브릿지 데몬)
+  useHardwareScanner({
+    onScan: (scannedCode) => {
+      if (!scannedCode) return;
+      setCouponCode(scannedCode);
+      handleVerifyCoupon(scannedCode);
+    },
+    enabled: payStep === 'INSERT_CARD',
+  });
 
   // 포인트 전액 사용 퀵 핸들러 (가맹점 최대 한도 적용)
   const handleUseAllPoints = () => {
@@ -222,7 +218,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       setAppNo(generatedAppNo);
       setCardIssuer(appliedCoupon ? '할인쿠폰 감면 결제' : '포인트 전액 결제');
       setMaskedCard(appliedCoupon ? '100% 할인 적용' : '100% 포인트 차감');
-      onPaymentSuccess({ 
+      completePaymentOnce({ 
         apprNo: generatedAppNo, 
         tradeDate: generatedTradeDate, 
         amount: 0,
@@ -237,11 +233,54 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     setPayStep('INSERT_CARD');
     setErrorMsg('');
 
+    // 🏛️ 서브 가맹점 / 소속 프로 TID 라우팅 검증 (Fail-Fast)
+    const unitUpper = String(businessUnitType || 'MAIN').toUpperCase();
+    const isSubMerchant = ['PRO', 'SUB', 'LESSON'].includes(unitUpper) || (businessMerchantId && businessMerchantId !== 'MAIN');
+    if ((api as any).resolveTerminalRoute) {
+      try {
+        const route = await (api as any).resolveTerminalRoute(
+          settings.deviceId,
+          businessMerchantId || 'MAIN',
+          businessUnitType || 'MAIN'
+        );
+        if (!route || route.error || route.status === 422 || (isSubMerchant && !route.terminal_id)) {
+          setErrorMsg(route?.message || '소속 프로/서브 가맹점 전용 단말기(TID) 라우팅 정보가 설정되지 않았습니다.');
+          setPayStep('INSERT_CARD');
+          isPayRequested.current = false;
+          return;
+        }
+        if (route.terminal_id) {
+          kioskVanClient.setConfig({
+            provider: String(route.van_provider || settings.providerType || 'KCP').replace('_VAN', '') as any,
+            ...({ providerType: route.van_provider || settings.providerType } as any),
+            vcatPort: Number(route.vcat_port || settings.vcatPort) || 9099,
+            terminalId: route.terminal_id,
+          });
+        }
+      } catch (routeErr: any) {
+        setErrorMsg(routeErr?.response?.data?.detail || routeErr?.message || '가맹점 단말기(TID) 라우팅 검증에 실패하여 결제가 차단되었습니다.');
+        setPayStep('INSERT_CARD');
+        isPayRequested.current = false;
+        return;
+      }
+    } else if (isSubMerchant) {
+      setErrorMsg('소속 프로/서브 가맹점 전용 단말기(TID) 라우팅을 확인할 수 없어 결제가 차단되었습니다.');
+      setPayStep('INSERT_CARD');
+      isPayRequested.current = false;
+      return;
+    }
+
+    const isTaxFree = String(vatYn || 'Y').toUpperCase() === 'N';
     const res = await startPayment({
       amount: actualPayAmt,
       productName,
       customerName: memberName,
       timeoutSeconds: 30,
+      ...({
+        vatAmount: isTaxFree ? 0 : Math.round(actualPayAmt - actualPayAmt / 1.1),
+        taxFreeAmount: isTaxFree ? actualPayAmt : 0,
+        vat_yn: isTaxFree ? 'N' : 'Y',
+      } as any),
     });
 
     if (res.success) {
@@ -261,7 +300,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           await new Promise((resolve) => setTimeout(resolve, 800));
         }
         setPayStep('PRINT_RECEIPT');
-        onPaymentSuccess({ 
+        completePaymentOnce({ 
           apprNo: res.auth_code, 
           tradeDate: res.approved_at, 
           amount: actualPayAmt, 
@@ -272,19 +311,46 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           cardApproval: res 
         });
       } catch (err: any) {
-        // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소)
+        // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소 + 실패 시 유령결제 긴급 리포트)
+        const orgDate = res.approved_at ? res.approved_at.replace(/[^0-9]/g, '').slice(0, 8) : new Date().toISOString().slice(0, 10).replace(/-/g, '');
         try {
-          const orgDate = res.approved_at ? res.approved_at.replace(/[^0-9]/g, '').slice(0, 8) : '';
-          await kioskVanClient.cancelCardPayment({
+          const cancelRes = await kioskVanClient.cancelCardPayment({
             amount: actualPayAmt,
             orgAuthCode: res.auth_code,
             orgApprovedDate: orgDate,
             terminalId: res.terminal_id,
             vanTrNo: res.van_tr_no,
             reason: '타석 배정 전산 오류로 인한 자동 망취소',
+            ...({ orgAuthNo: res.auth_code, orgAuthDate: orgDate, orgVanTrNo: res.van_tr_no } as any)
           });
+          if (!cancelRes || !cancelRes.success) {
+            await api.reportGhostCharge({
+              store_cd: STORE_CODE,
+              member_no: memberNo,
+              prod_cd: productName,
+              amount: actualPayAmt,
+              auth_code: res.auth_code,
+              card_no_masked: res.card_no_masked || '',
+              issuer_name: res.issuer_name || '',
+              van_tr_no: res.van_tr_no || '',
+              terminal_id: res.terminal_id || settings.terminalId || '',
+              error_reason: `${err?.message || 'Webhook failed'} / Cancel failed: ${cancelRes?.error_message || 'Unknown'}`
+            });
+          }
           setErrorMsg('타석 배정 처리 실패로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 회수해 주세요.');
-        } catch {
+        } catch (cancelErr: any) {
+          await api.reportGhostCharge({
+            store_cd: STORE_CODE,
+            member_no: memberNo,
+            prod_cd: productName,
+            amount: actualPayAmt,
+            auth_code: res.auth_code,
+            card_no_masked: res.card_no_masked || '',
+            issuer_name: res.issuer_name || '',
+            van_tr_no: res.van_tr_no || '',
+            terminal_id: res.terminal_id || settings.terminalId || '',
+            error_reason: `${err?.message || 'Webhook failed'} / Cancel exception: ${cancelErr?.message || String(cancelErr)}`
+          });
           setErrorMsg(err.message || '결제 후 배정 처리 중 오류가 발생했습니다.');
         }
         setPayStep('INSERT_CARD');
@@ -295,7 +361,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       setErrorMsg(res.error_message || '결제가 승인되지 않았습니다. 카드를 다시 확인해 주세요.');
       isPayRequested.current = false;
     }
-  }, [productName, memberName, resId, gradeDiscountAmt, couponDiscountAmt, appliedCoupon, startPayment, onPaymentSuccess]);
+  }, [productName, memberName, memberNo, resId, gradeDiscountAmt, couponDiscountAmt, appliedCoupon, vatYn, businessUnitType, businessMerchantId, settings, startPayment, completePaymentOnce]);
 
   // 포인트 보유 회원의 경우 사용자가 포인트를 선택하고 결제를 시작할 수 있도록 제어
   const [isReadyToPay, setIsReadyToPay] = useState<boolean>(!memberNo || memberPoint === 0);
@@ -734,12 +800,13 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                   )}
 
                   {(() => {
-                    const supplyAmount = Math.round(amount / 1.1);
-                    const vatAmount = amount - supplyAmount;
+                    const isTaxFree = String(vatYn || 'Y').toUpperCase() === 'N';
+                    const supplyAmount = isTaxFree ? finalCardAmt : Math.round(finalCardAmt / 1.1);
+                    const vatAmount = isTaxFree ? 0 : finalCardAmt - supplyAmount;
                     return (
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #000', paddingTop: '10px', marginTop: '4px' }}>
-                          <span>판매금액:</span>
+                          <span>{isTaxFree ? '면세공급가:' : '판매금액:'}</span>
                           <span>{supplyAmount.toLocaleString()} 원</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -882,7 +949,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           </div>
 
           <button 
-            onClick={() => onPaymentSuccess({ apprNo: appNo, tradeDate: receiptDate, amount: finalCardAmt, usedPoints, discountAmount: gradeDiscountAmt })}
+            onClick={() => completePaymentOnce(lastPayResultRef.current || { apprNo: appNo, tradeDate: receiptDate, amount: finalCardAmt, usedPoints, discountAmount: gradeDiscountAmt + couponDiscountAmt, couponNo: appliedCoupon?.coupon_no, couponDiscount: couponDiscountAmt })}
             style={{
               width: '100%',
               height: '60px',

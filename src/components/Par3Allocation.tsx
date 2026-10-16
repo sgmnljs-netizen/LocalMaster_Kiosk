@@ -150,6 +150,15 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }
   }, [slots]);
 
+  const getAssignableAssets = (m?: Member | null): MemberAsset[] => {
+    return (m?.assets || []).filter(
+      (a) =>
+        a.is_assignable !== false &&
+        (a.rem_count === null || a.rem_count === undefined || a.rem_count > 0) &&
+        ((a as any).remain_cnt === null || (a as any).remain_cnt === undefined || (a as any).remain_cnt > 0)
+    );
+  };
+
   // 3. 대표자 마운트 세팅
   useEffect(() => {
     const setupLeader = async () => {
@@ -171,8 +180,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           ]);
           
           // 만약 사용 가능한 이용권이 존재하면, 즉석에서 대표자 이용권 자동 매칭 팝업 작동 유도
-          if (detail && detail.assets && detail.assets.length > 0) {
-            setSelectedMemberForTicket({ member: detail, isLeader: true });
+          const assignable = getAssignableAssets(detail);
+          if (detail && assignable.length > 0) {
+            setSelectedMemberForTicket({ member: { ...detail, assets: assignable }, isLeader: true });
             setModalState('TICKET_SELECT');
           }
         } catch {
@@ -257,10 +267,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         if (member) {
           // 회원 조회 성공
           const isLeaderSlot = players.length === 0;
-          
-          if (member.assets && member.assets.length > 0) {
+          const assignable = getAssignableAssets(member);
+          if (assignable.length > 0) {
             // 사용 가능한 이용권이 있는 경우 ➔ 이용권 선택 팝업 오픈
-            setSelectedMemberForTicket({ member, isLeader: isLeaderSlot });
+            setSelectedMemberForTicket({ member: { ...member, assets: assignable }, isLeader: isLeaderSlot });
             setModalState('TICKET_SELECT');
           } else {
             // 이용권이 없으면 ➔ 바로 추가
@@ -287,10 +297,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }
 
     const isLeaderSlot = players.length === 0;
+    const assignable = getAssignableAssets(member);
 
-    if (member.assets && member.assets.length > 0) {
+    if (assignable.length > 0) {
       // 사용 가능한 이용권이 있는 경우 ➔ 이용권 선택 팝업 오픈
-      setSelectedMemberForTicket({ member, isLeader: isLeaderSlot });
+      setSelectedMemberForTicket({ member: { ...member, assets: assignable }, isLeader: isLeaderSlot });
       setModalState('TICKET_SELECT');
     } else {
       // 이용권이 없으면 ➔ 바로 추가
@@ -478,7 +489,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       }
 
       setAuthProgress(100);
-      await executeConfirmWebhook(resId, amount, approval.auth_code, approval.card_no_masked);
+      await executeConfirmWebhook(resId, amount, approval.auth_code, approval.card_no_masked, approval);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : '단말기 통신 오류가 발생했습니다.';
       setErrorMsg(`[결제 실패]: ${errMsg}`);
@@ -486,9 +497,52 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }
   };
 
-  const executeConfirmWebhook = async (resId: string, amount: number, authNo?: string, cardMasked?: string) => {
+  const rollbackVanApprovalIfNeeded = async (resId: string, amount: number, vanResult?: any, reason?: string) => {
+    if (amount <= 0 || !vanResult?.auth_code) return;
+    const orgApprovedDate = (vanResult.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) || new Date().toISOString().slice(0, 10).replace(/-/g, '');
     try {
-      const isSuccess = await api.confirmKioskPaymentWebhook(resId, amount, amount === 0 ? 'TICKET' : 'OFFLINE_CARD');
+      const cancelRes = await kioskVanClient.cancelCardPayment({
+        amount: vanResult.amount || amount,
+        orgAuthCode: vanResult.auth_code,
+        orgApprovedDate,
+        terminalId: vanResult.terminal_id,
+        vanTrNo: vanResult.van_tr_no,
+        ...({ orgAuthNo: vanResult.auth_code, orgAuthDate: orgApprovedDate, orgVanTrNo: vanResult.van_tr_no } as any)
+      });
+      if (!cancelRes || !cancelRes.success) {
+        await api.reportGhostCharge({
+          store_cd: STORE_CODE,
+          member_no: players[0]?.member_no || memberNo,
+          prod_cd: `PAR3_${course || 'COURSE'}`,
+          amount: vanResult.amount || amount,
+          auth_code: vanResult.auth_code,
+          card_no_masked: vanResult.card_no_masked || '',
+          issuer_name: vanResult.issuer_name || '',
+          van_tr_no: vanResult.van_tr_no || '',
+          terminal_id: vanResult.terminal_id || '',
+          error_reason: `${reason || 'Par3 webhook failed'} / Cancel failed: ${cancelRes?.error_message || 'Unknown'}`
+        });
+      }
+    } catch (cancelErr: any) {
+      await api.reportGhostCharge({
+        store_cd: STORE_CODE,
+        member_no: players[0]?.member_no || memberNo,
+        prod_cd: `PAR3_${course || 'COURSE'}`,
+        amount: vanResult.amount || amount,
+        auth_code: vanResult.auth_code,
+        card_no_masked: vanResult.card_no_masked || '',
+        issuer_name: vanResult.issuer_name || '',
+        van_tr_no: vanResult.van_tr_no || '',
+        terminal_id: vanResult.terminal_id || '',
+        error_reason: `${reason || 'Par3 webhook failed (resId=' + resId + ')'} / Cancel exception: ${cancelErr?.message || String(cancelErr)}`
+      });
+    }
+  };
+
+  const executeConfirmWebhook = async (resId: string, amount: number, authNo?: string, cardMasked?: string, vanResult?: any) => {
+    try {
+      const confirmRes = await api.confirmKioskPaymentWebhook(resId, amount, amount === 0 ? 'TICKET' : 'OFFLINE_CARD');
+      const isSuccess = typeof confirmRes === 'boolean' ? confirmRes : !!(confirmRes as any)?.success;
 
       if (isSuccess) {
         const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
@@ -511,11 +565,13 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
         setPaymentState('DONE');
       } else {
-        setErrorMsg('결제 웹훅 승인 처리에 실패했습니다.');
+        await rollbackVanApprovalIfNeeded(resId, amount, vanResult, (confirmRes as any)?.message || 'Par3 webhook returned false');
+        setErrorMsg('결제 웹훅 승인 처리에 실패하여 카드 승인이 자동 취소되었습니다.');
         resetPaymentState();
       }
-    } catch {
-      setErrorMsg('결제 서버 통신 중 오류가 발생했습니다.');
+    } catch (err: any) {
+      await rollbackVanApprovalIfNeeded(resId, amount, vanResult, err?.message || 'Par3 webhook exception');
+      setErrorMsg('결제 서버 통신 중 오류가 발생하여 카드 승인이 자동 취소되었습니다.');
       resetPaymentState();
     }
   };
@@ -1264,7 +1320,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '240px', overflowY: 'auto' }} className="kiosk-ultra-scrollbar">
-              {(selectedMemberForTicket.member.assets || []).map(ticket => (
+              {getAssignableAssets(selectedMemberForTicket.member).map(ticket => (
                 <button
                   key={ticket.member_item_id}
                   onClick={() => addMemberSlot(selectedMemberForTicket.member, selectedMemberForTicket.isLeader, ticket)}

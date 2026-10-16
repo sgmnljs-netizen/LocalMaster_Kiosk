@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Award, CalendarRange, Check, KeyRound, ShieldAlert, X } from 'lucide-react';
-import { api, Locker, Product } from '../services/api';
+import { api, Locker, Member, Product } from '../services/api';
 
 interface LockerExtendProps {
+  member?: Member | null;
   memberNo: string;
   memberName: string;
   onLockerPaymentTriggered: (lockerNo: number, prod: Product, extendDays: number) => void;
@@ -10,6 +11,7 @@ interface LockerExtendProps {
 }
 
 export const LockerExtend: React.FC<LockerExtendProps> = ({
+  member,
   memberNo,
   memberName,
   onLockerPaymentTriggered,
@@ -26,8 +28,23 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
   const loadLockerData = async () => {
     setLoading(true);
     try {
+      const effMemberNo = member?.member_no || memberNo;
       // 내 라카 찾기 (회원번호로 조회)
-      const foundLockers = await api.getMemberLockers(memberNo);
+      let foundLockers = await api.getMemberLockers(effMemberNo);
+      const memberLockerInfo = (member as any)?.locker_info;
+      if ((!foundLockers || foundLockers.length === 0) && memberLockerInfo) {
+        const fallbackNo = Number(String(memberLockerInfo.locker_no || memberLockerInfo.locker_id || '1').replace(/[^0-9]/g, '')) || 1;
+        foundLockers = [
+          {
+            locker_no: fallbackNo,
+            status: memberLockerInfo.status || 'IN_USE',
+            member_no: effMemberNo,
+            member_name: member?.member_name || memberName,
+            end_dt: memberLockerInfo.end_dt || memberLockerInfo.expiry_date || '',
+            ...({ locker_id: memberLockerInfo.locker_id || fallbackNo, display_no: memberLockerInfo.locker_no || String(fallbackNo) } as any)
+          }
+        ];
+      }
       setMyLockers(foundLockers);
 
       if (foundLockers.length > 0) {
@@ -48,25 +65,33 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
 
   useEffect(() => {
     loadLockerData();
-  }, [memberNo]);
+  }, [memberNo, member]);
 
   // 연장 실행 트리거 (한 번에 1개의 상품만 연장)
   const handleExtendClick = (prod: Product) => {
     setErrorMsg('');
     
-    if (myLockers.length === 0) {
+    if (myLockers.length === 0 && !(member as any)?.locker_info) {
       setErrorMsg('연장할 수 있는 라카가 없습니다. 신규 대여는 데스크로 문의해주세요.');
       return;
     }
     
-    const targetLockerNo = selectedLockerNo ?? (myLockers.length > 0 ? myLockers[0].locker_no : null);
-    if (!targetLockerNo) {
+    const selectedObj = myLockers.find(l => l.locker_no === selectedLockerNo) || myLockers[0];
+    const targetLockerId =
+      Number(
+        (selectedObj as any)?.locker_id ||
+        (member as any)?.locker_info?.locker_id ||
+        selectedLockerNo ||
+        selectedObj?.locker_no ||
+        (member as any)?.locker_info?.locker_no
+      ) || 0;
+    if (!targetLockerId) {
       setErrorMsg('연장할 라카를 선택해주세요.');
       return;
     }
 
     // 신규 배정 불가, 기존 라카 연장만
-    onLockerPaymentTriggered(Number(targetLockerNo) || 1, prod, prod.days || 30);
+    onLockerPaymentTriggered(targetLockerId, prod, prod.days || 30);
   };
 
   return (
@@ -209,7 +234,7 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                           color: isSelected ? '#ffffff' : '#1d1d1f',
                           transition: 'all 0.2s ease'
                         }}>
-                          {locker.locker_no}
+                          {(locker as any).display_no || (member as any)?.locker_info?.locker_no || locker.locker_no}
                         </div>
                         <div>
                           <div style={{ fontSize: '14px', color: '#86868b', fontWeight: 500, marginBottom: '2px' }}>만료일</div>

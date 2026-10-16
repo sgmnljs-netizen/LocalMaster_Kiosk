@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Lock, X, Delete } from 'lucide-react';
 import { useKioskSettings } from '../stores/kioskSettings';
 
@@ -16,26 +16,58 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   const { settings } = useKioskSettings();
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [failCount, setFailCount] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!lockoutUntil) return;
+    const timer = setInterval(() => {
+      const rem = Math.ceil((lockoutUntil - Date.now()) / 1000);
+      if (rem <= 0) {
+        setLockoutUntil(null);
+        setFailCount(0);
+        setErrorMsg('');
+      } else {
+        setErrorMsg(`PIN 5회 오류로 잠금되었습니다. (${rem}초 후 재시도)`);
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, [lockoutUntil]);
 
   if (!isOpen) return null;
 
   const handleNumClick = (num: string) => {
+    if (lockoutUntil && Date.now() < lockoutUntil) {
+      const rem = Math.ceil((lockoutUntil - Date.now()) / 1000);
+      setErrorMsg(`PIN 5회 오류로 잠금되었습니다. (${rem}초 후 재시도)`);
+      return;
+    }
     if (pin.length >= 4) return;
     const nextPin = pin + num;
     setPin(nextPin);
     setErrorMsg('');
 
     if (nextPin.length === 4) {
-      const correctPin = settings.adminPin || '1234';
+      const correctPin = settings.adminPin || '0000';
       if (nextPin === correctPin) {
         setTimeout(() => {
           setPin('');
           setErrorMsg('');
+          setFailCount(0);
+          setLockoutUntil(null);
           onSuccess();
         }, 150);
       } else {
+        const nextFail = failCount + 1;
+        setFailCount(nextFail);
         setTimeout(() => {
-          setErrorMsg('관리자 PIN 번호가 일치하지 않습니다.');
+          if (nextFail >= 5) {
+            const until = Date.now() + 30000;
+            setLockoutUntil(until);
+            setErrorMsg('PIN 5회 오류로 잠금되었습니다. (30초 후 재시도)');
+          } else {
+            setErrorMsg(`관리자 PIN 번호가 일치하지 않습니다. (${nextFail}/5)`);
+          }
           setPin('');
         }, 200);
       }
@@ -43,13 +75,16 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   };
 
   const handleDelete = () => {
+    if (lockoutUntil && Date.now() < lockoutUntil) return;
     setPin((prev) => prev.slice(0, -1));
     setErrorMsg('');
   };
 
   const handleClear = () => {
     setPin('');
-    setErrorMsg('');
+    if (!lockoutUntil || Date.now() >= lockoutUntil) {
+      setErrorMsg('');
+    }
   };
 
   return (
@@ -133,7 +168,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
         </div>
 
         <p style={{ fontSize: '14px', color: '#9ca3af', margin: '0 0 28px 0', textAlign: 'center' }}>
-          관리자 마스터 PIN 4자리를 입력하세요 (기본값: 0000)
+          관리자 마스터 PIN 4자리를 입력하세요
         </p>
 
         {/* PIN 4-Dot Indicator */}

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useKioskHardwareHealthStore } from '../stores/useKioskHardwareHealthStore';
-import { useKioskSettings } from '../stores/kioskSettings';
+import { getKioskSettings } from '../stores/kioskSettings';
+import { getIsMockHardware } from '../services/hardware/adapters/HardwareAdapterFactory';
+import { api } from '../services/api';
 
 const HEARTBEAT_INTERVAL_MS = 30000;
 const PING_TIMEOUT_MS = 1500;
 
 export function useKioskHardwareHeartbeat() {
-    const { settings } = useKioskSettings();
     const { 
         vcatStatus, 
         printerStatus, 
@@ -19,7 +20,9 @@ export function useKioskHardwareHeartbeat() {
     const lastPrinterRef = useRef(printerStatus);
 
     const checkHealth = useCallback(async () => {
-        const port = parseInt(settings.vcatPort, 10) || 8090;
+        const currentSettings = getKioskSettings();
+        const port = parseInt(currentSettings.vcatPort, 10) || 8090;
+        const isMock = getIsMockHardware();
         setLastCheckedAt(Date.now());
 
         // 1. VCAT 단말기 체크
@@ -32,22 +35,32 @@ export function useKioskHardwareHeartbeat() {
             }).catch(() => null);
             clearTimeout(timer);
 
+            let nextVcat: 'ONLINE' | 'OFFLINE' = 'OFFLINE';
+            let nextVcatReason: string | null = null;
+
             if (res && res.ok) {
-                setVcatStatus('ONLINE', null);
-                lastVcatRef.current = 'ONLINE';
+                nextVcat = 'ONLINE';
+            } else if (isMock && !res) {
+                nextVcat = 'ONLINE';
             } else {
-                const isDev = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-                if (isDev && !res) {
-                    setVcatStatus('ONLINE', null);
-                    lastVcatRef.current = 'ONLINE';
-                } else {
-                    setVcatStatus('OFFLINE', `VCAT 포트(${port}) 응답 없음`);
-                    lastVcatRef.current = 'OFFLINE';
-                }
+                nextVcat = 'OFFLINE';
+                nextVcatReason = `VCAT 포트(${port}) 응답 없음`;
             }
+
+            if (lastVcatRef.current !== nextVcat) {
+                api.writeKioskLog(
+                    'HW_HEARTBEAT_VCAT',
+                    `VCAT 단말기 상태 전환: ${lastVcatRef.current} -> ${nextVcat}${nextVcatReason ? ` (${nextVcatReason})` : ''}`
+                ).catch(() => {});
+                lastVcatRef.current = nextVcat;
+            }
+            setVcatStatus(nextVcat, nextVcatReason);
         } catch (err) {
+            if (lastVcatRef.current !== 'OFFLINE') {
+                api.writeKioskLog('HW_HEARTBEAT_VCAT', `VCAT 단말기 상태 전환: ${lastVcatRef.current} -> OFFLINE (${String(err)})`).catch(() => {});
+                lastVcatRef.current = 'OFFLINE';
+            }
             setVcatStatus('OFFLINE', String(err));
-            lastVcatRef.current = 'OFFLINE';
         }
 
         // 2. 프린터 데몬 체크
@@ -60,34 +73,47 @@ export function useKioskHardwareHeartbeat() {
             }).catch(() => null);
             clearTimeout(timer);
 
+            let nextPrinter: 'ONLINE' | 'OFFLINE' = 'OFFLINE';
+            let nextPrinterReason: string | null = null;
+
             if (res && res.ok) {
-                setPrinterStatus('ONLINE', null);
-                lastPrinterRef.current = 'ONLINE';
+                nextPrinter = 'ONLINE';
+            } else if (isMock && !res) {
+                nextPrinter = 'ONLINE';
             } else {
-                const isDev = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-                if (isDev && !res) {
-                    setPrinterStatus('ONLINE', null);
-                    lastPrinterRef.current = 'ONLINE';
-                } else {
-                    setPrinterStatus('OFFLINE', '브릿지 데몬(:18080) 응답 없음');
-                    lastPrinterRef.current = 'OFFLINE';
-                }
+                nextPrinter = 'OFFLINE';
+                nextPrinterReason = '브릿지 데몬(:18080) 응답 없음';
             }
+
+            if (lastPrinterRef.current !== nextPrinter) {
+                api.writeKioskLog(
+                    'HW_HEARTBEAT_PRINTER',
+                    `프린터 브릿지 상태 전환: ${lastPrinterRef.current} -> ${nextPrinter}${nextPrinterReason ? ` (${nextPrinterReason})` : ''}`
+                ).catch(() => {});
+                lastPrinterRef.current = nextPrinter;
+            }
+            setPrinterStatus(nextPrinter, nextPrinterReason);
         } catch (err) {
+            if (lastPrinterRef.current !== 'OFFLINE') {
+                api.writeKioskLog('HW_HEARTBEAT_PRINTER', `프린터 브릿지 상태 전환: ${lastPrinterRef.current} -> OFFLINE (${String(err)})`).catch(() => {});
+                lastPrinterRef.current = 'OFFLINE';
+            }
             setPrinterStatus('OFFLINE', String(err));
-            lastPrinterRef.current = 'OFFLINE';
         }
-    }, [settings.vcatPort, setVcatStatus, setPrinterStatus, setLastCheckedAt]);
+    }, [setVcatStatus, setPrinterStatus, setLastCheckedAt]);
 
     useEffect(() => {
         checkHealth();
         const intervalId = setInterval(checkHealth, HEARTBEAT_INTERVAL_MS);
         const handleFocus = () => checkHealth();
+        const handleSettingsChanged = () => checkHealth();
         window.addEventListener('focus', handleFocus);
+        window.addEventListener('kiosk-settings-changed', handleSettingsChanged);
 
         return () => {
             clearInterval(intervalId);
             window.removeEventListener('focus', handleFocus);
+            window.removeEventListener('kiosk-settings-changed', handleSettingsChanged);
         };
     }, [checkHealth]);
 

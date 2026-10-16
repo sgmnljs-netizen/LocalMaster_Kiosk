@@ -13,10 +13,17 @@ import {
   WindowsBridgeScannerAdapter,
 } from './WindowsBridgeAdapter';
 
+export const getIsMockHardware = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const stored = localStorage.getItem('HW_MOCK');
+  if (stored !== null) return stored === 'true';
+  return !window.navigator.userAgent.includes('Windows');
+};
+
 export const DEFAULT_HARDWARE_CONFIG: HardwareConfig = {
   bridgeHost: 'http://127.0.0.1',
   bridgePort: 18080,
-  isMock: typeof window !== 'undefined' && (!window.navigator.userAgent.includes('Windows') || localStorage.getItem('HW_MOCK') !== 'false'),
+  isMock: getIsMockHardware(),
   printMode: 'AUTO',
   drawerAutoOpen: false,
 };

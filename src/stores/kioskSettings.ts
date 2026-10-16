@@ -36,11 +36,30 @@ export const DEFAULT_KIOSK_SETTINGS: KioskSettings = {
 
 const STORAGE_KEY = 'lm-kiosk-settings';
 
+export function normalizeApiUrl(rawUrl?: string): string {
+  const base = (rawUrl || DEFAULT_KIOSK_SETTINGS.apiUrl || 'http://127.0.0.1:8000')
+    .trim()
+    .replace(/\/+$/, '');
+  return base.endsWith('/api') ? base : `${base}/api`;
+}
+
 export function getKioskSettings(): KioskSettings {
   try {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return DEFAULT_KIOSK_SETTINGS;
+    }
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_KIOSK_SETTINGS;
-    return { ...DEFAULT_KIOSK_SETTINGS, ...JSON.parse(raw) };
+    const fallbackStoreCd = localStorage.getItem('LM_STORE_CD') || DEFAULT_KIOSK_SETTINGS.storeCode;
+    if (!raw) {
+      return { ...DEFAULT_KIOSK_SETTINGS, storeCode: fallbackStoreCd };
+    }
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_KIOSK_SETTINGS,
+      ...parsed,
+      storeCode: parsed.storeCode || fallbackStoreCd,
+      apiUrl: (parsed.apiUrl || DEFAULT_KIOSK_SETTINGS.apiUrl).trim().replace(/\/+$/, ''),
+    };
   } catch {
     return DEFAULT_KIOSK_SETTINGS;
   }
@@ -48,8 +67,18 @@ export function getKioskSettings(): KioskSettings {
 
 export function saveKioskSettings(settings: Partial<KioskSettings>): KioskSettings {
   const current = getKioskSettings();
-  const next = { ...current, ...settings };
+  const next: KioskSettings = {
+    ...current,
+    ...settings,
+    apiUrl: (settings.apiUrl ?? current.apiUrl ?? DEFAULT_KIOSK_SETTINGS.apiUrl).trim().replace(/\/+$/, ''),
+  };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  if (next.storeCode) {
+    localStorage.setItem('LM_STORE_CD', next.storeCode);
+  }
+  if (next.terminalId) {
+    localStorage.setItem('LM_KIOSK_TERMINAL_ID', next.terminalId);
+  }
   window.dispatchEvent(new Event('kiosk-settings-changed'));
   return next;
 }

@@ -33,6 +33,8 @@ export function useHardwareScanner({
     });
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return;
+
       const target = e.target as HTMLElement;
       const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
 
@@ -40,8 +42,12 @@ export function useHardwareScanner({
       const interval = now - lastKeyTimeRef.current;
       lastKeyTimeRef.current = now;
 
+      if (isInputFocused && interval > maxKeystrokeIntervalMs) {
+        bufferRef.current = '';
+      }
+
       if (e.key === 'Enter') {
-        if (bufferRef.current.length >= minBarcodeLength) {
+        if (bufferRef.current.length >= minBarcodeLength && interval <= maxKeystrokeIntervalMs * 2) {
           const scannedCode = bufferRef.current;
           bufferRef.current = '';
           onScanRef.current(scannedCode);

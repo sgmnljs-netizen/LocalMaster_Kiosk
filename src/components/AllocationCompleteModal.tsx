@@ -13,6 +13,11 @@ interface AllocationCompleteModalProps {
   resId?: string;
   memberName?: string;
   payAmount?: number;
+  vatYn?: string;
+  cardIssuer?: string;
+  cardNoMasked?: string;
+  terminalId?: string;
+  authNo?: string;
   lang?: 'KO' | 'EN';
   onClose: () => void;
 }
@@ -25,12 +30,17 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   resId,
   memberName,
   payAmount = 0,
+  vatYn = 'Y',
+  cardIssuer,
+  cardNoMasked,
+  terminalId,
+  authNo,
   lang = 'KO',
   onClose
 }) => {
   const [countdown, setCountdown] = useState(6);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
-  const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string } | null>(null);
+  const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string; biz_no?: string; ceo_name?: string } | null>(null);
   const { settings } = useKioskSettings();
   const storeName = settings.deviceName || '골포스 스마트 키오스크';
   const autoPrintReceipt = true;
@@ -45,8 +55,13 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
     const nowStr = TimeMaster.formatKstDateTime(new Date());
     const startStr = startTime || nowStr.slice(11, 16);
-    const vat = Math.round(payAmount / 11);
-    const supply = payAmount - vat;
+    const isTaxFree = String(vatYn || 'Y').toUpperCase() === 'N';
+    const vat = isTaxFree ? 0 : Math.round(payAmount / 11);
+    const supply = isTaxFree ? 0 : payAmount - vat;
+    const taxFreeAmt = isTaxFree ? payAmount : 0;
+
+    const info = storeInfo || (await api.getStoreInfo().catch(() => null));
+    if (info && !storeInfo) setStoreInfo(info);
 
     const res = await kioskHardwareBridge.printReceipt({
       sale_id: resId || `ALLOC-${Date.now()}`,
@@ -55,11 +70,11 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
       member_name: memberName || '회원',
       pay_method: payAmount > 0 ? 'CARD' : 'SERVICE',
       store_info: {
-        store_name: storeInfo?.store_nm || storeName,
-        biz_no: (storeInfo as any)?.biz_no || '123-45-67890',
-        ceo_name: (storeInfo as any)?.ceo_name || '대표자',
-        tel: storeInfo?.tel || '02-0000-0000',
-        address: storeInfo?.address || '서울시 강남구',
+        store_name: info?.store_nm || storeName,
+        biz_no: (info as any)?.biz_no || (info as any)?.biz_reg_no || '',
+        ceo_name: (info as any)?.ceo_name || (info as any)?.owner_name || '',
+        tel: info?.tel || '',
+        address: info?.address || '',
       },
       items: [
         {
@@ -72,18 +87,25 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
       tax_summary: {
         supply_amt: supply,
         tax_amt: vat,
-        tax_free_amt: 0,
+        tax_free_amt: taxFreeAmt,
         total_amt: payAmount,
         discount_amt: 0,
         pay_amt: payAmount,
       },
+      card_info: payAmount > 0 ? {
+        issuer_name: cardIssuer || '신용카드',
+        card_no_masked: cardNoMasked || '신용카드',
+        approval_no: authNo || resId || '00000000',
+        installment_months: 0,
+        terminal_id: terminalId || settings.terminalId || api.getTerminalId(),
+      } : undefined,
       barcode_text: `BAY-${bayNo}-${startStr.replace(':', '')}`,
       header_message: `★★★ [${bayNo}번 타석 배정표] ★★★`,
       footer_message: `이용시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n타석으로 이동하여 연습을 시작해 주십시오.`,
     });
 
     setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
-  }, [bayNo, durationMin, startTime, endTime, resId, memberName, payAmount, lang, storeName]);
+  }, [bayNo, durationMin, startTime, endTime, resId, memberName, payAmount, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, lang, storeName, storeInfo, settings.terminalId]);
 
   // 마운트 시 자동 인쇄
   useEffect(() => {

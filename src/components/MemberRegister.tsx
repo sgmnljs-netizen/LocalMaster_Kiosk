@@ -136,8 +136,9 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
       });
     }, 1000);
 
-    // 3. 1회성 Long-polling 대기 수신 (최대 25초)
+    // 2. 단말기 안면 캡처 모드 활성화 후 1회성 Long-polling 대기 수신 (최대 25초)
     try {
+      await api.startFaceCaptureMode().catch(console.warn);
       const result = await api.detectFaceCamera();
       
       if (!isFaceEnrollStepRef.current) return; // 사용자가 '이전' 버튼 등으로 해당 단계를 벗어난 경우 무시

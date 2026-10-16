@@ -43,16 +43,28 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
     return numA - numB;
   });
 
+  const isBayBlocked = (b: Bay) => {
+    const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+    return (
+      (b as any).is_active === false ||
+      ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(st)
+    );
+  };
+
   // 전체 이용 가능 타석 계산 (연습타석 구역 기준)
-  const totalAvailable = practiceBays.filter(b => b.status === 'AVAILABLE').length;
+  const totalAvailable = practiceBays.filter(b => {
+    const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+    return st === 'AVAILABLE' && !isBayBlocked(b);
+  }).length;
   const totalPracticeBays = practiceBays.length;
 
   const renderBayCard = (bay: Bay) => {
-    const isAvailable = bay.status === 'AVAILABLE';
-    const isPreOccupied = bay.status === 'PRE_OCCUPIED';
-    const isPrepare = bay.status === 'PREPARE';
-    const isOccupied = bay.status === 'OCCUPIED' || bay.status === 'USE';
-    const isUnderMaintenance = bay.status === 'UNDER_MAINTENANCE' || bay.status === 'MAINTENANCE' || bay.status === 'DISABLED';
+    const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+    const isUnderMaintenance = isBayBlocked(bay);
+    const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance;
+    const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
+    const isPrepare = canonicalStatus === 'PREPARE';
+    const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
 
     let bgCol = '#e5e5ea';
     let borderCol = 'transparent';

@@ -166,6 +166,42 @@ function splitJong(j: string): string[] {
   return [j, ''];
 }
 
+function splitJung(j: string): string[] {
+  if (j === 'ㅘ') return ['ㅗ', 'ㅏ'];
+  if (j === 'ㅙ') return ['ㅗ', 'ㅐ'];
+  if (j === 'ㅚ') return ['ㅗ', 'ㅣ'];
+  if (j === 'ㅝ') return ['ㅜ', 'ㅓ'];
+  if (j === 'ㅞ') return ['ㅜ', 'ㅔ'];
+  if (j === 'ㅟ') return ['ㅜ', 'ㅣ'];
+  if (j === 'ㅢ') return ['ㅡ', 'ㅣ'];
+  return [j];
+}
+
+const Hangul = {
+  disassemble(str: string): string[] {
+    const out: string[] = [];
+    for (const ch of str) {
+      const code = ch.charCodeAt(0);
+      if (code >= 0xAC00 && code <= 0xD7A3) {
+        const offset = code - 0xAC00;
+        const cho = Math.floor(offset / (21 * 28));
+        const jung = Math.floor((offset % (21 * 28)) / 28);
+        const jong = offset % 28;
+        out.push(CHO[cho]);
+        out.push(...splitJung(JUNG[jung]));
+        if (jong > 0) {
+          const [j1, j2] = splitJong(JONG[jong]);
+          if (j1) out.push(j1);
+          if (j2) out.push(j2);
+        }
+      } else {
+        out.push(...splitJung(ch));
+      }
+    }
+    return out;
+  },
+};
+
 function flushHangul(cho: number, jung: number, jong: number): string {
   if (cho === -1) return '';
   if (jung === -1) return CHO[cho];
@@ -176,7 +212,7 @@ function flushHangul(cho: number, jung: number, jong: number): string {
 export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChange, onClose }) => {
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
   const [isShift, setIsShift] = useState(false);
-  const [inputBuffer, setInputBuffer] = useState<string[]>(value.split(''));
+  const [inputBuffer, setInputBuffer] = useState<string[]>(() => Hangul.disassemble(value));
 
   const handleKeyClick = (key: string) => {
     let finalKey = key;

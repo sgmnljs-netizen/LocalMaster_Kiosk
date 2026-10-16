@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
+import path from 'path';
 
-const DB_PATH = '/Users/sgmnljs/workspace/Python/LocalMaster_Backend/local_master.db';
+const DB_PATH = path.resolve(process.cwd(), '../LocalMaster_Backend/local_master.db');
 
 function resetDatabaseForTests() {
   try {

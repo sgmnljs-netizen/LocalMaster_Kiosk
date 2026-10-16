@@ -6,18 +6,21 @@
  *   자동으로 개입하여 무중단 영업(결제, 타석 선점, 배정)을 보장합니다.
  */
 
-// 실제 백엔드 주소 (LocalMaster_Backend)
-const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:8000/api'; 
-export const STORE_CODE = import.meta.env.VITE_STORE_CODE || localStorage.getItem('LM_STORE_CD') || 'H01-SE-001';
-
-// WebSocket 베이스 URL (BASE_URL에서 동적 생성 — localhost 하드코딩 제거)
-// [Fix-4] localhost:8000 하드코딩 제거 → BASE_URL 기반 생성
-const _baseHost = BASE_URL.replace('/api', '').replace('http://', 'ws://').replace('https://', 'wss://');
 import { TimeMaster } from '../utils/timeMaster';
 import type { CardApprovalResult } from './van/van_types';
+import { getKioskSettings, normalizeApiUrl } from '../stores/kioskSettings';
+
+// 기본 백엔드 주소 및 가맹점 코드 (동적 헬퍼 폴백용)
+const BASE_URL = normalizeApiUrl(import.meta.env.VITE_BASE_URL || 'http://localhost:8000/api');
+export const STORE_CODE =
+  getKioskSettings().storeCode ||
+  (typeof window !== 'undefined' ? localStorage.getItem('LM_STORE_CD') : null) ||
+  import.meta.env.VITE_STORE_CODE ||
+  'H01-SE-001';
+
+// WebSocket 베이스 URL (BASE_URL에서 동적 생성 — localhost 하드코딩 제거)
+const _baseHost = BASE_URL.replace(/\/api$/, '').replace(/^http:\/\//, 'ws://').replace(/^https:\/\//, 'wss://');
 export const WS_BASE_URL = _baseHost;
-
-
 
 export interface MemberAsset {
   member_item_id: string;
@@ -59,6 +62,13 @@ export interface Member {
   remain_days?: number;
   locker_no?: number | null;
   locker_expiry_date?: string | null;
+  locker_info?: {
+    locker_id?: number;
+    locker_no?: number | string;
+    end_dt?: string | null;
+    status?: string;
+    [key: string]: any;
+  } | null;
   assets?: MemberAsset[];
   face_registered?: boolean;
   face_vector_id?: string | null;
@@ -90,10 +100,12 @@ export interface Bay {
   zone_code?: string; // 타석 소속 구역 (e.g. 'BAY', 'PAR3')
   type: 'RIGHT' | 'LEFT'; // 우타, 좌타
   status: 'AVAILABLE' | 'PRE_OCCUPIED' | 'OCCUPIED' | 'PREPARE' | 'USE' | 'UNDER_MAINTENANCE' | 'MAINTENANCE' | 'DISABLED';
+  is_active?: boolean;
+  member_no?: string | null;
   current_user_name?: string | null;
   current_user_hp?: string | null;
   start_time?: string | null;
-  end_time?: string | null; // HHmm
+  end_time?: string | null; // HHmm or ISO
   minutes_left?: number;
   duration_min?: number | null;
   elapsed_min?: number | null;
@@ -135,9 +147,15 @@ export interface Product {
   sale_price?: number;
   logic_type: 'MEMBERSHIP' | 'PERIOD' | 'COUNT' | 'DAILY' | 'LESSON' | 'RETAIL' | 'FACILITY' | 'RENTAL' | string;
   duration_min?: number;
+  time_min?: number;
   days?: number;
   total_count?: number;
   res_id?: string;
+  vat_yn?: string;
+  tax_rate?: number;
+  business_unit_type?: string;
+  business_merchant_id?: string;
+  pro_id?: string | number;
   access_rules?: Record<string, any> | null;
   rules_detail?: Record<string, any> | null;
   meta_data?: {
@@ -158,6 +176,11 @@ export interface KioskMasterResponse {
     checkin_policy: string;
     address?: string;
     tel?: string;
+    biz_no?: string;
+    business_no?: string;
+    ceo_name?: string;
+    owner_nm?: string;
+    close_time?: string;
     meta_data?: any;
   };
   zones?: KioskZone[];
@@ -230,25 +253,28 @@ export const LM_SCHEMA_VERSION = 'v20260824_50bays_v4';
 // --------------------------------------------------------------------------
 
 const initializeEdgeDB = () => {
-  // [Auto-Heal Engine] 구버전 또는 오염된 캐시 감지 시 전체 소거 후 50타석 정품 재구축
+  // [P0-02] 구버전 스키마 감지 시 설정값(lm-kiosk-settings, LM_KIOSK_TERMINAL_ID, kiosk_zoom_scale, LM_KIOSK_AUDIT_LOGS)은 보존하고 캐시 키만 제거
   const currentVersion = localStorage.getItem('LM_SCHEMA_VERSION');
   const existingBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
   
-  if (currentVersion !== LM_SCHEMA_VERSION || !Array.isArray(existingBays) || existingBays.length !== 50) {
-    console.warn(`[Auto-Heal] 구버전 캐시 감지 (${currentVersion} -> ${LM_SCHEMA_VERSION}). 스토리지 완전 초기화 및 50타석 마이그레이션을 실행합니다.`);
-    localStorage.clear();
+  if (currentVersion !== LM_SCHEMA_VERSION) {
+    console.warn(`[Auto-Heal] 구버전 캐시 감지 (${currentVersion} -> ${LM_SCHEMA_VERSION}). 캐시 데이터 키 선택 초기화를 실행합니다.`);
+    ['LM_BAYS', 'LM_PRODUCTS', 'LM_LOCKERS', 'LM_TERMS'].forEach(key => localStorage.removeItem(key));
     localStorage.setItem('LM_SCHEMA_VERSION', LM_SCHEMA_VERSION);
   }
 
   // 1. 기본 가맹점 정보
   if (!localStorage.getItem('LM_STORE_INFO') || localStorage.getItem('LM_STORE_INFO') === '{}') {
+    const activeStoreCd = getKioskSettings().storeCode || STORE_CODE;
     localStorage.setItem('LM_STORE_INFO', JSON.stringify({
-      store_cd: STORE_CODE,
+      store_cd: activeStoreCd,
       store_nm: '골포스 강남 1호점 (체험관)',
+      biz_no: '721-81-04039',
       business_no: '721-81-04039',
       ceo_name: '대표이사',
       address: '서울특별시 강남구 테헤란로 123',
       tel: '1566-8705',
+      close_time: '23:00',
       checkin_policy: 'CHECKIN_REQUIRED',
       meta_data: { integration: { face_terminal_yn: true } }
     }));
@@ -259,8 +285,8 @@ const initializeEdgeDB = () => {
     localStorage.setItem('LM_ZONES', JSON.stringify(DEFAULT_50_ZONES));
   }
 
-  // 3. 기본 타석 목록 (1층 20개, 2층 20개, 3층 10개 총 50개 타석)
-  if (!localStorage.getItem('LM_BAYS') || JSON.parse(localStorage.getItem('LM_BAYS') || '[]').length !== 50) {
+  // 3. 기본 타석 목록 (캐시가 완전히 비어있을 때만 시드 생성 — 50개 강제 비교 제거)
+  if (!Array.isArray(existingBays) || existingBays.length === 0) {
     localStorage.setItem('LM_BAYS', JSON.stringify(generateDefault50Bays()));
   }
 
@@ -300,12 +326,8 @@ initializeEdgeDB();
 // 🔗 Hybrid API Client Implementation
 // --------------------------------------------------------------------------
 
-// 미들웨어 직접 통신 URL (Edge DB 오프라인 모드 전용)
-// 환경변수 또는 localStorage 설정에서 읽음
 const MIDDLEWARE_URL = import.meta.env.VITE_MIDDLEWARE_URL || localStorage.getItem('LM_MIDDLEWARE_URL') || 'http://127.0.0.1:5001';
-// [Fix-4] KIOSK_WS_KEY: .env 또는 localStorage 설정에서 읽음
 const KIOSK_WS_KEY = import.meta.env.VITE_KIOSK_WS_KEY || localStorage.getItem('LM_KIOSK_WS_KEY') || 'kiosk-ws-key-2025';
-// [Fix-4] 미들웨어 API Key: .env 또는 localStorage 설정에서 읽음
 const MIDDLEWARE_API_KEY_CLIENT = import.meta.env.VITE_MIDDLEWARE_API_KEY || localStorage.getItem('LM_MIDDLEWARE_API_KEY') || 'secret-key-changeme';
 export const isDemoEnvironment = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -320,13 +342,13 @@ export const isDemoEnvironment = (): boolean => {
 class HybridAPIClient {
   private terminalId: string;
   private isOnline: boolean = true;
-  private ws: WebSocket | null = null;                   // [Phase 2: WS-2] 실시간 WS 연결
+  private ws: WebSocket | null = null;
   private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private bayUpdateListeners: Array<(data: Bay) => void> = [];
 
   constructor() {
-    // 키오스크 단말기 고유 ID 생성 (윈도우 맥 주소 대체 등)
-    let tid = localStorage.getItem('LM_KIOSK_TERMINAL_ID');
+    const settings = getKioskSettings();
+    let tid = settings?.terminalId || localStorage.getItem('LM_KIOSK_TERMINAL_ID');
     if (!tid) {
       tid = `T-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
       localStorage.setItem('LM_KIOSK_TERMINAL_ID', tid);
@@ -334,18 +356,127 @@ class HybridAPIClient {
     this.terminalId = tid;
   }
 
-  public getStoreCd(): string {
-    return import.meta.env.VITE_STORE_CODE || localStorage.getItem('LM_STORE_CD') || STORE_CODE;
+  public getBaseUrl(): string {
+    const settings = getKioskSettings();
+    if (settings?.apiUrl) {
+      return normalizeApiUrl(settings.apiUrl);
+    }
+    return normalizeApiUrl(import.meta.env.VITE_BASE_URL || 'http://localhost:8000/api');
   }
 
-  getTerminalId() {
-    return this.terminalId;
+  public getWsBaseUrl(): string {
+    return this.getBaseUrl()
+      .replace(/\/api$/, '')
+      .replace(/^http:\/\//, 'ws://')
+      .replace(/^https:\/\//, 'wss://');
+  }
+
+  public getStoreCd(): string {
+    const settings = getKioskSettings();
+    return (
+      settings?.storeCode ||
+      (typeof window !== 'undefined' ? localStorage.getItem('LM_STORE_CD') : null) ||
+      import.meta.env.VITE_STORE_CODE ||
+      STORE_CODE
+    );
+  }
+
+  public getTerminalId(): string {
+    const settings = getKioskSettings();
+    return (
+      settings?.terminalId ||
+      (typeof window !== 'undefined' ? localStorage.getItem('LM_KIOSK_TERMINAL_ID') : null) ||
+      this.terminalId
+    );
+  }
+
+  /**
+   * 🔌 키오스크 단말기 목록 조회 (/v1/kiosk/terminals)
+   */
+  async getKioskTerminals(): Promise<any[]> {
+    try {
+      const storeCd = this.getStoreCd();
+      const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/terminals?store_cd=${encodeURIComponent(storeCd)}`, {
+        headers: this.getSecureHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data) ? data : data?.items || [];
+      }
+    } catch (err) {
+      console.warn('[Kiosk Terminals] Failed to load terminal list:', err);
+    }
+    return [];
+  }
+
+  /**
+   * 🔀 다중 사업자(PG/VAN) 단말기 라우팅 해석 (/v1/kiosk/terminals/resolve)
+   */
+  async resolveTerminalRoute(
+    deviceId: string,
+    merchantId?: string,
+    businessUnitType?: string
+  ): Promise<{
+    terminal_id: string;
+    provider_type?: string;
+    vcat_port?: number | string;
+    merchant_id?: string;
+    [key: string]: any;
+  }> {
+    const settings = getKioskSettings();
+    try {
+      const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/terminals/resolve`, {
+        method: 'POST',
+        headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          store_cd: this.getStoreCd(),
+          device_id: deviceId || settings.deviceId,
+          merchant_id: merchantId || null,
+          business_unit_type: businessUnitType || null,
+        }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('[Terminal Resolve] Failed to resolve terminal route, using local settings:', err);
+    }
+    return {
+      terminal_id: this.getTerminalId(),
+      provider_type: settings.providerType,
+      vcat_port: settings.vcatPort,
+      merchant_id: merchantId,
+    };
+  }
+
+  /**
+   * 📱 스마트 태그 (NFC / BLE UID) 회원 인증 (/v1/kiosk/smart-auth)
+   */
+  async authenticateSmartTag(tagUid: string): Promise<Member | null> {
+    try {
+      const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/smart-auth`, {
+        method: 'POST',
+        headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          store_cd: this.getStoreCd(),
+          tag_uid: tagUid,
+          token: tagUid,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && (data.member_no || data.member)) {
+          return (data.member || data) as Member;
+        }
+      }
+    } catch (err) {
+      console.warn('[SmartAuth] Failed to authenticate smart tag via /v1/kiosk/smart-auth:', err);
+    }
+    return this.getMember(tagUid);
   }
 
   /**
    * 🔄 백엔드 /api/v1/kiosk/master 마스터 데이터 연동 및 실시간 상태 바인딩
-   * - 온라인 시: /api/v1/kiosk/master 수신 후 Edge DB (localStorage) 및 state에 바인딩
-   * - 오프라인 시: Edge DB 캐시 로드
    */
   async getKioskMasterData(): Promise<KioskMasterResponse> {
     const isConnected = await this.checkConnection();
@@ -353,7 +484,7 @@ class HybridAPIClient {
 
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/master?store_cd=${encodeURIComponent(storeCd)}`, {
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/master?store_cd=${encodeURIComponent(storeCd)}`, {
           headers: this.getSecureHeaders()
         });
         if (res.ok) {
@@ -381,7 +512,7 @@ class HybridAPIClient {
     }
 
     const cachedBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
-    const baysToReturn = (cachedBays && cachedBays.length === 50) ? cachedBays : generateDefault50Bays();
+    const baysToReturn = (Array.isArray(cachedBays) && cachedBays.length > 0) ? cachedBays : generateDefault50Bays();
 
     const cachedZones = JSON.parse(localStorage.getItem('LM_ZONES') || '[]');
     const zonesToReturn = (cachedZones && cachedZones.length > 0) ? cachedZones : DEFAULT_50_ZONES;
@@ -402,12 +533,13 @@ class HybridAPIClient {
    * 범용 GET 요청 헬퍼 (백엔드 API 호출용)
    */
   async get<T = any>(endpoint: string): Promise<{ data: T }> {
-    const cleanUrl = endpoint.startsWith('http') ? endpoint : `${BASE_URL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+    const baseUrl = this.getBaseUrl();
+    const cleanUrl = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
     const res = await fetch(cleanUrl, {
       method: 'GET',
-      headers: {
+      headers: this.getSecureHeaders({
         'Content-Type': 'application/json',
-      },
+      }),
     });
     if (!res.ok) {
       throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
@@ -416,29 +548,21 @@ class HybridAPIClient {
     return { data };
   }
 
-  // 미들웨어 통합 제어 센터 헬스체크 (데모 쇼룸 및 엣지 모드 100% ONLINE 보장)
+  // 미들웨어 통합 제어 센터 헬스체크
   async getMiddlewareStatus(): Promise<{ online: boolean; status: string }> {
-    // 1. 데모 쇼룸 모드 또는 브라우저 데모 환경 감지 시 항상 ONLINE 반환
-    if (
-      import.meta.env.VITE_DEMO_MODE === 'true' ||
-      (typeof window !== 'undefined' && (
-        window.location.search.includes('demo=true') ||
-        window.location.pathname.includes('/demo/') ||
-        window.location.hostname === 'segnet.co.kr' ||
-        window.location.hostname === 'localhost'
-      ))
-    ) {
+    if (isDemoEnvironment()) {
       return { online: true, status: 'ONLINE' };
     }
 
     try {
-      const res = await fetch(`${BASE_URL}/v1/kiosk/middleware/status`, {
-        headers: { 'x-store-cd': this.getStoreCd() }
+      const storeCd = this.getStoreCd();
+      const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/middleware/status?store_cd=${encodeURIComponent(storeCd)}`, {
+        headers: this.getSecureHeaders()
       });
       if (res.ok) {
         return await res.json();
       }
-      return { online: true, status: 'ONLINE' }; // 엣지 오프라인 자율 모드 지원
+      return { online: true, status: 'ONLINE' };
     } catch {
       return { online: true, status: 'ONLINE' };
     }
@@ -460,8 +584,7 @@ class HybridAPIClient {
     }
     
     const storeCd = this.getStoreCd();
-    // [Fix-4] WS_BASE_URL 기반으로 동적 생성 (localhost:8000 하드코딩 제거)
-    const wsUrl = `${WS_BASE_URL}/ws/kiosk?store_cd=${encodeURIComponent(storeCd)}&terminal_id=${encodeURIComponent(this.terminalId)}&api_key=${encodeURIComponent(KIOSK_WS_KEY)}`;
+    const wsUrl = `${this.getWsBaseUrl()}/ws/kiosk?store_cd=${encodeURIComponent(storeCd)}&terminal_id=${encodeURIComponent(this.getTerminalId())}&api_key=${encodeURIComponent(KIOSK_WS_KEY)}`;
 
     const connect = () => {
       if (this.ws && this.ws.readyState <= WebSocket.OPEN) return;
@@ -587,7 +710,6 @@ class HybridAPIClient {
   // =========================================================================
   // [Phase 2: MW-1] Edge DB 오프라인 모드 전용 — 미들웨어 직접 HTTP 호출
   // 백엔드 서버가 다운된 상태에서도 타석 하드웨어를 가동합니다.
-  // MIDDLEWARE_URL은 localhost:5001 기본값 (LM_MIDDLEWARE_URL로 재정의 가능)
   // =========================================================================
   async activateMiddlewareDirect(bayNo: number, durationMin: number, memberName: string = '손님'): Promise<boolean> {
     const endTime = new Date();
@@ -631,9 +753,12 @@ class HybridAPIClient {
   // [Security Layer 2] 단말기 시큐어 헤더 공통 생성기
   getSecureHeaders(additionalHeaders: Record<string, string> = {}): Record<string, string> {
     const timestamp = Math.floor(Date.now() / 1000).toString();
+    const settings = getKioskSettings();
     return {
-      'x-store-cd': STORE_CODE,
-      'x-terminal-id': this.terminalId,
+      'x-store-cd': this.getStoreCd(),
+      'x-terminal-id': this.getTerminalId(),
+      'x-device-id': settings?.deviceId || 'dev-3',
+      ...(settings?.deviceKey ? { 'x-device-key': settings.deviceKey } : {}),
       'x-timestamp': timestamp,
       ...additionalHeaders
     };
@@ -641,7 +766,6 @@ class HybridAPIClient {
 
   // 네트워크 헬스 체크
   async checkConnection(): Promise<boolean> {
-    // 데모 쇼룸 환경에서는 localhost 백엔드 fetch를 시도하지 않고 즉시 Edge DB 사용
     if (isDemoEnvironment()) {
       this.isOnline = false;
       return false;
@@ -649,8 +773,8 @@ class HybridAPIClient {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2초 타임아웃
-      const res = await fetch(`${BASE_URL}/store`, { 
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch(`${this.getBaseUrl()}/store`, { 
         method: 'GET',
         headers: this.getSecureHeaders(),
         signal: controller.signal
@@ -670,6 +794,12 @@ class HybridAPIClient {
     checkin_policy: string;
     address: string;
     tel: string;
+    tel_no?: string;
+    biz_no: string;
+    ceo_name: string;
+    owner_nm?: string;
+    ceo_nm?: string;
+    close_time: string;
     logo_url?: string;
     photo_url?: string;
     meta_data?: any;
@@ -677,15 +807,25 @@ class HybridAPIClient {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/store-info?store_cd=${this.getStoreCd()}`);
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/store-info?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+          headers: this.getSecureHeaders()
+        });
         if (res.ok) {
           const data = await res.json();
           localStorage.setItem('LM_STORE_INFO', JSON.stringify(data));
+          const resolvedTel = data.phone_no || data.tel || data.tel_no || '02-450-4500';
+          const resolvedCeo = data.owner_nm || data.ceo_name || data.ceo_nm || '';
           return {
             store_nm: data.store_nm || 'SGM Golf Academy',
             checkin_policy: data.checkin_policy || 'CHECKIN_REQUIRED',
             address: data.address || '서울특별시 광진구 워커힐로 177',
-            tel: data.phone_no || data.tel || '02-450-4500',
+            tel: resolvedTel,
+            tel_no: resolvedTel,
+            biz_no: data.biz_no || data.business_no || '',
+            ceo_name: resolvedCeo,
+            owner_nm: resolvedCeo,
+            ceo_nm: resolvedCeo,
+            close_time: data.close_time || '23:00',
             logo_url: data.logo_url || undefined,
             photo_url: data.photo_url || undefined,
             meta_data: data.meta_data
@@ -697,11 +837,19 @@ class HybridAPIClient {
     }
     // Offline Fallback
     const cached = JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}');
+    const fallbackTel = cached.phone_no || cached.tel || cached.tel_no || '1566-8705';
+    const fallbackCeo = cached.owner_nm || cached.ceo_name || cached.ceo_nm || '대표이사';
     return {
       store_nm: cached.store_nm || '골포스 강남 1호점 (체험관)',
       checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED',
       address: cached.address || '서울특별시 강남구 테헤란로 123',
-      tel: cached.phone_no || cached.tel || '1566-8705',
+      tel: fallbackTel,
+      tel_no: fallbackTel,
+      biz_no: cached.biz_no || cached.business_no || '721-81-04039',
+      ceo_name: fallbackCeo,
+      owner_nm: fallbackCeo,
+      ceo_nm: fallbackCeo,
+      close_time: cached.close_time || '23:00',
       logo_url: cached.logo_url || undefined,
       photo_url: cached.photo_url || undefined,
       meta_data: cached.meta_data || { integration: { face_terminal_yn: true } }
@@ -712,7 +860,9 @@ class HybridAPIClient {
   async getKioskSystemSettings(): Promise<any> {
     if (isDemoEnvironment()) return null;
     try {
-      const res = await fetch(`${BASE_URL}/v1/kiosk/config?store_cd=${this.getStoreCd()}`);
+      const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/config?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+        headers: this.getSecureHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         return data || null;
@@ -738,22 +888,33 @@ class HybridAPIClient {
     const isConnected = await this.checkConnection();
     console.log(`[LM_KIOSK] Auth Query: "${query}". Network Connection: ${isConnected ? 'ONLINE' : 'OFFLINE(EdgeDB)'}`);
     
-    // Normalize QR prefix if present (e.g. QR-M260501 -> M260501)
-    const normalizedQuery = query.replace(/^(QR[-_]?|MEMBER[-_]?)/i, '');
+    // Normalize QR prefix if present (e.g. GOLFOS_MEMBER_M260501 / QR-M260501 -> M260501)
+    const normalizedQuery = query.replace(/^(GOLFOS[-_]?MEMBER[-_]?|QR[-_]?|MEMBER[-_]?)/i, '');
     const searchTarget = normalizedQuery || query;
 
     if (isConnected) {
+      let duplicateErr: Error | null = null;
       try {
-        // 백엔드 키오스크 전용 익명 회원 조회 API 호출 (/v1/kiosk/member 경로 매핑)
-        const res = await fetch(`${BASE_URL}/v1/kiosk/member?store_cd=${STORE_CODE}&query=${encodeURIComponent(searchTarget)}`);
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/member?store_cd=${encodeURIComponent(this.getStoreCd())}&query=${encodeURIComponent(searchTarget)}`, {
+          headers: this.getSecureHeaders()
+        });
         if (res.ok) {
           const member = await res.json();
           if (member) {
             return member as Member;
           }
+        } else if (res.status === 409) {
+          const errData = await res.json().catch(() => ({ detail: '동일한 뒷번호 회원이 2명 이상 존재합니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.' }));
+          const msg = errData.detail || '동일한 뒷번호 회원이 2명 이상 존재합니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.';
+          duplicateErr = Object.assign(new Error(msg), { duplicate: true, status: 409, message: msg });
+        } else if (res.status === 404) {
+          return null;
         }
       } catch (err) {
         console.error('Backend member query failed. Falling back to EdgeDB:', err);
+      }
+      if (duplicateErr) {
+        throw duplicateErr;
       }
     }
 
@@ -785,7 +946,9 @@ class HybridAPIClient {
     };
 
     try {
-      const res = await fetch(`${BASE_URL}/v1/public/stores/${STORE_CODE}/terms`);
+      const res = await fetch(`${this.getBaseUrl()}/v1/public/stores/${encodeURIComponent(this.getStoreCd())}/terms`, {
+        headers: this.getSecureHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         return {
@@ -807,13 +970,16 @@ class HybridAPIClient {
     
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/bays/`, {
-          headers: { 'x-store-cd': this.getStoreCd() }
+        const res = await fetch(`${this.getBaseUrl()}/bays/`, {
+          headers: this.getSecureHeaders()
         });
         if (res.ok) {
           const bayList = (await res.json()) as Bay[];
           if (bayList && bayList.length > 0 && bayList[0].server_epoch_ms) {
             TimeMaster.syncServerTime(bayList[0].server_epoch_ms);
+          }
+          if (Array.isArray(bayList) && bayList.length > 0) {
+            localStorage.setItem('LM_BAYS', JSON.stringify(bayList));
           }
           return bayList;
         }
@@ -823,7 +989,7 @@ class HybridAPIClient {
     }
 
     let bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
-    if (!bays || bays.length !== 50) {
+    if (!Array.isArray(bays) || bays.length === 0) {
       bays = generateDefault50Bays();
     }
     const now = new Date();
@@ -832,7 +998,6 @@ class HybridAPIClient {
       if (bay.status === 'OCCUPIED' && bay.end_time) {
         const endDt = TimeMaster.parseSessionEnd(bay.end_time, now);
         if (endDt && endDt <= now) {
-          // 이용시간 종료 -> 빈 타석으로 변경
           return {
             ...bay,
             status: 'AVAILABLE',
@@ -855,7 +1020,6 @@ class HybridAPIClient {
     return updatedBays;
   }
 
-  // 3. 타석 선점 (Preoccupy) - 동시성 방어용
   // 3. 타석 선점 (Pre-emption) - 단일 및 다중 타석 지원
   async preoccupyBay(bayNo: number): Promise<boolean> {
     return this.preoccupyBays([bayNo]);
@@ -867,19 +1031,15 @@ class HybridAPIClient {
     
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/bays/preoccupy`, {
+        const res = await fetch(`${this.getBaseUrl()}/bays/preoccupy`, {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-store-cd': STORE_CODE
-          },
+          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             bay_nos: bayNos,
-            terminal_id: this.terminalId
+            terminal_id: this.getTerminalId()
           })
         });
         if (res.ok) return true;
-        // 서버가 명시적으로 점유 거절(409/400 등)한 경우 Edge DB로 Fallback하지 않고 즉시 실패 반환
         if (res.status === 409 || res.status === 400 || res.status === 422) {
           console.warn(`[Preoccupy] 서버에서 타석 선점 거절 (HTTP ${res.status})`);
           return false;
@@ -902,13 +1062,13 @@ class HybridAPIClient {
 
     if (allAvailable) {
       const expires = new Date();
-      expires.setMinutes(expires.getMinutes() + 2); // 다중선점은 2분간 유효
+      expires.setMinutes(expires.getMinutes() + 2);
       
       bayNos.forEach(bayNo => {
         const idx = bays.findIndex(b => b.bay_no === bayNo);
         if (idx !== -1) {
           bays[idx].status = 'PRE_OCCUPIED';
-          bays[idx].lock_terminal_id = this.terminalId;
+          bays[idx].lock_terminal_id = this.getTerminalId();
           bays[idx].lock_expired_at = expires.toISOString();
         }
       });
@@ -930,7 +1090,9 @@ class HybridAPIClient {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/checkin/reservations?store_cd=${this.getStoreCd()}&member_no=${memberNo}`);
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/checkin/reservations?store_cd=${encodeURIComponent(this.getStoreCd())}&member_no=${encodeURIComponent(memberNo)}`, {
+          headers: this.getSecureHeaders()
+        });
         if (res.ok) {
           return await res.json();
         }
@@ -943,13 +1105,13 @@ class HybridAPIClient {
     return reservations.filter(r => r.member_no === memberNo && ['RSV', 'REQ', 'HOLD', 'CHK'].includes(r.status_cd));
   }
 
-  async verifyKioskCheckin(memberNo: string, resId?: string): Promise<{ success: boolean; message: string; bay_no?: number }> {
+  async verifyKioskCheckin(memberNo: string, resId?: string): Promise<{ success: boolean; message: string; bay_no?: number; duration_min?: number; start_time?: string; end_time?: string }> {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/checkin/verify`, {
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/checkin/verify`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             store_cd: this.getStoreCd(),
             member_no: memberNo,
@@ -971,7 +1133,14 @@ class HybridAPIClient {
       target.status_cd = 'CHK';
       localStorage.setItem('LM_RESERVATIONS', JSON.stringify(reservations));
       const bayNo = parseInt(target.resource_no || '1') || 1;
-      return { success: true, message: `${bayNo}번 타석 체크인이 완료되었습니다.`, bay_no: bayNo };
+      return {
+        success: true,
+        message: `${bayNo}번 타석 체크인이 완료되었습니다.`,
+        bay_no: bayNo,
+        duration_min: target.duration_min,
+        start_time: target.start_time,
+        end_time: target.end_time,
+      };
     }
     return { success: false, message: '당일 체크인 가능한 타석 예약 내역이 없습니다.' };
   }
@@ -982,15 +1151,12 @@ class HybridAPIClient {
     
     if (isConnected) {
       try {
-        await fetch(`${BASE_URL}/bays/release`, {
+        await fetch(`${this.getBaseUrl()}/bays/release`, {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-store-cd': STORE_CODE
-          },
+          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             bay_nos: bayNos,
-            terminal_id: this.terminalId
+            terminal_id: this.getTerminalId()
           })
         });
         return;
@@ -1003,7 +1169,7 @@ class HybridAPIClient {
     const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
     bayNos.forEach(bayNo => {
       const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
-      if (targetIdx !== -1 && bays[targetIdx].status === 'PRE_OCCUPIED' && bays[targetIdx].lock_terminal_id === this.terminalId) {
+      if (targetIdx !== -1 && bays[targetIdx].status === 'PRE_OCCUPIED' && bays[targetIdx].lock_terminal_id === this.getTerminalId()) {
         bays[targetIdx].status = 'AVAILABLE';
         bays[targetIdx].lock_terminal_id = null;
         bays[targetIdx].lock_expired_at = null;
@@ -1031,12 +1197,9 @@ class HybridAPIClient {
     valid_to?: string;
     valid_from?: string;
   }> {
-    const cleanBase = BASE_URL.replace(/\/api$/, '');
+    const cleanBase = this.getBaseUrl().replace(/\/api$/, '');
     const res = await fetch(`${cleanBase}/api/marketing/coupons/verify/${encodeURIComponent(couponNo)}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'x-store-cd': STORE_CODE
-      }
+      headers: this.getSecureHeaders({ 'Content-Type': 'application/json' })
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -1062,13 +1225,10 @@ class HybridAPIClient {
     success?: boolean;
     message?: string;
   }> {
-    const cleanBase = BASE_URL.replace(/\/api$/, '');
+    const cleanBase = this.getBaseUrl().replace(/\/api$/, '');
     const res = await fetch(`${cleanBase}/api/marketing/coupons/register-serial`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-store-cd': STORE_CODE
-      },
+      headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         serial_code: serialCode.trim(),
         member_no: memberNo
@@ -1081,7 +1241,7 @@ class HybridAPIClient {
     return res.json();
   }
 
-  // 5. 타석 최종 배정 완료 — [BUG-1·2·3 FIX] 통합 API 단일 호출 (/v1/kiosk/allocate-bay)
+  // 5. 타석 최종 배정 완료 — 통합 API 단일 호출 (/v1/kiosk/allocate-bay)
   async allocateBay(
     bayNo: number, 
     durationMin: number, 
@@ -1093,7 +1253,16 @@ class HybridAPIClient {
     amount: number = 0,
     paymentApproval?: Partial<CardApprovalResult>,
     couponNo?: string,
-    discountAmount?: number
+    discountAmount?: number,
+    extraOrUsedPoints?: {
+      usedPoints?: number;
+      gradeDiscountAmount?: number;
+      prodCd?: string;
+      acceptClosingTruncate?: boolean;
+    } | number,
+    gradeDiscountAmount?: number,
+    prodCd?: string,
+    acceptClosingTruncate?: boolean
   ): Promise<{ 
     success: boolean; 
     res_id?: string; 
@@ -1101,6 +1270,8 @@ class HybridAPIClient {
     hardware_success?: boolean; 
     start_time?: string; 
     end_time?: string; 
+    start_date?: string;
+    end_date?: string;
     is_chained?: boolean;
     closingPrompt?: {
       code: string;
@@ -1113,17 +1284,22 @@ class HybridAPIClient {
   }> {
     const isConnected = await this.checkConnection();
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const storeCd = this.getStoreCd();
+    const extraOptions = typeof extraOrUsedPoints === 'object' && extraOrUsedPoints !== null
+      ? extraOrUsedPoints
+      : {
+          usedPoints: typeof extraOrUsedPoints === 'number' ? extraOrUsedPoints : 0,
+          gradeDiscountAmount: gradeDiscountAmount ?? 0,
+          prodCd: prodCd,
+          acceptClosingTruncate: acceptClosingTruncate,
+        };
 
     if (isConnected) {
       try {
-        // [BUG-1 FIX] 백엔드 SSOT 라우트 표준 (/v1/kiosk/allocate-bay) 일치화
         const parsedItemId = memberItemId !== undefined && memberItemId !== null ? Number(memberItemId) : null;
-        const res = await fetch(`${BASE_URL}/v1/kiosk/allocate-bay?store_cd=${STORE_CODE}`, {
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/allocate-bay?store_cd=${encodeURIComponent(storeCd)}`, {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-store-cd': STORE_CODE
-          },
+          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             bay_no: bayNo,
             duration_min: durationMin,
@@ -1131,11 +1307,15 @@ class HybridAPIClient {
             guest_name: guestName || null,
             hp_no: hpNo || null,
             member_item_id: isNaN(parsedItemId as number) ? null : parsedItemId,
-            payment_method: paymentMethod,     // TICKET(회원권) | CARD(일일권)
-            terminal_id: this.terminalId,      // 선점 락 검증 필수값
-            amount: amount,                    // 일일권 결제 금액
-            coupon_no: couponNo || null,       // 적용 쿠폰 번호
-            discount_amount: discountAmount || 0, // 쿠폰 할인액
+            payment_method: paymentMethod,
+            terminal_id: paymentApproval?.terminal_id || this.getTerminalId(),
+            amount: amount,
+            prod_cd: extraOptions?.prodCd || null,
+            coupon_no: couponNo || null,
+            discount_amount: discountAmount || 0,
+            used_points: extraOptions?.usedPoints ?? 0,
+            grade_discount_amount: extraOptions?.gradeDiscountAmount ?? 0,
+            ...(extraOptions?.acceptClosingTruncate !== undefined ? { accept_closing_truncate: extraOptions.acceptClosingTruncate } : {}),
             approval_no: paymentApproval?.auth_code || null,
             issuer_name: paymentApproval?.issuer_name || null,
             acquirer_name: paymentApproval?.acquirer_name || null,
@@ -1148,7 +1328,6 @@ class HybridAPIClient {
 
         if (res.ok) {
           const data = await res.json();
-          // 로컬스토리지 즉시 동기화 (폴링 5초 지연 없이 UI 반영)
           const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
           const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
           if (targetIdx !== -1) {
@@ -1170,6 +1349,8 @@ class HybridAPIClient {
             hardware_success: data.hardware_success,
             start_time: data.start_time,
             end_time: data.end_time,
+            start_date: data.start_date,
+            end_date: data.end_date,
             is_chained: data.is_chained
           };
         } else {
@@ -1177,7 +1358,6 @@ class HybridAPIClient {
           let errMsg: string = '';
           let closingPromptData = undefined;
 
-          // CLOSING_TRUNCATE_PROMPT 응답 파싱
           if (typeof errData.detail === 'string') {
             try {
               const parsed = JSON.parse(errData.detail);
@@ -1208,8 +1388,21 @@ class HybridAPIClient {
           };
         }
       } catch (err) {
-        console.error('[BUG-1 FIX] 통합 배정 API 호출 실패, Edge DB 폴백:', err);
+        console.error('[BUG-1 FIX] 통합 배정 API 호출 실패:', err);
+        if (paymentMethod === 'CARD' && (amount ?? 0) > 0) {
+          return {
+            success: false,
+            message: '서버 통신 오류로 타석 배정에 실패했습니다.'
+          };
+        }
       }
+    }
+
+    if (paymentMethod === 'CARD' && (amount ?? 0) > 0 && !isDemoEnvironment()) {
+      return {
+        success: false,
+        message: '서버 통신 오류로 타석 배정에 실패했습니다.'
+      };
     }
 
     // Edge DB 모드 (offline fallback)
@@ -1231,14 +1424,13 @@ class HybridAPIClient {
 
       localStorage.setItem('LM_BAYS', JSON.stringify(bays));
       
-      // 일일권 매입 기록 (Edge DB)
       if (paymentMethod === 'CARD' && !memberNo) {
         const sales = JSON.parse(localStorage.getItem('LM_SALES') || '[]') as unknown[];
         sales.push({
           sale_id: `S-${Date.now()}`,
           sale_dt: todayStr,
-          total_amt: amount || (durationMin === 60 ? 15000 : 20000),
-          pay_amt: amount || (durationMin === 60 ? 15000 : 20000),
+          total_amt: amount || 20000,
+          pay_amt: amount || 20000,
           pay_method: 'CARD',
           items: `일일 타석권 ${durationMin}분 배정`,
           status: 'COMPLETED'
@@ -1246,8 +1438,6 @@ class HybridAPIClient {
         localStorage.setItem('LM_SALES', JSON.stringify(sales));
       }
 
-      // [Phase 2: MW-1] Edge DB 오프라인 모드에서 미들웨어 직접 가동
-      // 백엔드가 다운되어도 하드웨어(타석)는 실제로 작동해야 함
       const mwSuccess = await this.activateMiddlewareDirect(
         bayNo, 
         durationMin, 
@@ -1264,84 +1454,131 @@ class HybridAPIClient {
           ? '타석 배정이 완료되었습니다. (Edge DB 저장)'
           : '타석 배정이 완료되었으나 기기 가동에 실패했습니다. 직원에게 문의해주세요.'
       };
-
     }
 
     return { success: false, message: '타석 상태 변경 실패' };
   }
 
-  // 6. 타석 이동 (사용 중인 타석 변경)
-  async moveBay(memberNo: string, targetBayNo: number): Promise<{ success: boolean; message: string }> {
-    const isConnected = await this.checkConnection();
+  // 5-B. 다중 동반자 타석 배정 (CLOSING_TRUNCATE_PROMPT 및 acceptClosingTruncate 지원)
+  async allocateGroupBays(
+    targets: Array<{
+      bayNo: number;
+      durationMin: number;
+      memberNo?: string;
+      memberName?: string;
+      hp?: string;
+      memberItemId?: number | string;
+      paymentMethod?: 'TICKET' | 'CARD';
+      amount?: number;
+      prodCd?: string;
+    }>,
+    paymentApproval?: Partial<CardApprovalResult>,
+    options?: {
+      acceptClosingTruncate?: boolean;
+      couponNo?: string;
+      discountAmount?: number;
+      usedPoints?: number;
+      gradeDiscountAmount?: number;
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    results?: any[];
+    allocatedBayNos?: number[];
+    closingPrompt?: {
+      code: string;
+      max_available_min: number;
+      total_gap_min?: number;
+      prepare_min?: number;
+      close_time: string;
+      message: string;
+    };
+  }> {
+    const results: any[] = [];
+    const allocatedBayNos: number[] = [];
 
-    if (isConnected) {
-      try {
-        // 1. 회원의 현재 실시간 이용 중(USE) 또는 체크인(CHK) 예약 내역 조회
-        const resList = await this.getMemberCheckinReservations(memberNo);
-        const activeRes = resList.find(r => r.status_cd === 'USE' || r.status_cd === 'CHK' || r.status === 'OCCUPIED');
-
-        if (activeRes && activeRes.res_id) {
-          const moveRes = await fetch(`${BASE_URL}/reservations/${activeRes.res_id}/move`, {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-store-cd': STORE_CODE
-            },
-            body: JSON.stringify({
-              resource_no: targetBayNo
-            })
-          });
-
-          if (moveRes.ok) {
-            const data = await moveRes.json();
-            return {
-              success: true,
-              message: data.message || `타석이 ${targetBayNo}번으로 성공적으로 변경되었습니다.`
-            };
-          }
+    for (const t of targets) {
+      const pMethod = t.paymentMethod || ((t.amount ?? 0) > 0 ? 'CARD' : 'TICKET');
+      const res = await this.allocateBay(
+        t.bayNo,
+        t.durationMin,
+        t.memberNo,
+        t.memberName,
+        t.hp,
+        t.memberItemId,
+        pMethod,
+        t.amount ?? 0,
+        paymentApproval,
+        options?.couponNo,
+        options?.discountAmount,
+        {
+          usedPoints: options?.usedPoints,
+          gradeDiscountAmount: options?.gradeDiscountAmount,
+          prodCd: t.prodCd,
+          acceptClosingTruncate: options?.acceptClosingTruncate,
         }
-      } catch (err) {
-        console.error('Online moveBay failed, falling back to Edge DB:', err);
+      );
+
+      if (!res.success) {
+        for (const bNo of allocatedBayNos) {
+          await this.releaseBay(bNo).catch(() => {});
+        }
+        return {
+          success: false,
+          message: res.message || `${t.bayNo}번 동반자 타석 배정에 실패했습니다.`,
+          allocatedBayNos,
+          closingPrompt: res.closingPrompt,
+        };
       }
+
+      allocatedBayNos.push(t.bayNo);
+      results.push(res);
     }
 
-    // 2. Edge DB 모드 (Fallback)
-    const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
-    
-    let searchName = memberNo;
-    const member = await this.getMember(memberNo);
-    if (member) {
-      searchName = member.member_name;
+    return {
+      success: true,
+      message: '동반자 타석 배정이 완료되었습니다.',
+      results,
+      allocatedBayNos,
+    };
+  }
+
+  // 6. 타석 이동 (사용 중인 타석 변경 — POST /v1/kiosk/bays/move)
+  async moveBay(memberNo: string, targetBayNo: number, oldBayNo?: number): Promise<{ success: boolean; message: string; old_bay_no?: number; new_bay_no?: number }> {
+    try {
+      const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/bays/move`, {
+        method: 'POST',
+        headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          store_cd: this.getStoreCd(),
+          member_no: memberNo,
+          old_bay_no: oldBayNo ?? null,
+          new_bay_no: targetBayNo,
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          success: data.success !== false,
+          message: data.message || `타석이 ${targetBayNo}번으로 성공적으로 변경되었습니다.`,
+          old_bay_no: data.old_bay_no,
+          new_bay_no: data.new_bay_no ?? targetBayNo,
+        };
+      } else {
+        const errData = await res.json().catch(() => ({ detail: `타석 이동에 실패했습니다. (HTTP ${res.status})` }));
+        const errMsg = typeof errData.detail === 'string'
+          ? errData.detail
+          : (errData.detail?.message || errData.message || '타석 이동을 진행할 수 없습니다.');
+        return { success: false, message: errMsg };
+      }
+    } catch (err) {
+      console.error('Online moveBay failed:', err);
+      return {
+        success: false,
+        message: err instanceof Error ? err.message : '서버 통신 오류로 타석 이동에 실패했습니다.'
+      };
     }
-
-    const sourceIdx = bays.findIndex(b => 
-      b.status === 'OCCUPIED' && 
-      (b.current_user_name === searchName || b.current_user_name === memberNo || (b.current_user_name && b.current_user_name.includes(searchName)))
-    );
-    const destIdx = bays.findIndex(b => b.bay_no === targetBayNo && b.status === 'AVAILABLE');
-
-    if (sourceIdx !== -1 && destIdx !== -1) {
-      const sourceBay = bays[sourceIdx];
-      
-      // 대상 타석으로 정보 복사
-      bays[destIdx].status = 'OCCUPIED';
-      bays[destIdx].current_user_name = sourceBay.current_user_name;
-      bays[destIdx].current_user_hp = sourceBay.current_user_hp;
-      bays[destIdx].end_time = sourceBay.end_time;
-      bays[destIdx].minutes_left = sourceBay.minutes_left;
-
-      // 기존 타석 비우기
-      bays[sourceIdx].status = 'AVAILABLE';
-      bays[sourceIdx].current_user_name = null;
-      bays[sourceIdx].current_user_hp = null;
-      bays[sourceIdx].end_time = null;
-      bays[sourceIdx].minutes_left = undefined;
-
-      localStorage.setItem('LM_BAYS', JSON.stringify(bays));
-      return { success: true, message: `타석이 ${targetBayNo}번으로 성공적으로 변경되었습니다.` };
-    }
-
-    return { success: false, message: '타석 변경 대상을 찾을 수 없거나 목적지 타석이 비어있지 않습니다.' };
   }
 
   // 7. 상품 목록 가져오기
@@ -1349,12 +1586,24 @@ class HybridAPIClient {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/products?store_cd=${STORE_CODE}`);
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/products?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+          headers: this.getSecureHeaders()
+        });
         if (res.ok) {
           const prods = await res.json();
           if (Array.isArray(prods) && prods.length > 0) {
-            localStorage.setItem('LM_PRODUCTS', JSON.stringify(prods));
-            return prods;
+            const normalizedProds: Product[] = prods.map((p: any) => ({
+              ...p,
+              vat_yn: p.vat_yn,
+              tax_rate: p.tax_rate,
+              business_unit_type: p.business_unit_type,
+              business_merchant_id: p.business_merchant_id,
+              pro_id: p.pro_id,
+              total_count: p.total_count,
+              access_rules: p.access_rules,
+            }));
+            localStorage.setItem('LM_PRODUCTS', JSON.stringify(normalizedProds));
+            return normalizedProds;
           }
         }
       } catch (err) {
@@ -1372,18 +1621,40 @@ class HybridAPIClient {
     apprNo?: string,
     vanTrNo?: string,
     couponNo?: string,
-    discountAmount?: number
-  ): Promise<{ success: boolean; message: string; sale_id?: string; item_id?: number }> {
+    discountAmount?: number,
+    extraOrUsedPoints?: {
+      usedPoints?: number;
+      gradeDiscountAmount?: number;
+      terminalId?: string;
+      cardNoMasked?: string;
+      issuerName?: string;
+      acquirerName?: string;
+      installmentMonths?: number;
+      rawData?: string;
+      cardApproval?: Partial<CardApprovalResult>;
+    } | number,
+    gradeDiscountAmount?: number,
+    cardApprovalArg?: Partial<CardApprovalResult>
+  ): Promise<{ success: boolean; message: string; sale_id?: string; item_id?: number; start_date?: string; end_date?: string }> {
     const products = await this.getProducts();
     const targetProd = products.find(p => p.prod_cd === prodCd);
     
     if (!targetProd) return { success: false, message: '상품 정보를 찾을 수 없습니다.' };
 
-    // [Online Sync] 백엔드 연결 가능 시 실제 원장 및 MemberItem 동기화
+    const storeCd = this.getStoreCd();
+    const extraPaymentInfo = typeof extraOrUsedPoints === 'object' && extraOrUsedPoints !== null
+      ? extraOrUsedPoints
+      : {
+          usedPoints: typeof extraOrUsedPoints === 'number' ? extraOrUsedPoints : 0,
+          gradeDiscountAmount: gradeDiscountAmount ?? 0,
+          cardApproval: cardApprovalArg,
+        };
+    const cardApp = extraPaymentInfo?.cardApproval;
     const isConnected = await this.checkConnection();
-    if (isConnected) {
+
+    if (isConnected || !isDemoEnvironment()) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/products/purchase?store_cd=${STORE_CODE}`, {
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/products/purchase?store_cd=${encodeURIComponent(storeCd)}`, {
           method: 'POST',
           headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
@@ -1391,30 +1662,52 @@ class HybridAPIClient {
             prod_cd: prodCd,
             pay_amt: payAmt,
             pay_method: 'CARD',
-            store_cd: STORE_CODE,
-            appr_no: apprNo,
-            van_tr_no: vanTrNo,
+            store_cd: storeCd,
+            appr_no: apprNo || cardApp?.auth_code || null,
+            van_tr_no: vanTrNo || cardApp?.van_tr_no || null,
             coupon_no: couponNo || null,
-            discount_amount: discountAmount || 0
+            discount_amount: discountAmount || 0,
+            used_points: extraPaymentInfo?.usedPoints ?? 0,
+            grade_discount_amount: extraPaymentInfo?.gradeDiscountAmount ?? 0,
+            terminal_id: extraPaymentInfo?.terminalId || cardApp?.terminal_id || this.getTerminalId(),
+            card_no_masked: extraPaymentInfo?.cardNoMasked || cardApp?.card_no_masked || null,
+            issuer_name: extraPaymentInfo?.issuerName || cardApp?.issuer_name || null,
+            acquirer_name: extraPaymentInfo?.acquirerName || cardApp?.acquirer_name || null,
+            installment_months: extraPaymentInfo?.installmentMonths ?? cardApp?.installment_months ?? 0,
+            raw_data: extraPaymentInfo?.rawData || cardApp?.raw_response || null,
           })
         });
         if (res.ok) {
           const data = await res.json();
-          // EdgeDB 동기화
           this.syncLocalMemberProduct(memberNo, targetProd, payAmt);
           return {
             success: true,
             sale_id: data.sale_id,
             item_id: data.item_id,
+            start_date: data.start_date,
+            end_date: data.end_date,
             message: data.message || `${targetProd.prod_nm} 구매 및 결제가 완료되었습니다.`
+          };
+        } else {
+          const errData = await res.json().catch(() => ({ detail: '상품 구매 처리 실패' }));
+          const errMsg = typeof errData.detail === 'string'
+            ? errData.detail
+            : (errData.detail?.message || errData.message || '상품 구매 처리 실패');
+          return {
+            success: false,
+            message: errMsg
           };
         }
       } catch (err) {
-        console.warn('[Kiosk Purchase] 백엔드 구매 API 실패, EdgeDB 폴백 진행:', err);
+        console.error('[Kiosk Purchase] 백엔드 구매 API 실패:', err);
+        return {
+          success: false,
+          message: err instanceof Error ? err.message : '상품 구매 처리 실패'
+        };
       }
     }
 
-    // [Offline EdgeDB Fallback]
+    // [Demo Mode Offline Fallback Only]
     this.syncLocalMemberProduct(memberNo, targetProd, payAmt);
     return { success: true, message: `${targetProd.prod_nm} 구매 및 결제가 완료되었습니다.` };
   }
@@ -1465,12 +1758,14 @@ class HybridAPIClient {
     }
   }
 
-  // 9. 라카 목록 가져오기 (특정 회원의 라카만 가져오는 것도 필요하지만, 기존 호환을 위해 유지)
+  // 9. 라카 목록 가져오기
   async getLockers(): Promise<Locker[]> {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/lockers?store_cd=${STORE_CODE}`);
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/lockers?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+          headers: this.getSecureHeaders()
+        });
         if (res.ok) {
           return await res.json() as Locker[];
         }
@@ -1486,7 +1781,9 @@ class HybridAPIClient {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/members/${memberNo}/lockers?store_cd=${STORE_CODE}`);
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/members/${encodeURIComponent(memberNo)}/lockers?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+          headers: this.getSecureHeaders()
+        });
         if (res.ok) {
           return await res.json() as Locker[];
         }
@@ -1504,24 +1801,41 @@ class HybridAPIClient {
     lockerId: number,
     amount: number,
     prodCd: string
-  ): Promise<{ success: boolean; res_id: string; message: string }> {
+  ): Promise<{ success: boolean; res_id: string; resId: string; message: string }> {
     const isConnected = await this.checkConnection();
-    if (isConnected) {
+    if (isConnected || !isDemoEnvironment()) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/lockers/extend/hold?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/lockers/extend/hold?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
           method: 'POST',
           headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ locker_id: lockerId, amount, prod_cd: prodCd })
         });
         if (res.ok) {
-          return await res.json();
+          const data = await res.json();
+          const rId = data.res_id || data.resId || '';
+          return {
+            success: data.success !== false && Boolean(rId),
+            res_id: rId,
+            resId: rId,
+            message: data.message || '라카 연장 대기 완료'
+          };
+        } else {
+          const errData = await res.json().catch(() => ({ detail: '라카 연장 예약 생성 실패' }));
+          const errMsg = typeof errData.detail === 'string' ? errData.detail : (errData.detail?.message || errData.message || '라카 연장 예약 생성 실패');
+          return { success: false, res_id: '', resId: '', message: errMsg };
         }
       } catch (err) {
-        console.error('[Locker Hold API] 백엔드 HOLD 생성 실패, EdgeDB 폴백:', err);
+        console.error('[Locker Hold API] 백엔드 HOLD 생성 실패:', err);
+        return {
+          success: false,
+          res_id: '',
+          resId: '',
+          message: err instanceof Error ? err.message : '라카 연장 예약 생성 중 통신 오류가 발생했습니다.'
+        };
       }
     }
     const resId = `RES_LOCKER_${Date.now()}_${lockerId}`;
-    return { success: true, res_id: resId, message: '오프라인 라카 연장 대기 완료' };
+    return { success: true, res_id: resId, resId, message: '오프라인 라카 연장 대기 완료' };
   }
 
   // 10. 라카 연장 처리
@@ -1531,29 +1845,76 @@ class HybridAPIClient {
     payAmt: number,
     resId?: string,
     couponNo?: string,
-    couponDiscount?: number
-  ): Promise<{ success: boolean; message: string }> {
-    // [Online Sync] 백엔드 HOLD 예약 결제 확정 웹훅 전송
+    couponDiscount?: number,
+    extraOrUsedPoints?: {
+      usedPoints?: number;
+      gradeDiscountAmount?: number;
+      prodCd?: string;
+      cardApproval?: Partial<CardApprovalResult>;
+    } | number,
+    gradeDiscountAmount?: number,
+    cardApprovalArg?: Partial<CardApprovalResult>
+  ): Promise<{ success: boolean; message: string; start_date?: string; end_date?: string }> {
+    if (!resId) {
+      return { success: false, message: '라카 연장 예약 번호(resId)가 누락되었습니다.' };
+    }
+
+    const extraPaymentInfo = typeof extraOrUsedPoints === 'object' && extraOrUsedPoints !== null
+      ? extraOrUsedPoints
+      : {
+          usedPoints: typeof extraOrUsedPoints === 'number' ? extraOrUsedPoints : 0,
+          gradeDiscountAmount: gradeDiscountAmount ?? 0,
+          cardApproval: cardApprovalArg,
+        };
+
     const isConnected = await this.checkConnection();
-    if (isConnected && resId) {
+    let backendStartDate: string | undefined;
+    let backendEndDate: string | undefined;
+
+    if (isConnected || !isDemoEnvironment()) {
       try {
-        const webhookRes = await fetch(`${BASE_URL}/v1/kiosk/payment-webhook?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+        const cardApp = extraPaymentInfo?.cardApproval;
+        const webhookRes = await fetch(`${this.getBaseUrl()}/v1/kiosk/payment-webhook?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
           method: 'POST',
           headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             res_id: resId,
             amount: payAmt,
             payment_method: 'CARD',
-            terminal_id: this.getTerminalId(),
-            coupon_no: couponNo,
-            coupon_discount: couponDiscount
+            terminal_id: cardApp?.terminal_id || this.getTerminalId(),
+            coupon_no: couponNo || null,
+            coupon_discount: couponDiscount || 0,
+            used_points: extraPaymentInfo?.usedPoints ?? 0,
+            grade_discount_amount: extraPaymentInfo?.gradeDiscountAmount ?? 0,
+            prod_cd: extraPaymentInfo?.prodCd || null,
+            approval_no: cardApp?.auth_code || null,
+            van_tr_no: cardApp?.van_tr_no || cardApp?.auth_code || null,
+            card_no_masked: cardApp?.card_no_masked || null,
+            issuer_name: cardApp?.issuer_name || null,
+            acquirer_name: cardApp?.acquirer_name || null,
+            installment_months: cardApp?.installment_months ?? 0,
+            raw_data: cardApp?.raw_response || null,
           })
         });
         if (!webhookRes.ok) {
-          console.warn('[Locker Webhook] 백엔드 결제 웹훅 응답 비정상:', webhookRes.status);
+          const errData = await webhookRes.json().catch(() => ({ detail: `라카 연장 결제 확정 실패 (HTTP ${webhookRes.status})` }));
+          const errMsg = typeof errData.detail === 'string'
+            ? errData.detail
+            : (errData.detail?.message || errData.message || '라카 연장 결제 확정에 실패했습니다.');
+          return { success: false, message: errMsg };
         }
+        const webhookData = await webhookRes.json().catch(() => ({}));
+        if (webhookData && webhookData.success === false) {
+          return { success: false, message: webhookData.message || '라카 연장 처리에 실패했습니다.' };
+        }
+        backendStartDate = webhookData?.start_date || webhookData?.start_dt;
+        backendEndDate = webhookData?.end_date || webhookData?.end_dt;
       } catch (err) {
-        console.warn('[Locker Webhook] 백엔드 웹훅 전송 실패, EdgeDB 폴백 진행:', err);
+        console.error('[Locker Webhook] 백엔드 웹훅 전송 실패:', err);
+        return {
+          success: false,
+          message: err instanceof Error ? err.message : '라카 연장 결제 처리 중 서버 통신 오류가 발생했습니다.'
+        };
       }
     }
 
@@ -1578,16 +1939,14 @@ class HybridAPIClient {
       const existingEnd = lockers[lIdx].end_dt ? new Date(lockers[lIdx].end_dt!) : today;
       existingEnd.setHours(0, 0, 0, 0);
       
-      // 만료일이 이미 지난 경우 오늘 기준으로 연장, 아직 유효한 경우 기존 만료일에 가산
       const baseDate = existingEnd > today ? existingEnd : today;
       const newEnd = new Date(baseDate);
       newEnd.setDate(newEnd.getDate() + extendDays);
       
       lockers[lIdx].status = 'OCCUPIED';
-      lockers[lIdx].end_dt = newEnd.toISOString().slice(0, 10);
+      lockers[lIdx].end_dt = backendEndDate || newEnd.toISOString().slice(0, 10);
       localStorage.setItem('LM_LOCKERS', JSON.stringify(lockers));
 
-      // 회원 정보의 락카 만료일도 함께 갱신
       const memberNo = lockers[lIdx].member_no;
       if (memberNo) {
         const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
@@ -1598,7 +1957,6 @@ class HybridAPIClient {
         }
       }
 
-      // 결제 기록
       const sales = JSON.parse(localStorage.getItem('LM_SALES') || '[]') as unknown[];
       sales.push({
         sale_id: `S-${Date.now()}`,
@@ -1611,10 +1969,14 @@ class HybridAPIClient {
       });
       localStorage.setItem('LM_SALES', JSON.stringify(sales));
 
-      // 감사 로그 추가
       await this.writeKioskLog('LOCKER_EXTEND', `라카 ${lockerNo}번 ${extendDays}일 연장 완료`, memberNo || undefined);
 
-      return { success: true, message: `라카 ${lockerNo}번 연장 결제가 완료되었습니다.` };
+      return {
+        success: true,
+        start_date: backendStartDate,
+        end_date: lockers[lIdx].end_dt || backendEndDate,
+        message: `라카 ${lockerNo}번 연장 결제가 완료되었습니다.`
+      };
     }
 
     return { success: false, message: '사용 중이 아니거나 연장 가능한 라카가 아닙니다.' };
@@ -1632,7 +1994,7 @@ class HybridAPIClient {
       action_type: action,
       detail: detail,
       member_no: memberNo || 'GUEST',
-      terminal_id: this.terminalId,
+      terminal_id: this.getTerminalId(),
       trace_id: `TR-${Math.floor(100000 + Math.random() * 900000)}`
     });
 
@@ -1662,43 +2024,21 @@ class HybridAPIClient {
     referrerHp: string | null = null
   ): Promise<{ success: boolean; member?: Member; message: string }> {
     const isConnected = await this.checkConnection();
-    const cleanHp = hp.replace(/[^0-9]/g, '');
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const newMemberNo = `M${todayStr.replace(/-/g, '').slice(2)}${Math.floor(1000 + Math.random() * 9000)}`; // 고유 회원번호 난수 발급 (타임스탬프+4자리)
-
-    const newMember: Member = {
-      member_no: newMemberNo,
-      member_name: name,
-      hp: hp,
-      email: email,
-      gender: gender,
-      member_grade: '일반',
-      grade_cd: 'GENERAL',
-      status_cd: '10',
-      total_point: 0,
-      discount_rate: 0.0,
-      recent_product_nm: null,
-      expiry_date: null,
-      remain_days: 0,
-      locker_no: null,
-      face_registered: faceRegistered,
-      face_vector_id: faceVectorId,
-      store_cd: STORE_CODE
-    };
+    const storeCd = this.getStoreCd();
 
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/member?store_cd=${STORE_CODE}`, {
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/member?store_cd=${encodeURIComponent(storeCd)}`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'x-store-cd': STORE_CODE
+            'x-store-cd': storeCd
           },
           body: JSON.stringify({
             member_name: name,
             hp: hp,
             email: email,
-            store_cd: STORE_CODE,
+            store_cd: storeCd,
             gender: gender,
             face_auth_yn: faceRegistered ? 'Y' : 'N',
             marketing_agree_yn: marketingAgree ? 'Y' : 'N',
@@ -1709,7 +2049,7 @@ class HybridAPIClient {
           const created = await res.json();
           created.face_registered = faceRegistered;
           created.face_vector_id = faceVectorId;
-          created.store_cd = STORE_CODE;
+          created.store_cd = storeCd;
           await this.writeKioskLog('MEMBER_REGISTER', `신규 회원 등록 성공 (백엔드): ${name} (${hp})`, created.member_no);
           return { success: true, member: created, message: '회원가입이 성공적으로 완료되었습니다.' };
         } else {
@@ -1717,35 +2057,18 @@ class HybridAPIClient {
           return { success: false, message: errData.detail || '회원 등록 실패' };
         }
       } catch (err) {
-        console.error('Backend registration failed. Falling back to EdgeDB:', err);
+        console.error('Backend registration failed:', err);
+        return { success: false, message: '서버 통신 오류로 회원가입에 실패했습니다.' };
       }
     }
 
-    // Edge DB 모드 저장
-    const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
-    
-    // 중복 체크 (휴대폰 번호)
-    if (members.some(m => m.hp.replace(/[^0-9]/g, '') === cleanHp)) {
-      return { success: false, message: '이미 등록된 휴대폰 번호입니다.' };
-    }
-
-    members.push(newMember);
-    localStorage.setItem('LM_MEMBERS', JSON.stringify(members));
-
-    // 감사 로그 기록
-    await this.writeKioskLog('MEMBER_REGISTER', `신규 회원 등록 성공 (EdgeDB): ${name} (${hp})`, newMemberNo);
-
-    return { 
-      success: true, 
-      member: newMember, 
-      message: '회원가입이 성공적으로 완료되었습니다. (Edge DB 저장)' 
-    };
+    return { success: false, message: '서버 통신 오류로 회원가입에 실패했습니다.' };
   }
 
   // 13. 안면인식 스캔 API (실시간 백엔드 단말기 API GET /v1/face-terminal/scan-identity 연동)
   async scanFace(deviceIp?: string, externalSignal?: AbortSignal): Promise<Member | null> {
     const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
-    const storeCd = this.getStoreCd() || STORE_CODE;
+    const storeCd = this.getStoreCd();
 
     try {
       const controller = new AbortController();
@@ -1756,7 +2079,7 @@ class HybridAPIClient {
         externalSignal.addEventListener('abort', () => controller.abort());
       }
 
-      const res = await fetch(`${BASE_URL}/v1/face-terminal/scan-identity?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
+      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/scan-identity?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         signal: externalSignal || controller.signal
@@ -1786,7 +2109,7 @@ class HybridAPIClient {
   async startFaceCaptureMode(deviceIp?: string): Promise<boolean> {
     const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
     try {
-      const res = await fetch(`${BASE_URL}/v1/face-terminal/start-capture?ip=${encodeURIComponent(ip)}`, {
+      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/start-capture?ip=${encodeURIComponent(ip)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1801,7 +2124,7 @@ class HybridAPIClient {
   async detectFaceCamera(deviceIp?: string): Promise<{ detected: boolean; imageBase64: string }> {
     const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
     try {
-      const res = await fetch(`${BASE_URL}/v1/face-terminal/detect-face?ip=${encodeURIComponent(ip)}`, {
+      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/detect-face?ip=${encodeURIComponent(ip)}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1820,7 +2143,7 @@ class HybridAPIClient {
   async cancelFaceCaptureMode(deviceIp?: string): Promise<boolean> {
     const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
     try {
-      const res = await fetch(`${BASE_URL}/v1/face-terminal/cancel-capture?ip=${encodeURIComponent(ip)}`, {
+      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/cancel-capture?ip=${encodeURIComponent(ip)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1834,10 +2157,10 @@ class HybridAPIClient {
   // 13.4. 프런트포스 표준: 회원 안면 데이터 단말기 동기화 푸시 등록
   async enrollMemberFace(memberNo: string, memberName: string, faceImageBase64?: string, deviceIp?: string): Promise<{ success: boolean; message: string }> {
     const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
-    const storeCd = this.getStoreCd() || STORE_CODE;
+    const storeCd = this.getStoreCd();
 
     try {
-      const res = await fetch(`${BASE_URL}/v1/face-terminal/enroll`, {
+      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/enroll`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1879,9 +2202,10 @@ class HybridAPIClient {
   // 14.5. 지점의 파3 구역(Zone) 목록 조회 API
   async getKioskZones(): Promise<KioskZone[]> {
     const isConnected = await this.checkConnection();
+    const storeCd = this.getStoreCd();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/zones?store_cd=${STORE_CODE}`);
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/zones?store_cd=${encodeURIComponent(storeCd)}`);
         if (res.ok) {
           const zones = await res.json() as KioskZone[];
           if (zones && zones.length > 0) {
@@ -1911,9 +2235,10 @@ class HybridAPIClient {
   // 15. 파3 티오프 시간 슬롯 조회 API
   async getPar3Slots(zoneCode: string, date: string): Promise<Par3Slot[]> {
     const isConnected = await this.checkConnection();
+    const storeCd = this.getStoreCd();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/facilities/slots?store_cd=${STORE_CODE}&zone_code=${zoneCode}&date=${date}`);
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/facilities/slots?store_cd=${encodeURIComponent(storeCd)}&zone_code=${encodeURIComponent(zoneCode)}&date=${encodeURIComponent(date)}`);
         if (res.ok) {
           return await res.json() as Par3Slot[];
         }
@@ -1937,14 +2262,15 @@ class HybridAPIClient {
     companions: KioskCompanionItem[]
   ): Promise<{ success: boolean; message: string; res_id?: string; price?: number }> {
     const isConnected = await this.checkConnection();
+    const storeCd = this.getStoreCd();
     if (isConnected) {
       try {
         const cleanTime = timeStr.replace(':', '');
-        const res = await fetch(`${BASE_URL}/v1/kiosk/facilities/preoccupy?store_cd=${STORE_CODE}`, {
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/facilities/preoccupy?store_cd=${encodeURIComponent(storeCd)}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-store-cd': STORE_CODE
+            'x-store-cd': storeCd
           },
           body: JSON.stringify({
             zone_code: zoneCode,
@@ -2024,13 +2350,14 @@ class HybridAPIClient {
   // 결제 승인 후 웹훅 (결제 완료 통보 및 예약 확정 처리)
   async confirmKioskPaymentWebhook(resId: string, amount: number, paymentMethod: string): Promise<boolean> {
     const isConnected = await this.checkConnection();
+    const storeCd = this.getStoreCd();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/payment-webhook?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/payment-webhook?store_cd=${encodeURIComponent(storeCd)}`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'x-store-cd': this.getStoreCd()
+            'x-store-cd': storeCd
           },
           body: JSON.stringify({
             status: 'success',
@@ -2065,14 +2392,15 @@ class HybridAPIClient {
     hpNo?: string
   ): Promise<{ success: boolean; res_id?: string; message: string }> {
     const isConnected = await this.checkConnection();
+    const storeCd = this.getStoreCd();
 
     if (isConnected) {
       try {
-        const createRes = await fetch(`${BASE_URL}/v1/kiosk/hold-reservation?store_cd=${encodeURIComponent(STORE_CODE)}`, {
+        const createRes = await fetch(`${this.getBaseUrl()}/v1/kiosk/hold-reservation?store_cd=${encodeURIComponent(storeCd)}`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'x-store-cd': STORE_CODE
+            'x-store-cd': storeCd
           },
           body: JSON.stringify({
             bay_no: bayNo,
@@ -2132,14 +2460,15 @@ class HybridAPIClient {
   // 18. 결제 취소 시 보류 상태(HOLD) 예약 해제/삭제 API
   async cancelHoldReservation(resId: string): Promise<{ success: boolean; message: string }> {
     const isConnected = await this.checkConnection();
+    const storeCd = this.getStoreCd();
 
     if (isConnected && !resId.startsWith('R-HOLD-')) {
       try {
-        const res = await fetch(`${BASE_URL}/reservations/${resId}/cancel`, {
+        const res = await fetch(`${this.getBaseUrl()}/reservations/${resId}/cancel`, {
           method: 'PATCH',
           headers: { 
             'Content-Type': 'application/json',
-            'x-store-cd': this.getStoreCd() 
+            'x-store-cd': storeCd
           },
           body: JSON.stringify({ memo: 'Kiosk Cancel' })
         });
@@ -2168,20 +2497,21 @@ class HybridAPIClient {
     paymentMethod: string = "CARD"
   ): Promise<{ success: boolean; message: string }> {
     const isConnected = await this.checkConnection();
+    const storeCd = this.getStoreCd();
 
     if (isConnected && !resId.startsWith('R-HOLD-')) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/payment-webhook?store_cd=${STORE_CODE}`, {
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/payment-webhook?store_cd=${encodeURIComponent(storeCd)}`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'x-store-cd': STORE_CODE
+            'x-store-cd': storeCd
           },
           body: JSON.stringify({
             res_id: resId,
             amount: amount,
             payment_method: paymentMethod,
-            terminal_id: this.terminalId
+            terminal_id: this.getTerminalId()
           })
         });
         if (res.ok) {
@@ -2246,11 +2576,30 @@ class HybridAPIClient {
   // 18. 키오스크 전용 전시 카테고리 로드 API
   async getKioskDisplayCategories(): Promise<any[]> {
     const isConnected = await this.checkConnection();
+    const storeCd = this.getStoreCd();
     if (isConnected) {
       try {
-        const res = await fetch(`${BASE_URL}/v1/kiosk/display-categories?store_cd=${STORE_CODE}`);
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/display-categories?store_cd=${encodeURIComponent(storeCd)}`);
         if (res.ok) {
-          return await res.json();
+          const categories = await res.json();
+          if (Array.isArray(categories)) {
+            return categories.map((cat: any) => ({
+              ...cat,
+              products: Array.isArray(cat.products)
+                ? cat.products.map((p: any) => ({
+                    ...p,
+                    vat_yn: p.vat_yn || 'Y',
+                    tax_rate: p.tax_rate ?? 0.1,
+                    business_unit_type: p.business_unit_type || 'STORE',
+                    business_merchant_id: p.business_merchant_id || null,
+                    pro_id: p.pro_id || null,
+                    total_count: p.total_count ?? p.count_val ?? 0,
+                    access_rules: p.access_rules || null,
+                  }))
+                : [],
+            }));
+          }
+          return categories;
         }
       } catch (err) {
         console.error('Failed to fetch kiosk display categories:', err);
@@ -2259,38 +2608,55 @@ class HybridAPIClient {
     return []; // EdgeDB Fallback 시 빈 리스트
   }
 
+  async getDisplayCategories(): Promise<any[]> {
+    return this.getKioskDisplayCategories();
+  }
+
   // 19. 고아 결제(Ghost Charge) 긴급 DLQ 보고 API
   async reportGhostCharge(params: {
-    terminalId: string;
+    store_cd?: string;
+    storeCd?: string;
+    member_no?: string;
+    memberNo?: string;
+    terminalId?: string;
+    terminal_id?: string;
     deviceType?: string;
-    authNo: string;
+    authNo?: string;
+    auth_no?: string;
+    auth_code?: string;
     amount: number;
     cardName?: string;
+    issuer_name?: string;
     cardNoMasked?: string;
+    card_no_masked?: string;
     vanTrNo?: string;
+    van_tr_no?: string;
     approvedAt?: string;
     backendErrorReason?: string;
+    error_reason?: string;
     reversalErrorReason?: string;
     rawApprovalData?: string;
+    [key: string]: any;
   }): Promise<{ success: boolean; dlq_id?: string; message?: string }> {
+    const storeCd = params.store_cd || params.storeCd || this.getStoreCd();
     try {
-      const res = await fetch(`${BASE_URL}/sales/dlq/report-ghost-charge`, {
+      const res = await fetch(`${this.getBaseUrl()}/sales/dlq/report-ghost-charge`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-store-cd': STORE_CODE,
+          'x-store-cd': storeCd,
         },
         body: JSON.stringify({
-          store_cd: STORE_CODE,
-          terminal_id: params.terminalId || this.terminalId || 'KIOSK-01',
+          store_cd: storeCd,
+          terminal_id: params.terminalId || params.terminal_id || this.getTerminalId() || 'KIOSK-01',
           device_type: params.deviceType || 'KIOSK',
-          auth_no: params.authNo,
+          auth_no: params.authNo || params.auth_no || params.auth_code || '',
           amount: params.amount,
-          card_name: params.cardName || '',
-          card_no_masked: params.cardNoMasked || '',
-          van_tr_no: params.vanTrNo,
+          card_name: params.cardName || params.issuer_name || '',
+          card_no_masked: params.cardNoMasked || params.card_no_masked || '',
+          van_tr_no: params.vanTrNo || params.van_tr_no,
           approved_at: params.approvedAt,
-          backend_error_reason: params.backendErrorReason,
+          backend_error_reason: params.backendErrorReason || params.error_reason,
           reversal_error_reason: params.reversalErrorReason,
           raw_approval_data: params.rawApprovalData,
         }),

@@ -10,6 +10,7 @@ import type {
   BarcodeScanHandler,
   HardwareConfig,
 } from '../types/hardware_types';
+import { kioskEscPosPrinter } from '../../printer/escpos_printer';
 
 export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
   constructor(private getConfig: () => HardwareConfig) {}
@@ -27,6 +28,43 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
     }
   }
 
+  private async fallbackEscPosPrint(data: ReceiptPrintData): Promise<PrintResult> {
+    return kioskEscPosPrinter.printReceipt({
+      storeName: data.store_info?.store_name || '골포스 스마트 키오스크',
+      storeTel: data.store_info?.tel,
+      bizNo: data.store_info?.biz_no,
+      ceoName: data.store_info?.ceo_name,
+      address: data.store_info?.address,
+      receiptNo: data.receipt_no,
+      tradeDate: data.trade_dt,
+      memberName: data.member_name,
+      itemName: data.items?.[0]?.name,
+      payAmount: data.tax_summary?.pay_amt ?? data.tax_summary?.total_amt ?? 0,
+      supplyAmt: data.tax_summary?.supply_amt,
+      vatAmt: data.tax_summary?.tax_amt,
+      taxFreeAmt: data.tax_summary?.tax_free_amt,
+      barcodeText: data.barcode_text,
+      cardIssuer: data.card_info?.issuer_name,
+      cardNoMasked: data.card_info?.card_no_masked,
+      terminalId: data.card_info?.terminal_id,
+      approvalNo: data.card_info?.approval_no,
+      cardInfo: data.card_info
+        ? {
+            issuerName: data.card_info.issuer_name,
+            cardNoMasked: data.card_info.card_no_masked,
+            approvalNo: data.card_info.approval_no,
+            terminalId: data.card_info.terminal_id,
+          }
+        : undefined,
+      cashInfo: data.cash_receipt_info
+        ? {
+            approvalNo: data.cash_receipt_info.approval_no,
+            receiptType: data.cash_receipt_info.receipt_type,
+          }
+        : undefined,
+    });
+  }
+
   public async printReceipt(data: ReceiptPrintData): Promise<PrintResult> {
     const cfg = this.getConfig();
     try {
@@ -41,12 +79,9 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
         const json = await res.json();
         return { success: true, message: json.message || '영수증 출력 완료' };
       }
-      return { success: false, message: `프린터 데몬 오류 (HTTP ${res.status})` };
-    } catch (err: unknown) {
-      return {
-        success: false,
-        message: err instanceof Error ? err.message : '윈도우 하드웨어 브릿지 데몬 미연결',
-      };
+      return await this.fallbackEscPosPrint(data);
+    } catch {
+      return await this.fallbackEscPosPrint(data);
     }
   }
 }
@@ -54,13 +89,25 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
 export class WindowsBridgeScannerAdapter implements IScannerAdapter {
   private ws: WebSocket | null = null;
   private handlers: Set<BarcodeScanHandler> = new Set();
+  private isListening: boolean = true;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private getConfig: () => HardwareConfig) {
     this.connectWebSocket();
   }
 
+  private scheduleReconnect(): void {
+    if (!this.isListening) return;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      if (this.isListening) {
+        this.connectWebSocket();
+      }
+    }, 5000);
+  }
+
   private connectWebSocket(): void {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !this.isListening) return;
     const cfg = this.getConfig();
     const wsUrl = `ws://${cfg.bridgeHost.replace(/^https?:\/\//, '')}:${cfg.bridgePort}/ws/scanner`;
 
@@ -79,15 +126,35 @@ export class WindowsBridgeScannerAdapter implements IScannerAdapter {
           }
         }
       };
+      this.ws.onclose = () => {
+        this.ws = null;
+        if (this.isListening) {
+          this.scheduleReconnect();
+        }
+      };
+      this.ws.onerror = () => {
+        // handled by onclose
+      };
     } catch {
-      // 재시도
+      this.scheduleReconnect();
     }
   }
 
   public onScan(handler: BarcodeScanHandler): () => void {
+    this.isListening = true;
     this.handlers.add(handler);
+    if (!this.ws || this.ws.readyState > WebSocket.OPEN) {
+      this.connectWebSocket();
+    }
     return () => {
       this.handlers.delete(handler);
+      if (this.handlers.size === 0) {
+        this.isListening = false;
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+      }
     };
   }
 }

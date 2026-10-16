@@ -6,14 +6,25 @@
 export interface KioskReceiptPrintData {
   storeName: string;
   storeTel?: string;
+  bizNo?: string;
+  ceoName?: string;
+  address?: string;
   receiptNo: string;
   tradeDate: string;
   bayNo?: number | string;
   memberName?: string;
+  itemName?: string;
   useMinutes?: number;
   startTime?: string;
   endTime?: string;
   payAmount: number;
+  supplyAmt?: number;
+  vatAmt?: number;
+  taxFreeAmt?: number;
+  cardIssuer?: string;
+  cardNoMasked?: string;
+  terminalId?: string;
+  approvalNo?: string;
   barcodeText?: string;
   purchaseType?: 'MEMBERSHIP' | 'LOCKER' | 'DAILY' | 'PRODUCT';
   cardInfo?: {
@@ -28,11 +39,57 @@ export interface KioskReceiptPrintData {
   };
 }
 
+export function getTextLength(str: string): number {
+  let len = 0;
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    len += code > 0x7f ? 2 : 1;
+  }
+  return len;
+}
+
+export function formatTwoCol(left: string, right: string, totalWidth: number = 42): string {
+  const leftLen = getTextLength(left);
+  const rightLen = getTextLength(right);
+  const spaces = Math.max(1, totalWidth - leftLen - rightLen);
+  return `${left}${' '.repeat(spaces)}${right}`;
+}
+
+export function formatRow(
+  cols: Array<{ text: string; width: number; align?: 'left' | 'right' | 'center' }>
+): string {
+  return cols
+    .map(({ text, width, align = 'left' }) => {
+      const len = getTextLength(text);
+      const pad = Math.max(0, width - len);
+      if (align === 'right') return `${' '.repeat(pad)}${text}`;
+      if (align === 'center') {
+        const leftPad = Math.floor(pad / 2);
+        const rightPad = pad - leftPad;
+        return `${' '.repeat(leftPad)}${text}${' '.repeat(rightPad)}`;
+      }
+      return `${text}${' '.repeat(pad)}`;
+    })
+    .join('');
+}
+
 export class KioskEscPosPrinterService {
   private width: 58 | 80 = 80;
 
   constructor(width: 58 | 80 = 80) {
     this.width = width;
+  }
+
+  public getTextLength(str: string): number {
+    return getTextLength(str);
+  }
+
+  public formatTwoCol(left: string, right: string, totalWidth?: number): string {
+    return formatTwoCol(left, right, totalWidth ?? (this.width === 58 ? 32 : 42));
+  }
+
+  public formatRow(cols: Array<{ text: string; width: number; align?: 'left' | 'right' | 'center' }>): string {
+    return formatRow(cols);
   }
 
   public buildReceiptBuffer(data: KioskReceiptPrintData): Uint8Array {
@@ -49,12 +106,22 @@ export class KioskEscPosPrinterService {
     // 1. 프린터 초기화
     appendBytes(0x1b, 0x40);
 
-    // 2. 헤더
+    // 2. 헤더 및 가맹점 사업자 정보
     appendBytes(0x1b, 0x61, 0x01); // Center Align
     appendBytes(0x1d, 0x21, 0x11); // Double Size
     append(`${data.storeName}\n`);
     appendBytes(0x1d, 0x21, 0x00); // Normal Size
-    append(`[타석 배정표 및 영수증]\n\n`);
+    append(`[타석 배정표 및 영수증]\n`);
+    if (data.bizNo || data.ceoName) {
+      append(`사업자: ${data.bizNo || '-'} / 대표: ${data.ceoName || '-'}\n`);
+    }
+    if (data.storeTel) {
+      append(`TEL: ${data.storeTel}\n`);
+    }
+    if (data.address) {
+      append(`${data.address}\n`);
+    }
+    append(`\n`);
 
     // 3. 배정 타석 정보 (크고 굵게)
     if (data.bayNo) {
@@ -66,22 +133,46 @@ export class KioskEscPosPrinterService {
 
     // 4. 이용 시간 / 고객 정보
     appendBytes(0x1b, 0x61, 0x00); // Left Align
-    if (data.memberName) append(`회 원 명: ${data.memberName}\n`);
-    if (data.useMinutes) append(`이용시간: ${data.useMinutes}분\n`);
-    if (data.startTime && data.endTime) append(`이용구간: ${data.startTime} ~ ${data.endTime}\n`);
-    append(`거래일시: ${data.tradeDate}\n`);
-    append(`영수증No: ${data.receiptNo}\n`);
+    if (data.memberName) append(`${formatTwoCol('회 원 명', data.memberName, colWidth)}\n`);
+    if (data.itemName) append(`${formatTwoCol('상 품 명', data.itemName, colWidth)}\n`);
+    if (data.useMinutes) append(`${formatTwoCol('이용시간', `${data.useMinutes}분`, colWidth)}\n`);
+    if (data.startTime && data.endTime) append(`${formatTwoCol('이용구간', `${data.startTime} ~ ${data.endTime}`, colWidth)}\n`);
+    append(`${formatTwoCol('거래일시', data.tradeDate, colWidth)}\n`);
+    append(`${formatTwoCol('영수증No', data.receiptNo, colWidth)}\n`);
     append(`${divider}\n`);
 
-    // 5. 결제 금액
-    append(`결제금액: ${data.payAmount.toLocaleString()}원\n`);
-    if (data.cardInfo) {
-      append(`카드정보: ${data.cardInfo.issuerName} (${data.cardInfo.cardNoMasked})\n`);
-      append(`승인번호: ${data.cardInfo.approvalNo}\n`);
-      append(`단말기ID: ${data.cardInfo.terminalId}\n`);
+    // 5. 과세/면세 세액 및 결제 금액
+    if (data.supplyAmt !== undefined) {
+      append(`${formatTwoCol('공급가액', `${data.supplyAmt.toLocaleString()}원`, colWidth)}\n`);
+    }
+    if (data.vatAmt !== undefined) {
+      append(`${formatTwoCol('부 가 세', `${data.vatAmt.toLocaleString()}원`, colWidth)}\n`);
+    }
+    if (data.taxFreeAmt !== undefined && data.taxFreeAmt > 0) {
+      append(`${formatTwoCol('면세금액', `${data.taxFreeAmt.toLocaleString()}원`, colWidth)}\n`);
+    }
+    append(`${formatTwoCol('결제금액', `${data.payAmount.toLocaleString()}원`, colWidth)}\n`);
+
+    const resolvedIssuer = data.cardInfo?.issuerName || data.cardIssuer;
+    const resolvedCardNo = data.cardInfo?.cardNoMasked || data.cardNoMasked;
+    const resolvedApprNo = data.cardInfo?.approvalNo || data.approvalNo;
+    const resolvedTermId = data.cardInfo?.terminalId || data.terminalId;
+
+    if (resolvedIssuer || resolvedCardNo || resolvedApprNo || resolvedTermId) {
+      append(`${divider}\n`);
+      if (resolvedIssuer || resolvedCardNo) {
+        append(`${formatTwoCol('카드정보', `${resolvedIssuer || '신용카드'} (${resolvedCardNo || '****'})`, colWidth)}\n`);
+      }
+      if (resolvedApprNo) {
+        append(`${formatTwoCol('승인번호', resolvedApprNo, colWidth)}\n`);
+      }
+      if (resolvedTermId) {
+        append(`${formatTwoCol('단말기ID', resolvedTermId, colWidth)}\n`);
+      }
     } else if (data.cashInfo) {
-      append(`현금영수증: ${data.cashInfo.receiptType || '소득공제'}\n`);
-      append(`승인번호: ${data.cashInfo.approvalNo}\n`);
+      append(`${divider}\n`);
+      append(`${formatTwoCol('현금영수증', data.cashInfo.receiptType || '소득공제', colWidth)}\n`);
+      append(`${formatTwoCol('승인번호', data.cashInfo.approvalNo, colWidth)}\n`);
     }
     append(`${dblDivider}\n`);
 

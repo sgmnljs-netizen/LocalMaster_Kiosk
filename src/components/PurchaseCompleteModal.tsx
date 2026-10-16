@@ -3,6 +3,7 @@ import { CheckCircle2, Printer, ArrowRight, CreditCard, Calendar, User, Shopping
 import { TimeMaster } from '../utils/timeMaster';
 import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
 import { useKioskSettings } from '../stores/kioskSettings';
+import { api } from '../services/api';
 
 export interface CompletedPurchaseInfo {
   memberName: string;
@@ -17,32 +18,52 @@ export interface CompletedPurchaseInfo {
   cardIssuer?: string;
   cardNoMasked?: string;
   terminalId?: string;
+  vatYn?: string;
 }
 
 interface PurchaseCompleteModalProps {
   purchaseInfo: CompletedPurchaseInfo;
+  startDate?: string;
+  endDate?: string;
+  vatYn?: string;
   lang?: 'KO' | 'EN';
   onClose: () => void;
 }
 
 export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
   purchaseInfo,
+  startDate: propStartDate,
+  endDate: propEndDate,
+  vatYn: propVatYn,
   lang = 'KO',
   onClose
 }) => {
   const [countdown, setCountdown] = useState(10);
   const [isPrinting, setIsPrinting] = useState(true);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
+  const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string; biz_no?: string; ceo_name?: string } | null>(null);
   const { settings } = useKioskSettings();
   const storeName = settings.deviceName || '골포스 스마트 키오스크';
   const autoPrintReceipt = settings.autoPrintReceipt ?? true;
+
+  useEffect(() => {
+    api.getStoreInfo().then((info) => {
+      if (info) setStoreInfo(info);
+    }).catch(console.error);
+  }, []);
 
   const handlePrint = useCallback(async () => {
     setIsPrinting(true);
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
     const safeApprNo = purchaseInfo?.apprNo || '00000000';
-    const vat = Math.round((purchaseInfo?.amount || 0) / 11);
-    const supply = (purchaseInfo?.amount || 0) - vat;
+    const totalAmt = purchaseInfo?.amount || 0;
+    const isTaxFree = String(propVatYn || purchaseInfo?.vatYn || 'Y').toUpperCase() === 'N';
+    const vat = isTaxFree ? 0 : Math.round(totalAmt / 11);
+    const supply = isTaxFree ? 0 : totalAmt - vat;
+    const taxFreeAmt = isTaxFree ? totalAmt : 0;
+
+    const info = storeInfo || (await api.getStoreInfo().catch(() => null));
+    if (info && !storeInfo) setStoreInfo(info);
 
     const res = await kioskHardwareBridge.printReceipt({
       sale_id: `SALE-${safeApprNo}`,
@@ -51,34 +72,34 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
       member_name: purchaseInfo?.memberName || '비회원',
       pay_method: 'CARD',
       store_info: {
-        store_name: storeName,
-        biz_no: '123-45-67890',
-        ceo_name: '대표자',
-        tel: '02-0000-0000',
-        address: '서울시 강남구',
+        store_name: info?.store_nm || storeName,
+        biz_no: (info as any)?.biz_no || (info as any)?.biz_reg_no || '',
+        ceo_name: (info as any)?.ceo_name || (info as any)?.owner_name || '',
+        tel: info?.tel || '',
+        address: info?.address || '',
       },
       items: [
         {
           name: purchaseInfo?.productName || '이용권',
           qty: 1,
-          unit_price: purchaseInfo?.amount || 0,
-          amount: purchaseInfo?.amount || 0,
+          unit_price: totalAmt,
+          amount: totalAmt,
         },
       ],
       tax_summary: {
         supply_amt: supply,
         tax_amt: vat,
-        tax_free_amt: 0,
-        total_amt: purchaseInfo?.amount || 0,
+        tax_free_amt: taxFreeAmt,
+        total_amt: totalAmt,
         discount_amt: 0,
-        pay_amt: purchaseInfo?.amount || 0,
+        pay_amt: totalAmt,
       },
       card_info: {
         issuer_name: purchaseInfo?.cardIssuer || '신용카드',
-        card_no_masked: purchaseInfo?.cardNoMasked || '9410-****-****-1234',
+        card_no_masked: purchaseInfo?.cardNoMasked || '신용카드',
         approval_no: safeApprNo,
         installment_months: 0,
-        terminal_id: purchaseInfo?.terminalId || settings.terminalId || '88010003',
+        terminal_id: purchaseInfo?.terminalId || settings.terminalId || api.getTerminalId(),
       },
       barcode_text: `PUR-${safeApprNo}`,
       footer_message: '키오스크 결제가 완료되었습니다. (주차 2시간 무료)',
@@ -86,7 +107,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
 
     setIsPrinting(false);
     setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
-  }, [purchaseInfo, storeName, settings.terminalId, lang]);
+  }, [purchaseInfo, propVatYn, storeName, storeInfo, settings.terminalId, lang]);
 
   useEffect(() => {
     if (autoPrintReceipt) {
@@ -114,12 +135,13 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
     };
   }, [onClose]);
 
-  // 오늘 날짜 및 30일/90일 유효기간 자동 계산 (TimeMaster SSOT 적용)
+  // 오늘 날짜 및 유효기간 계산 (TimeMaster SSOT 적용)
   const ONE_DAY_MS = 86400000;
   const todayStr = TimeMaster.getKstYmd(new Date());
   const defaultEndDateStr = TimeMaster.getKstYmd(new Date(Date.now() + 30 * ONE_DAY_MS));
-  const startDate = purchaseInfo.startDate || todayStr;
-  const endDate = purchaseInfo.endDate || defaultEndDateStr;
+  const startDate = propStartDate || purchaseInfo.startDate || todayStr;
+  const endDate = propEndDate || purchaseInfo.endDate || defaultEndDateStr;
+  const isPrinterOffline = !isPrinting && (printStatus === '프린터 미연결' || printStatus === 'Printer Offline');
 
   return (
     <div
@@ -187,11 +209,11 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
             display: 'flex',
             alignItems: 'center',
             gap: '10px',
-            background: isPrinting ? '#eff6ff' : '#f0fdf4',
-            border: `1px solid ${isPrinting ? '#bfdbfe' : '#bbf7d0'}`,
+            background: isPrinting ? '#eff6ff' : isPrinterOffline ? '#fef2f2' : '#f0fdf4',
+            border: `1px solid ${isPrinting ? '#bfdbfe' : isPrinterOffline ? '#fecdd3' : '#bbf7d0'}`,
             padding: '10px 20px',
             borderRadius: '20px',
-            color: isPrinting ? '#1d4ed8' : '#15803d',
+            color: isPrinting ? '#1d4ed8' : isPrinterOffline ? '#dc2626' : '#15803d',
             fontSize: '15px',
             fontWeight: 700,
             marginBottom: '28px'
@@ -201,7 +223,9 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
           <span>
             {isPrinting
               ? (lang === 'KO' ? '영수증이 인출기에서 인쇄 중입니다...' : 'Printing receipt...')
-              : (lang === 'KO' ? '영수증 출력이 완료되었습니다. 영수증을 챙겨주세요!' : 'Receipt printed successfully!')}
+              : isPrinterOffline
+                ? `${lang === 'KO' ? '영수증 인쇄 상태' : 'Print Status'}: ${printStatus}`
+                : (lang === 'KO' ? '영수증 출력이 완료되었습니다. 영수증을 챙겨주세요!' : 'Receipt printed successfully!')}
           </span>
         </div>
 

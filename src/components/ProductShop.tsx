@@ -100,8 +100,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       // 일일 타석 배정권 전용 필터링 (DAILY 상품만 노출)
       return allProducts.filter(checkIfDaily);
     } else {
-      // PURCHASE_PRODUCT(회원권/정기권/횟수권 구매) 모드: DAILY(일일 현장권) 상품 혼입 원천 차단
-      const nonDailyFilter = (p: Product) => (p.logic_type || '').toUpperCase() !== 'DAILY' && !checkIfDaily(p);
+      // PURCHASE_PRODUCT(회원권/정기권/횟수권 구매) 모드: DAILY(일일 현장권) 및 RENTAL(라카 연장) 상품 혼입 원천 차단
+      const nonDailyFilter = (p: Product) => {
+        const lt = (p.logic_type || '').toUpperCase();
+        return lt !== 'DAILY' && lt !== 'RENTAL' && !checkIfDaily(p);
+      };
 
       // 동적 전시 카테고리 상품 매핑
       const matchedCat = displayCategories.find(c => c.category_id === activeTab);
@@ -306,7 +309,13 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 key={prod.prod_cd}
                 data-testid={`product-card-${prod.prod_cd}`}
                 data-duration={durationMin}
-                onClick={() => onProductSelected(prod)}
+                onClick={() => {
+                  if (!memberNo && (prod.logic_type || '').toUpperCase() !== 'DAILY' && !checkIfDaily(prod)) {
+                    setWarningMessage('회원 전용 상품입니다. 먼저 회원 인증을 진행해 주세요.');
+                    return;
+                  }
+                  onProductSelected(prod);
+                }}
                 style={{
                   padding: '36px 30px',
                   borderRadius: '28px',

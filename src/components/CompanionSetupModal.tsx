@@ -22,15 +22,26 @@ interface CompanionSetupModalProps {
   leaderMember: Member;
   lang: 'KO' | 'EN';
   selectedDurationMin?: number;
+  defaultDailyPrice?: number;
   onConfirm: (targets: CompanionTargetItem[]) => void;
   onCancel: () => void;
 }
+
+const getFirstAssignableAsset = (member?: Member | null) => {
+  return (member?.assets || []).find(
+    (a) =>
+      a.is_assignable !== false &&
+      (a.rem_count === null || a.rem_count === undefined || a.rem_count > 0) &&
+      ((a as any).remain_cnt === null || (a as any).remain_cnt === undefined || (a as any).remain_cnt > 0)
+  );
+};
 
 export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   selectedBayNos,
   leaderMember,
   lang,
   selectedDurationMin = 60,
+  defaultDailyPrice,
   onConfirm,
   onCancel
 }) => {
@@ -39,14 +50,17 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   const [searchHp, setSearchHp] = useState<string>('');
   const [searchLoading, setSearchLoading] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string>('');
+  const [dailyPrice, setDailyPrice] = useState<number>(defaultDailyPrice || 15000);
 
   // 각 타석별 배정 설정 상태
   const [targets, setTargets] = useState<CompanionTargetItem[]>(() => {
+    const initialDailyPrice = defaultDailyPrice || 15000;
     return selectedBayNos.map((bayNo, idx) => {
       if (idx === 0) {
         // 대표자 타석
-        const validAsset = (leaderMember.assets || [])[0];
+        const validAsset = getFirstAssignableAsset(leaderMember);
         const durMin = (validAsset as any)?.duration_min || selectedDurationMin;
+        const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
         return {
           bayNo,
           isLeader: true,
@@ -54,11 +68,11 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           memberName: leaderMember.member_name,
           hp: leaderMember.hp,
           isGuest: false,
-          ticketType: validAsset ? 'MEMBERSHIP' : 'DAILY',
-          memberItemId: validAsset ? parseInt(validAsset.member_item_id) : undefined,
-          ticketName: validAsset ? validAsset.item_name : `일일 타석권 ${durMin}분`,
+          ticketType: validAsset && parsedId ? 'MEMBERSHIP' : 'DAILY',
+          memberItemId: validAsset && parsedId ? parsedId : undefined,
+          ticketName: validAsset && parsedId ? validAsset.item_name : `일일 타석권 ${durMin}분`,
           durationMin: durMin,
-          price: validAsset ? 0 : (durMin === 90 ? 20000 : 15000)
+          price: validAsset && parsedId ? 0 : initialDailyPrice
         };
       } else {
         // 동반자 타석 (디폴트: 비회원 일일권, 대표자와 동일 시간 상속)
@@ -71,11 +85,34 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           ticketType: 'DAILY',
           ticketName: `일일 타석권 ${selectedDurationMin}분`,
           durationMin: selectedDurationMin,
-          price: selectedDurationMin === 90 ? 20000 : 15000
+          price: initialDailyPrice
         };
       }
     });
   });
+
+  // 백엔드 일일권 상품 단가 동적 조회
+  useEffect(() => {
+    let mounted = true;
+    api.getProducts().then((prods) => {
+      if (!mounted || !Array.isArray(prods)) return;
+      const dailyProds = prods.filter(
+        (p) => (p.logic_type || '').toUpperCase() === 'DAILY' || (p.prod_nm || '').includes('일일')
+      );
+      const matched =
+        dailyProds.find((p) => Number(p.duration_min) === Number(selectedDurationMin)) || dailyProds[0];
+      const resolvedPrice = Number(matched?.sale_price || matched?.standard_price || defaultDailyPrice || 0);
+      if (resolvedPrice > 0) {
+        setDailyPrice(resolvedPrice);
+        setTargets((prev) =>
+          prev.map((t) => (t.ticketType === 'DAILY' ? { ...t, price: resolvedPrice } : t))
+        );
+      }
+    }).catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [selectedDurationMin, defaultDailyPrice]);
 
   // 120초 타이머 및 30초 주기 Heartbeat 락 갱신
   useEffect(() => {
@@ -126,16 +163,17 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       // 휴대폰번호 검색
       const member = await api.getMemberByHp(cleanHp);
       if (member) {
-        const validAsset = (member.assets || [])[0];
+        const validAsset = getFirstAssignableAsset(member);
+        const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
         updateTarget(activeBayIdx, {
           isGuest: false,
           memberNo: member.member_no,
           memberName: member.member_name,
           hp: member.hp,
-          ticketType: validAsset ? 'MEMBERSHIP' : 'DAILY',
-          memberItemId: validAsset ? parseInt(validAsset.member_item_id) : undefined,
-          ticketName: validAsset ? validAsset.item_name : '일일 타석권 60분',
-          price: validAsset ? 0 : 15000
+          ticketType: validAsset && parsedId ? 'MEMBERSHIP' : 'DAILY',
+          memberItemId: validAsset && parsedId ? parsedId : undefined,
+          ticketName: validAsset && parsedId ? validAsset.item_name : `일일 타석권 ${selectedDurationMin}분`,
+          price: validAsset && parsedId ? 0 : dailyPrice
         });
         setSearchHp('');
       } else {
@@ -296,7 +334,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                       <UserCheck size={16} style={{ display: 'inline', marginRight: '4px' }} /> 회원
                     </button>
                     <button
-                      onClick={() => updateTarget(activeBayIdx, { isGuest: true, memberName: `비회원 ${activeBayIdx}`, ticketType: 'DAILY', price: 15000 })}
+                      onClick={() => updateTarget(activeBayIdx, { isGuest: true, memberNo: undefined, memberItemId: undefined, memberName: `비회원 ${activeBayIdx}`, ticketType: 'DAILY', price: dailyPrice })}
                       style={{
                         padding: '8px 16px',
                         borderRadius: '12px',
@@ -345,14 +383,28 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   {/* 이용권 차감 옵션 */}
                   <button
-                    onClick={() => updateTarget(activeBayIdx, { ticketType: 'MEMBERSHIP', price: 0, ticketName: '정기 회원권 / 잔여 횟수 차감' })}
+                    onClick={() => {
+                      if (currentTarget.isGuest || !currentTarget.memberItemId) {
+                        setSearchError(lang === 'KO' ? '사용 가능한 회원권이 없습니다. 회원 조회 후 이용하거나 일일 타석권을 선택해 주세요.' : 'No valid membership found.');
+                        return;
+                      }
+                      setSearchError('');
+                      updateTarget(activeBayIdx, {
+                        ticketType: 'MEMBERSHIP',
+                        memberItemId: currentTarget.memberItemId,
+                        price: 0,
+                        ticketName: '정기 회원권 / 잔여 횟수 차감'
+                      });
+                    }}
+                    disabled={currentTarget.isGuest || !currentTarget.memberItemId}
                     style={{
                       padding: '20px',
                       borderRadius: '16px',
                       textAlign: 'left',
                       border: currentTarget.ticketType === 'MEMBERSHIP' ? '2px solid #047857' : '1px solid #cbd5e1',
                       background: currentTarget.ticketType === 'MEMBERSHIP' ? '#ffffff' : '#f8fafc',
-                      cursor: 'pointer',
+                      cursor: (currentTarget.isGuest || !currentTarget.memberItemId) ? 'not-allowed' : 'pointer',
+                      opacity: (currentTarget.isGuest || !currentTarget.memberItemId) ? 0.5 : 1,
                       boxShadow: currentTarget.ticketType === 'MEMBERSHIP' ? '0 4px 12px rgba(4, 120, 87, 0.1)' : 'none'
                     }}
                   >
@@ -362,7 +414,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
 
                   {/* 일일 이용권 결제 옵션 */}
                   <button
-                    onClick={() => updateTarget(activeBayIdx, { ticketType: 'DAILY', price: 15000, ticketName: '일일 타석권 60분' })}
+                    onClick={() => updateTarget(activeBayIdx, { ticketType: 'DAILY', price: dailyPrice, ticketName: `일일 타석권 ${currentTarget.durationMin}분` })}
                     style={{
                       padding: '20px',
                       borderRadius: '16px',
@@ -374,7 +426,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                     }}
                   >
                     <div style={{ fontWeight: 800, fontSize: '17px', color: '#0f172a' }}>💳 일일 타석권 결제</div>
-                    <div style={{ fontSize: '13px', color: '#047857', fontWeight: 700, marginTop: '4px' }}>15,000 원 (60분 이용)</div>
+                    <div style={{ fontSize: '13px', color: '#047857', fontWeight: 700, marginTop: '4px' }}>{dailyPrice.toLocaleString()} 원 ({currentTarget.durationMin}분 이용)</div>
                   </button>
                 </div>
               </div>

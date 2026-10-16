@@ -41,14 +41,26 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
     return numA - numB;
   });
 
-  const totalAvailable = practiceBays.filter(b => b.status === 'AVAILABLE').length;
+  const isBayBlocked = (b: Bay) => {
+    const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+    return (
+      (b as any).is_active === false ||
+      ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(st)
+    );
+  };
+
+  const totalAvailable = practiceBays.filter(b => {
+    const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+    return st === 'AVAILABLE' && !isBayBlocked(b);
+  }).length;
 
   const renderBayIndicator = (bay: Bay) => {
-    const isAvailable = bay.status === 'AVAILABLE';
-    const isPreOccupied = bay.status === 'PRE_OCCUPIED';
-    const isPrepare = bay.status === 'PREPARE';
-    const isOccupied = bay.status === 'OCCUPIED' || bay.status === 'USE';
-    const isUnderMaintenance = bay.status === 'UNDER_MAINTENANCE' || bay.status === 'MAINTENANCE' || bay.status === 'DISABLED';
+    const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+    const isUnderMaintenance = isBayBlocked(bay);
+    const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance;
+    const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
+    const isPrepare = canonicalStatus === 'PREPARE';
+    const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
 
     let bgCol = 'rgba(255, 255, 255, 0.03)';
     let borderCol = 'rgba(255, 255, 255, 0.1)';

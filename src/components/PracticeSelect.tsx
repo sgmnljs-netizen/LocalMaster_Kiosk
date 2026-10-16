@@ -144,11 +144,19 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   const handleBayTouch = async (bayNo: number) => {
     const bay = bays.find(b => b.bay_no === bayNo);
     if (!bay) return;
-    if (bay.status === 'UNDER_MAINTENANCE') return;
 
-    const canonicalStatus = (bay as any).status_info?.code || bay.status;
-    const isBayOccupiedStatus = canonicalStatus === 'OCCUPIED' || canonicalStatus === 'USE' || canonicalStatus === 'PREPARE';
+    const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+    const isBlockedStatus =
+      (bay as any).is_active === false ||
+      ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
+    if (isBlockedStatus) return;
+
+    const isBayOccupiedStatus = ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus);
     if (isBayOccupiedStatus) {
+      if (allocMode === 'GROUP') {
+        setErrorMsg(lang === 'KO' ? '다중(그룹) 배정 모드에서는 빈 타석만 선택할 수 있습니다.' : 'Only empty teeboxes can be selected in group mode.');
+        return;
+      }
       let mwMin = 0;
       if (bay.config_json) {
         try {
@@ -425,6 +433,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               <button
                 onClick={() => {
                   if (allocMode !== 'SINGLE') {
+                    if (selectedBayNos.length > 0) api.releaseBays(selectedBayNos);
                     handleReleaseAll();
                     setAllocMode('SINGLE');
                   }
@@ -448,6 +457,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               <button
                 onClick={() => {
                   if (allocMode !== 'GROUP') {
+                    if (selectedBayNos.length > 0) api.releaseBays(selectedBayNos);
                     handleReleaseAll();
                     setAllocMode('GROUP');
                   }

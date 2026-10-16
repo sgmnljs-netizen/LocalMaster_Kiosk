@@ -18,7 +18,7 @@ interface CheckinSelectProps {
   memberNo: string;
   memberName?: string;
   lang?: 'KO' | 'EN';
-  onCheckinSuccess: (bayNo: number, resId: string) => void;
+  onCheckinSuccess: (bayNo: number, resId: string, durationMin?: number, startTime?: string, endTime?: string) => void;
   onCancel: () => void;
 }
 
@@ -56,9 +56,16 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
     setProcessingResId(resId);
     setErrorMsg('');
     try {
+      const targetRes = reservations.find((r) => r.res_id === resId);
       const res = await api.verifyKioskCheckin(memberNo, resId);
       if (res.success && res.bay_no) {
-        onCheckinSuccess(res.bay_no, resId);
+        onCheckinSuccess(
+          res.bay_no,
+          resId,
+          (res as any).duration_min ?? targetRes?.duration_min,
+          (res as any).start_time ?? targetRes?.start_time,
+          (res as any).end_time ?? targetRes?.end_time
+        );
       } else {
         setErrorMsg(res.message || (lang === 'KO' ? '체크인 승인 처리 중 오류가 발생했습니다.' : 'Checkin failed.'));
       }

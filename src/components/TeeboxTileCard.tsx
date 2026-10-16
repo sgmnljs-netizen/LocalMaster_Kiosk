@@ -21,11 +21,13 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   isJustAllocated = false,
 }) => {
   // 🧮 5대 시간 변수 누적 합산 정밀 계산 함수 (Master Total Availability Calculation)
-  const canonicalStatus = (bay as any).status_info?.code || bay.status;
-  const isOccupied = canonicalStatus === 'OCCUPIED' || canonicalStatus === 'USE';
+  const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+  const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
   const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
   const isPrepare = canonicalStatus === 'PREPARE';
-  const isMaintenance = canonicalStatus === 'UNDER_MAINTENANCE' || canonicalStatus === 'REPAIR' || canonicalStatus === 'ERROR';
+  const isMaintenance =
+    (bay as any).is_active === false ||
+    ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
   const isAvailable = canonicalStatus === 'AVAILABLE' && !isOccupied && !isPreOccupied && !isPrepare && !isMaintenance;
 
   const totalRemainingMin = (bay as any).status_info?.minutes_left ?? TimeMaster.getRemainingMinutes(bay);
@@ -41,7 +43,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
 
   return (
     <div
-      onClick={() => (isAvailable || isOccupied) && onSelect(bay.bay_no)}
+      onClick={() => !isMaintenance && (isAvailable || isOccupied || isPrepare) && onSelect(bay.bay_no)}
       style={{
         position: 'relative',
         borderRadius: '24px',
