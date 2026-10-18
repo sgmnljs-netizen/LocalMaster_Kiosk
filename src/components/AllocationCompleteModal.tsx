@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Check, Printer, ArrowRight, RefreshCw } from 'lucide-react';
 import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
 import { useKioskSettings } from '../stores/kioskSettings';
@@ -13,6 +13,9 @@ interface AllocationCompleteModalProps {
   resId?: string;
   memberName?: string;
   payAmount?: number;
+  originalAmount?: number;
+  discountAmount?: number;
+  usedPoints?: number;
   vatYn?: string;
   cardIssuer?: string;
   cardNoMasked?: string;
@@ -30,6 +33,9 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   resId,
   memberName,
   payAmount = 0,
+  originalAmount,
+  discountAmount,
+  usedPoints,
   vatYn = 'Y',
   cardIssuer,
   cardNoMasked,
@@ -38,12 +44,14 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   lang = 'KO',
   onClose
 }) => {
-  const [countdown, setCountdown] = useState(6);
-  const [printStatus, setPrintStatus] = useState<string | null>(null);
-  const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string; biz_no?: string; ceo_name?: string } | null>(null);
   const { settings } = useKioskSettings();
   const storeName = settings.deviceName || '골포스 스마트 키오스크';
-  const autoPrintReceipt = true;
+  const autoPrintReceipt = settings.autoPrintReceipt ?? true;
+  const [countdown, setCountdown] = useState(6);
+  const [isPrinting, setIsPrinting] = useState<boolean>(autoPrintReceipt);
+  const [printStatus, setPrintStatus] = useState<string | null>(null);
+  const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string; biz_no?: string; ceo_name?: string } | null>(null);
+  const hasAutoPrintedRef = useRef(false);
 
   useEffect(() => {
     api.getStoreInfo().then((info) => {
@@ -52,70 +60,91 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   }, []);
 
   const handlePrint = useCallback(async () => {
+    setIsPrinting(true);
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
-    const nowStr = TimeMaster.formatKstDateTime(new Date());
-    const startStr = startTime || nowStr.slice(11, 16);
-    const isTaxFree = String(vatYn || 'Y').toUpperCase() === 'N';
-    const vat = isTaxFree ? 0 : Math.round(payAmount / 11);
-    const supply = isTaxFree ? 0 : payAmount - vat;
-    const taxFreeAmt = isTaxFree ? payAmount : 0;
+    try {
+      const nowStr = TimeMaster.formatKstDateTime(new Date());
+      const startStr = startTime || nowStr.slice(11, 16);
+      const resolvedDiscount = (discountAmount ?? 0) + (usedPoints ?? 0);
+      const resolvedUnitPrice = originalAmount ?? (payAmount + resolvedDiscount);
+      const isTaxFree = String(vatYn || 'Y').toUpperCase() === 'N';
+      const vat = isTaxFree ? 0 : Math.round(payAmount / 11);
+      const supply = isTaxFree ? 0 : payAmount - vat;
+      const taxFreeAmt = isTaxFree ? payAmount : 0;
 
-    const info = storeInfo || (await api.getStoreInfo().catch(() => null));
-    if (info && !storeInfo) setStoreInfo(info);
+      const info = storeInfo || (await api.getStoreInfo().catch(() => null));
+      if (info && !storeInfo) setStoreInfo(info);
 
-    const res = await kioskHardwareBridge.printReceipt({
-      sale_id: resId || `ALLOC-${Date.now()}`,
-      receipt_no: resId ? `TICK-${resId.slice(-6)}` : `TICK-${Date.now().toString().slice(-6)}`,
-      trade_dt: nowStr,
-      member_name: memberName || '회원',
-      pay_method: payAmount > 0 ? 'CARD' : 'SERVICE',
-      store_info: {
-        store_name: info?.store_nm || storeName,
-        biz_no: (info as any)?.biz_no || (info as any)?.biz_reg_no || '',
-        ceo_name: (info as any)?.ceo_name || (info as any)?.owner_name || '',
-        tel: info?.tel || '',
-        address: info?.address || '',
-      },
-      items: [
-        {
-          name: `타석 [${bayNo}번] ${durationMin}분 배정표`,
-          qty: 1,
-          unit_price: payAmount,
-          amount: payAmount,
+      const res = await kioskHardwareBridge.printReceipt({
+        sale_id: resId || `ALLOC-${Date.now()}`,
+        receipt_no: resId ? `TICK-${resId.slice(-6)}` : `TICK-${Date.now().toString().slice(-6)}`,
+        trade_dt: nowStr,
+        bay_no: bayNo,
+        bayNo,
+        use_minutes: durationMin,
+        useMinutes: durationMin,
+        start_time: startStr,
+        startTime: startStr,
+        end_time: endTime,
+        endTime,
+        member_name: memberName || '회원',
+        pay_method: payAmount > 0 ? 'CARD' : 'SERVICE',
+        store_info: {
+          store_name: info?.store_nm || storeName,
+          biz_no: (info as any)?.biz_no || (info as any)?.biz_reg_no || '',
+          ceo_name: (info as any)?.ceo_name || (info as any)?.owner_name || '',
+          tel: info?.tel || '',
+          address: info?.address || '',
         },
-      ],
-      tax_summary: {
-        supply_amt: supply,
-        tax_amt: vat,
-        tax_free_amt: taxFreeAmt,
-        total_amt: payAmount,
-        discount_amt: 0,
-        pay_amt: payAmount,
-      },
-      card_info: payAmount > 0 ? {
-        issuer_name: cardIssuer || '신용카드',
-        card_no_masked: cardNoMasked || '신용카드',
-        approval_no: authNo || resId || '00000000',
-        installment_months: 0,
-        terminal_id: terminalId || settings.terminalId || api.getTerminalId(),
-      } : undefined,
-      barcode_text: `BAY-${bayNo}-${startStr.replace(':', '')}`,
-      header_message: `★★★ [${bayNo}번 타석 배정표] ★★★`,
-      footer_message: `이용시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n타석으로 이동하여 연습을 시작해 주십시오.`,
-    });
+        items: [
+          {
+            name: `타석 [${bayNo}번] ${durationMin}분 배정표`,
+            qty: 1,
+            unit_price: resolvedUnitPrice,
+            amount: payAmount,
+            discount_amt: resolvedDiscount,
+            is_tax_free: isTaxFree,
+          },
+        ],
+        tax_summary: {
+          supply_amt: supply,
+          tax_amt: vat,
+          tax_free_amt: taxFreeAmt,
+          total_amt: resolvedUnitPrice,
+          discount_amt: resolvedDiscount,
+          pay_amt: payAmount,
+        },
+        card_info: payAmount > 0 ? {
+          issuer_name: cardIssuer || '신용카드',
+          card_no_masked: cardNoMasked || '신용카드',
+          approval_no: authNo || resId || '00000000',
+          installment_months: 0,
+          terminal_id: terminalId || settings.terminalId || api.getTerminalId(),
+        } : undefined,
+        barcode_text: `BAY-${bayNo}-${startStr.replace(':', '')}`,
+        header_message: `★★★ [${bayNo}번 타석 배정표] ★★★`,
+        footer_message: `이용시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n타석으로 이동하여 연습을 시작해 주십시오.`,
+      });
 
-    setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
-  }, [bayNo, durationMin, startTime, endTime, resId, memberName, payAmount, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, lang, storeName, storeInfo, settings.terminalId]);
+      setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
+    } finally {
+      setIsPrinting(false);
+    }
+  }, [bayNo, durationMin, startTime, endTime, resId, memberName, payAmount, originalAmount, discountAmount, usedPoints, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, lang, storeName, storeInfo, settings.terminalId]);
 
-  // 마운트 시 자동 인쇄
+  // 마운트 시 자동 인쇄 (단 1회 보장)
   useEffect(() => {
-    if (autoPrintReceipt) {
+    if (autoPrintReceipt && !hasAutoPrintedRef.current) {
+      hasAutoPrintedRef.current = true;
       handlePrint();
+    } else if (!autoPrintReceipt) {
+      setIsPrinting(false);
     }
   }, [autoPrintReceipt, handlePrint]);
 
-  // 6초 자동 카운트다운
+  // 6초 자동 카운트다운 (인쇄 진행 중에는 대기)
   useEffect(() => {
+    if (isPrinting) return;
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -128,7 +157,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [onClose]);
+  }, [onClose, isPrinting]);
 
   // 시각 포맷팅 (HH:mm)
   const formatTime = (timeStr?: string) => {

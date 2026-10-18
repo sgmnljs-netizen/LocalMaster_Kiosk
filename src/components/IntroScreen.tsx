@@ -160,12 +160,20 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
           });
           if (practiceBays.length === 0) return null;
 
+          const isBayAvailable = (b: any) => {
+            const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+            const isBlocked =
+              (b as any).is_active === false ||
+              ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(st);
+            return st === 'AVAILABLE' && !isBlocked;
+          };
+
           const floorMap: { [key: string]: { total: number; avail: number } } = {};
           practiceBays.forEach(b => {
             const fKey = b.floor ? String(b.floor) : (b.floor_no ? `${b.floor_no}F` : '1F');
             if (!floorMap[fKey]) floorMap[fKey] = { total: 0, avail: 0 };
             floorMap[fKey].total += 1;
-            if (b.status === 'AVAILABLE') floorMap[fKey].avail += 1;
+            if (isBayAvailable(b)) floorMap[fKey].avail += 1;
           });
 
           const sortedFloorKeys = Object.keys(floorMap).sort((a, b) => {
@@ -174,7 +182,7 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
             return numA - numB;
           });
 
-          const totalAvail = practiceBays.filter(b => b.status === 'AVAILABLE').length;
+          const totalAvail = practiceBays.filter(isBayAvailable).length;
 
           return (
             <div 

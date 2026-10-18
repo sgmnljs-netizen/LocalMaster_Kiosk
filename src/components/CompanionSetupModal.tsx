@@ -27,17 +27,36 @@ interface CompanionSetupModalProps {
   onCancel: () => void;
 }
 
-const getFirstAssignableAsset = (member?: Member | null) => {
-  return (member?.assets || []).find(
-    (a) =>
-      a.is_assignable !== false &&
-      (a.rem_count === null || a.rem_count === undefined || a.rem_count > 0) &&
-      ((a as any).remain_cnt === null || (a as any).remain_cnt === undefined || (a as any).remain_cnt > 0)
-  );
+const getAssignableAssets = (member?: Member | null, bay?: Bay | null) => {
+  const targetZoneCode = bay?.zone_code?.toUpperCase() || 'BAY';
+  return (member?.assets || []).filter((a) => {
+    if (a.is_assignable === false) return false;
+    const logicType = (a.logic_type || 'PERIOD').toUpperCase();
+    if (logicType === 'COUNT' || logicType === 'COUPON') {
+      const cnt = (a as any).remain_cnt ?? a.rem_count ?? 0;
+      if (cnt <= 0) return false;
+    } else {
+      if (a.rem_count !== null && a.rem_count !== undefined && a.rem_count <= 0) return false;
+      if ((a as any).remain_cnt !== null && (a as any).remain_cnt !== undefined && (a as any).remain_cnt <= 0) return false;
+      if (a.remain_days !== undefined && a.remain_days !== null && a.remain_days < 0) return false;
+    }
+    if (!a.allowed_categories || a.allowed_categories.length === 0) return true;
+    const allowedUpper = a.allowed_categories.map((c: string) => String(c).toUpperCase());
+    return allowedUpper.includes(targetZoneCode);
+  });
+};
+
+const getFirstAssignableAsset = (member?: Member | null, bay?: Bay | null) => {
+  return getAssignableAssets(member, bay)[0];
+};
+
+const resolveAssetTicketName = (asset?: any): string => {
+  return asset?.product_nm || asset?.item_name || asset?.prod_nm || '정기 회원권 / 잔여 횟수 차감';
 };
 
 export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   selectedBayNos,
+  bays = [],
   leaderMember,
   lang,
   selectedDurationMin = 60,
@@ -51,14 +70,16 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   const [searchLoading, setSearchLoading] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string>('');
   const [dailyPrice, setDailyPrice] = useState<number>(defaultDailyPrice || 15000);
+  const [companionMembers, setCompanionMembers] = useState<Record<number, Member>>({});
 
   // 각 타석별 배정 설정 상태
   const [targets, setTargets] = useState<CompanionTargetItem[]>(() => {
     const initialDailyPrice = defaultDailyPrice || 15000;
     return selectedBayNos.map((bayNo, idx) => {
+      const targetBay = bays.find(b => b.bay_no === bayNo);
       if (idx === 0) {
         // 대표자 타석
-        const validAsset = getFirstAssignableAsset(leaderMember);
+        const validAsset = getFirstAssignableAsset(leaderMember, targetBay);
         const durMin = (validAsset as any)?.duration_min || selectedDurationMin;
         const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
         return {
@@ -70,7 +91,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           isGuest: false,
           ticketType: validAsset && parsedId ? 'MEMBERSHIP' : 'DAILY',
           memberItemId: validAsset && parsedId ? parsedId : undefined,
-          ticketName: validAsset && parsedId ? validAsset.item_name : `일일 타석권 ${durMin}분`,
+          ticketName: validAsset && parsedId ? resolveAssetTicketName(validAsset) : `일일 타석권 ${durMin}분`,
           durationMin: durMin,
           price: validAsset && parsedId ? 0 : initialDailyPrice
         };
@@ -149,44 +170,122 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
     });
   };
 
-  // 동반자 회원 검색 (정규화 헬퍼 적용)
+  // 동반자 회원 검색 (정규화 헬퍼 및 409 중복 뒷번호 대응 적용)
   const handleSearchCompanion = async () => {
     const cleanHp = searchHp.replace(/[^0-9]/g, '');
-    if (!cleanHp || cleanHp.length < 4) {
-      setSearchError(lang === 'KO' ? '전화번호 뒤 4자리 이상 입력해주세요.' : 'Enter at least 4 digits.');
+    if (!cleanHp || (cleanHp.length !== 4 && cleanHp.length < 10)) {
+      setSearchError(lang === 'KO' ? '휴대폰 번호 뒷 4자리 또는 전체 11자리를 입력해주세요.' : 'Enter 4-digit suffix or full 11-digit phone number.');
       return;
     }
     setSearchError('');
     setSearchLoading(true);
 
     try {
-      // 휴대폰번호 검색
       const member = await api.getMemberByHp(cleanHp);
       if (member) {
-        const validAsset = getFirstAssignableAsset(member);
+        const slotBayNo = targets[activeBayIdx]?.bayNo;
+        const targetBay = bays.find(b => b.bay_no === slotBayNo);
+        if (slotBayNo !== undefined) {
+          setCompanionMembers(prev => ({ ...prev, [slotBayNo]: member }));
+        }
+        const alreadyAssignedSlot = targets.find((t, i) => i !== activeBayIdx && t.memberNo === member.member_no);
+        const validAsset = getFirstAssignableAsset(member, targetBay);
         const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
+        const assetLogic = String((validAsset as any)?.logic_type || '').toUpperCase();
+        const assetRemCnt = Number(validAsset?.rem_count ?? (validAsset as any)?.remain_cnt ?? 0);
+        const isCountAsset = (assetLogic === 'COUNT' || assetLogic === 'COUPON') || assetRemCnt > 0;
+
+        // 동일 회원이 이미 다른 슬롯에 등록되어 있고 횟수권 다회 보유자가 아닌 경우 회원권 중복 차감 차단
+        const usedCountForSameAsset = parsedId
+          ? targets.filter((t, i) => i !== activeBayIdx && t.ticketType === 'MEMBERSHIP' && t.memberItemId === parsedId).length
+          : 0;
+        const canUseMembership = Boolean(
+          validAsset &&
+          parsedId &&
+          (!alreadyAssignedSlot || (isCountAsset && assetRemCnt > usedCountForSameAsset))
+        );
+
         updateTarget(activeBayIdx, {
           isGuest: false,
           memberNo: member.member_no,
           memberName: member.member_name,
           hp: member.hp,
-          ticketType: validAsset && parsedId ? 'MEMBERSHIP' : 'DAILY',
-          memberItemId: validAsset && parsedId ? parsedId : undefined,
-          ticketName: validAsset && parsedId ? validAsset.item_name : `일일 타석권 ${selectedDurationMin}분`,
-          price: validAsset && parsedId ? 0 : dailyPrice
+          ticketType: canUseMembership ? 'MEMBERSHIP' : 'DAILY',
+          memberItemId: canUseMembership ? parsedId : undefined,
+          ticketName: canUseMembership && validAsset ? resolveAssetTicketName(validAsset) : `일일 타석권 ${selectedDurationMin}분`,
+          price: canUseMembership ? 0 : dailyPrice
         });
+        if (alreadyAssignedSlot && !canUseMembership) {
+          setSearchError(lang === 'KO' ? '이미 다른 타석에 선택된 회원권이므로 일일 타석권 결제로 자동 설정되었습니다.' : 'Membership already used in another slot; set to Daily Pass.');
+        }
         setSearchHp('');
       } else {
-        setSearchError(lang === 'KO' ? '해당 정보의 회원을 찾을 수 없습니다. 비회원으로 진행됩니다.' : 'Member not found.');
+        setSearchError(lang === 'KO' ? '일치하는 회원을 찾을 수 없습니다. 번호를 다시 확인하거나 비회원으로 진행해주세요.' : 'Member not found.');
       }
-    } catch {
-      setSearchError(lang === 'KO' ? '회원 검색 중 오류가 발생했습니다.' : 'Failed to search member.');
+    } catch (err: any) {
+      if (err?.duplicate || err?.status === 409) {
+        setSearchError(err.message || '동일한 뒷번호 회원이 2명 이상 존재합니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
+      } else {
+        setSearchError(err?.message || (lang === 'KO' ? '회원 검색 중 오류가 발생했습니다.' : 'Failed to search member.'));
+      }
     } finally {
       setSearchLoading(false);
     }
   };
 
+  // 최종 확정 전 슬롯 무결성 검증
+  const handleConfirmAll = () => {
+    // 이용권별 총 사용 횟수 초과 검증
+    const usageByItemId = new Map<number, number>();
+    for (const t of targets) {
+      if (t.ticketType === 'MEMBERSHIP') {
+        if (!t.memberItemId || !t.memberNo) {
+          setSearchError(`${t.bayNo}번 타석의 회원 인증 또는 유효 이용권이 확인되지 않았습니다. 회원 조회 후 이용하거나 일일 타석권을 선택해 주세요.`);
+          return;
+        }
+        usageByItemId.set(t.memberItemId, (usageByItemId.get(t.memberItemId) || 0) + 1);
+      }
+    }
+
+    // 대표자 및 동반자 자산과 대조하여 기간권 중복 사용 또는 횟수권 초과 사용 검증
+    const allKnownAssets = [
+      ...(leaderMember.assets || []),
+      ...Object.values(companionMembers).flatMap(m => m?.assets || [])
+    ];
+    for (const [itemId, usedCount] of usageByItemId.entries()) {
+      if (usedCount > 1) {
+        const matchedAsset = allKnownAssets.find(
+          a => Number(a.member_item_id || (a as any).id) === itemId
+        );
+        if (matchedAsset) {
+          const logicType = String(matchedAsset.logic_type || '').toUpperCase();
+          const remCnt = Number(matchedAsset.rem_count ?? (matchedAsset as any).remain_cnt ?? 0);
+          if ((logicType === 'PERIOD' || logicType === 'MEMBERSHIP') && remCnt <= 0) {
+            setSearchError('기간제 정기 회원권은 1인 1타석만 배정 가능합니다. 동반자 타석은 횟수권 또는 일일 타석권을 선택해 주세요.');
+            return;
+          }
+          if (remCnt > 0 && usedCount > remCnt) {
+            setSearchError(`보유하신 이용권의 잔여 횟수(${remCnt}회)보다 많은 타석(${usedCount}석)에 적용할 수 없습니다.`);
+            return;
+          }
+        }
+      }
+    }
+
+    onConfirm(targets);
+  };
+
   const currentTarget = targets[activeBayIdx];
+  const currentSlotMember = currentTarget
+    ? (currentTarget.isLeader ? leaderMember : companionMembers[currentTarget.bayNo])
+    : undefined;
+  const currentSlotBay = currentTarget
+    ? bays.find(b => b.bay_no === currentTarget.bayNo)
+    : undefined;
+  const currentAssignableAssets = getAssignableAssets(currentSlotMember, currentSlotBay);
+  const selectedAsset = currentAssignableAssets.find(
+    a => Number(a.member_item_id || (a as any).id) === Number(currentTarget?.memberItemId)
+  ) || currentAssignableAssets[0];
   const totalPrice = targets.reduce((sum, t) => sum + t.price, 0);
 
   return (
@@ -196,7 +295,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
         top: 0, left: 0, right: 0, bottom: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.75)',
         backdropFilter: 'blur(12px)',
-        zIndex: 999,
+        zIndex: 9500,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -277,7 +376,11 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
               return (
                 <button
                   key={t.bayNo}
-                  onClick={() => setActiveBayIdx(idx)}
+                  onClick={() => {
+                    setActiveBayIdx(idx);
+                    setSearchError('');
+                    setSearchHp('');
+                  }}
                   style={{
                     flex: 1,
                     minWidth: '140px',
@@ -319,7 +422,10 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                 ) : (
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
-                      onClick={() => updateTarget(activeBayIdx, { isGuest: false, memberName: '동반자 회원' })}
+                      onClick={() => {
+                        setSearchError('');
+                        updateTarget(activeBayIdx, { isGuest: false, memberName: currentTarget.memberNo ? currentTarget.memberName : '동반자 회원' });
+                      }}
                       style={{
                         padding: '8px 16px',
                         borderRadius: '12px',
@@ -334,7 +440,11 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                       <UserCheck size={16} style={{ display: 'inline', marginRight: '4px' }} /> 회원
                     </button>
                     <button
-                      onClick={() => updateTarget(activeBayIdx, { isGuest: true, memberNo: undefined, memberItemId: undefined, memberName: `비회원 ${activeBayIdx}`, ticketType: 'DAILY', price: dailyPrice })}
+                      onClick={() => {
+                        setSearchError('');
+                        setSearchHp('');
+                        updateTarget(activeBayIdx, { isGuest: true, memberNo: undefined, memberItemId: undefined, memberName: `비회원 ${activeBayIdx}`, ticketType: 'DAILY', price: dailyPrice });
+                      }}
                       style={{
                         padding: '8px 16px',
                         borderRadius: '12px',
@@ -352,27 +462,63 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                 )}
               </div>
 
-              {/* 회원 검색 폼 (동반자 회원 선택 시) */}
+              {/* 회원 검색 폼 + 터치 숫자 키패드 (동반자 회원 선택 시) */}
               {!currentTarget.isLeader && !currentTarget.isGuest && (
-                <div style={{ background: '#ffffff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', gap: '12px', alignItems: 'center' }}>
-                  <input 
-                    type="text"
-                    placeholder="휴대폰 번호 뒤 4자리 검색"
-                    value={searchHp}
-                    onChange={(e) => setSearchHp(e.target.value)}
-                    style={{ flex: 1, padding: '12px 16px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '16px' }}
-                  />
-                  <button
-                    onClick={handleSearchCompanion}
-                    disabled={searchLoading}
-                    style={{ padding: '12px 24px', background: '#047857', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 800, cursor: 'pointer' }}
-                  >
-                    {searchLoading ? '검색 중...' : '회원 조회'}
-                  </button>
+                <div style={{ background: '#ffffff', padding: '18px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <input 
+                      type="text"
+                      readOnly
+                      placeholder={lang === 'KO' ? '휴대폰 번호 뒷 4자리 또는 11자리 터치 입력' : 'Tap 4 or 11 digits'}
+                      value={searchHp}
+                      style={{ flex: 1, padding: '12px 16px', borderRadius: '12px', border: '2px solid #047857', fontSize: '20px', fontWeight: 900, letterSpacing: '2px', color: '#0f172a', background: '#f8fafc' }}
+                    />
+                    <button
+                      onClick={handleSearchCompanion}
+                      disabled={searchLoading}
+                      style={{ padding: '14px 28px', background: '#047857', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '16px', fontWeight: 900, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      {searchLoading ? '검색 중...' : '회원 조회'}
+                    </button>
+                  </div>
+
+                  {/* 키오스크 전용 인라인 터치 숫자 패드 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '8px' }}>
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '←', '초기화'].map((key) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          setSearchError('');
+                          if (key === '초기화') setSearchHp('');
+                          else if (key === '←') setSearchHp((prev) => prev.slice(0, -1));
+                          else if (searchHp.length < 11) setSearchHp((prev) => prev + key);
+                        }}
+                        style={{
+                          height: '46px',
+                          borderRadius: '10px',
+                          border: '1px solid #cbd5e1',
+                          background: key === '초기화' || key === '←' ? '#f1f5f9' : '#ffffff',
+                          color: '#0f172a',
+                          fontSize: key === '초기화' ? '14px' : '18px',
+                          fontWeight: 800,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {key}
+                      </button>
+                    ))}
+                  </div>
+
+                  {currentTarget.memberNo && (
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#047857', background: '#ecfdf5', padding: '8px 12px', borderRadius: '10px' }}>
+                      ✅ 조회된 동반 회원: {currentTarget.memberName} ({currentTarget.hp || currentTarget.memberNo})
+                    </div>
+                  )}
                 </div>
               )}
               {searchError && (
-                <div style={{ color: '#ef4444', fontSize: '14px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', padding: '10px 14px', borderRadius: '10px', fontSize: '14px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <AlertCircle size={16} /> {searchError}
                 </div>
               )}
@@ -380,36 +526,77 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
               {/* 이용권 / 상품 지정 */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <label style={{ fontSize: '15px', fontWeight: 800, color: '#334155' }}>배정 및 이용 방식 선택</label>
+                {!currentTarget.isGuest && currentAssignableAssets.length > 1 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {currentAssignableAssets.map((asset) => {
+                      const assetId = Number(asset.member_item_id || (asset as any).id);
+                      const isSelectedAsset = currentTarget.ticketType === 'MEMBERSHIP' && Number(currentTarget.memberItemId) === assetId;
+                      const assetName = resolveAssetTicketName(asset);
+                      const remCnt = (asset as any).remain_cnt ?? asset.rem_count;
+                      return (
+                        <button
+                          key={assetId}
+                          type="button"
+                          onClick={() => {
+                            setSearchError('');
+                            updateTarget(activeBayIdx, {
+                              ticketType: 'MEMBERSHIP',
+                              memberItemId: assetId,
+                              price: 0,
+                              ticketName: assetName,
+                              durationMin: Number((asset as any).duration_min || currentTarget.durationMin || selectedDurationMin)
+                            });
+                          }}
+                          style={{
+                            padding: '8px 14px',
+                            borderRadius: '12px',
+                            fontSize: '13px',
+                            fontWeight: 800,
+                            border: isSelectedAsset ? '2px solid #047857' : '1px solid #cbd5e1',
+                            background: isSelectedAsset ? '#ecfdf5' : '#ffffff',
+                            color: isSelectedAsset ? '#047857' : '#475569',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🎟️ {assetName}{remCnt !== undefined && remCnt !== null ? ` (잔여 ${remCnt}회)` : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   {/* 이용권 차감 옵션 */}
                   <button
                     onClick={() => {
-                      if (currentTarget.isGuest || !currentTarget.memberItemId) {
+                      const resolvedAssetId = currentTarget.memberItemId || (selectedAsset ? Number(selectedAsset.member_item_id || (selectedAsset as any).id) : undefined);
+                      if (currentTarget.isGuest || !resolvedAssetId) {
                         setSearchError(lang === 'KO' ? '사용 가능한 회원권이 없습니다. 회원 조회 후 이용하거나 일일 타석권을 선택해 주세요.' : 'No valid membership found.');
                         return;
                       }
                       setSearchError('');
                       updateTarget(activeBayIdx, {
                         ticketType: 'MEMBERSHIP',
-                        memberItemId: currentTarget.memberItemId,
+                        memberItemId: resolvedAssetId,
                         price: 0,
-                        ticketName: '정기 회원권 / 잔여 횟수 차감'
+                        ticketName: resolveAssetTicketName(selectedAsset)
                       });
                     }}
-                    disabled={currentTarget.isGuest || !currentTarget.memberItemId}
+                    disabled={currentTarget.isGuest || (!currentTarget.memberItemId && !selectedAsset)}
                     style={{
                       padding: '20px',
                       borderRadius: '16px',
                       textAlign: 'left',
                       border: currentTarget.ticketType === 'MEMBERSHIP' ? '2px solid #047857' : '1px solid #cbd5e1',
                       background: currentTarget.ticketType === 'MEMBERSHIP' ? '#ffffff' : '#f8fafc',
-                      cursor: (currentTarget.isGuest || !currentTarget.memberItemId) ? 'not-allowed' : 'pointer',
-                      opacity: (currentTarget.isGuest || !currentTarget.memberItemId) ? 0.5 : 1,
+                      cursor: (currentTarget.isGuest || (!currentTarget.memberItemId && !selectedAsset)) ? 'not-allowed' : 'pointer',
+                      opacity: (currentTarget.isGuest || (!currentTarget.memberItemId && !selectedAsset)) ? 0.5 : 1,
                       boxShadow: currentTarget.ticketType === 'MEMBERSHIP' ? '0 4px 12px rgba(4, 120, 87, 0.1)' : 'none'
                     }}
                   >
                     <div style={{ fontWeight: 800, fontSize: '17px', color: '#0f172a' }}>🎟️ 회원권 차감</div>
-                    <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>보유 중인 회원 이용권으로 배정 (0원)</div>
+                    <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
+                      {selectedAsset ? `${resolveAssetTicketName(selectedAsset)} (0원)` : '보유 중인 회원 이용권으로 배정 (0원)'}
+                    </div>
                   </button>
 
                   {/* 일일 이용권 결제 옵션 */}
@@ -469,7 +656,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
               이전으로
             </button>
             <button
-              onClick={() => onConfirm(targets)}
+              onClick={handleConfirmAll}
               style={{
                 padding: '16px 40px',
                 borderRadius: '16px',

@@ -21,7 +21,7 @@ export function useKioskHardwareHeartbeat() {
 
     const checkHealth = useCallback(async () => {
         const currentSettings = getKioskSettings();
-        const port = parseInt(currentSettings.vcatPort, 10) || 8090;
+        const port = parseInt(currentSettings.vcatPort, 10) || 9099;
         const isMock = getIsMockHardware();
         setLastCheckedAt(Date.now());
 

@@ -23,6 +23,8 @@ interface PaymentTerminalProps {
   vatYn?: string;
   businessUnitType?: string;
   businessMerchantId?: string;
+  proId?: string | null;
+  onVanBusyChange?: (busy: boolean) => void;
   onPaymentSuccess: (payResult?: { 
     apprNo: string; 
     tradeDate: string; 
@@ -51,6 +53,8 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   vatYn = 'Y',
   businessUnitType = 'MAIN',
   businessMerchantId = 'MAIN',
+  proId = null,
+  onVanBusyChange,
   onPaymentSuccess,
   onCancel
 }) => {
@@ -65,8 +69,28 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const [maskedCard, setMaskedCard] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const isPayRequested = useRef(false);
+  const isSilentCancelRef = useRef(false);
   const hasCompletedRef = useRef(false);
   const lastPayResultRef = useRef<any>(null);
+
+  useEffect(() => {
+    const busy = vanState === 'WAITING_CARD' || vanState === 'REQUESTING' || payStep === 'PROCESSING';
+    onVanBusyChange?.(busy);
+    if (!busy) {
+      return () => {
+        onVanBusyChange?.(false);
+      };
+    }
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      onVanBusyChange?.(false);
+    };
+  }, [vanState, payStep, onVanBusyChange]);
 
   const completePaymentOnce = useCallback((payload: any) => {
     lastPayResultRef.current = payload;
@@ -163,6 +187,14 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       setAppliedCoupon(coupon);
       setCouponCode('');
       setCouponError('');
+      // 이미 단말기 결제 대기 중이었던 경우 기존 승인 요청을 취소하고 변경된 금액으로 재요청 준비
+      if (isPayRequested.current) {
+        isSilentCancelRef.current = true;
+        cancelPayment();
+        isPayRequested.current = false;
+      }
+      setErrorMsg('');
+      setIsReadyToPay(false);
     } catch (err: any) {
       setAppliedCoupon(null);
       setCouponError(err.message || '유효하지 않거나 이미 사용된 쿠폰입니다.');
@@ -174,6 +206,13 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const handleRemoveCoupon = () => {
     setAppliedCoupon(null);
     setCouponError('');
+    if (isPayRequested.current) {
+      isSilentCancelRef.current = true;
+      cancelPayment();
+      isPayRequested.current = false;
+    }
+    setErrorMsg('');
+    setIsReadyToPay(false);
   };
 
   // 📟 통합 하드웨어 바코드 스캐너 훅 (USB HID 및 브릿지 데몬)
@@ -235,13 +274,17 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
 
     // 🏛️ 서브 가맹점 / 소속 프로 TID 라우팅 검증 (Fail-Fast)
     const unitUpper = String(businessUnitType || 'MAIN').toUpperCase();
-    const isSubMerchant = ['PRO', 'SUB', 'LESSON'].includes(unitUpper) || (businessMerchantId && businessMerchantId !== 'MAIN');
+    const isSubMerchant =
+      ['PRO', 'SUB', 'LESSON', 'FNB'].includes(unitUpper) ||
+      (Boolean(businessMerchantId) && businessMerchantId !== 'MAIN') ||
+      Boolean(proId);
     if ((api as any).resolveTerminalRoute) {
       try {
-        const route = await (api as any).resolveTerminalRoute(
+        const route = await api.resolveTerminalRoute(
           settings.deviceId,
           businessMerchantId || 'MAIN',
-          businessUnitType || 'MAIN'
+          businessUnitType || 'MAIN',
+          proId || null
         );
         if (!route || route.error || route.status === 422 || (isSubMerchant && !route.terminal_id)) {
           setErrorMsg(route?.message || '소속 프로/서브 가맹점 전용 단말기(TID) 라우팅 정보가 설정되지 않았습니다.');
@@ -271,13 +314,14 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     }
 
     const isTaxFree = String(vatYn || 'Y').toUpperCase() === 'N';
+    const vatAmt = isTaxFree ? 0 : Math.round(actualPayAmt - actualPayAmt / 1.1);
     const res = await startPayment({
       amount: actualPayAmt,
       productName,
       customerName: memberName,
       timeoutSeconds: 30,
       ...({
-        vatAmount: isTaxFree ? 0 : Math.round(actualPayAmt - actualPayAmt / 1.1),
+        vatAmount: vatAmt,
         taxFreeAmount: isTaxFree ? actualPayAmt : 0,
         vat_yn: isTaxFree ? 'N' : 'Y',
       } as any),
@@ -292,7 +336,13 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
 
       try {
         if (resId) {
-          const webhookRes = await api.processPaymentWebhook(resId, actualPayAmt);
+          const webhookRes = await api.processPaymentWebhook(resId, actualPayAmt, 'CARD', {
+            ...res,
+            couponNo: appliedCoupon?.coupon_no,
+            couponDiscount: couponDiscountAmt,
+            usedPoints: ptsUsed,
+            gradeDiscountAmount: gradeDiscountAmt,
+          });
           if (!webhookRes.success) {
             throw new Error(webhookRes.message);
           }
@@ -321,9 +371,19 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             terminalId: res.terminal_id,
             vanTrNo: res.van_tr_no,
             reason: '타석 배정 전산 오류로 인한 자동 망취소',
-            ...({ orgAuthNo: res.auth_code, orgAuthDate: orgDate, orgVanTrNo: res.van_tr_no } as any)
+            ...({
+              isTaxFree,
+              vat: vatAmt,
+              vatAmount: vatAmt,
+              taxFreeAmount: isTaxFree ? actualPayAmt : 0,
+              orgAuthNo: res.auth_code,
+              orgAuthDate: orgDate,
+              orgVanTrNo: res.van_tr_no,
+            } as any)
           });
           if (!cancelRes || !cancelRes.success) {
+            const backendReason = err?.message || 'Webhook failed';
+            const revReason = cancelRes?.error_message || 'Unknown';
             await api.reportGhostCharge({
               store_cd: STORE_CODE,
               member_no: memberNo,
@@ -333,12 +393,17 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               card_no_masked: res.card_no_masked || '',
               issuer_name: res.issuer_name || '',
               van_tr_no: res.van_tr_no || '',
+              approvedAt: res.approved_at,
               terminal_id: res.terminal_id || settings.terminalId || '',
-              error_reason: `${err?.message || 'Webhook failed'} / Cancel failed: ${cancelRes?.error_message || 'Unknown'}`
+              backendErrorReason: backendReason,
+              reversalErrorReason: revReason,
+              error_reason: `${backendReason} / Cancel failed: ${revReason}`
             });
           }
           setErrorMsg('타석 배정 처리 실패로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 회수해 주세요.');
         } catch (cancelErr: any) {
+          const backendReason = err?.message || 'Webhook failed';
+          const revReason = cancelErr?.message || String(cancelErr);
           await api.reportGhostCharge({
             store_cd: STORE_CODE,
             member_no: memberNo,
@@ -348,8 +413,11 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             card_no_masked: res.card_no_masked || '',
             issuer_name: res.issuer_name || '',
             van_tr_no: res.van_tr_no || '',
+            approvedAt: res.approved_at,
             terminal_id: res.terminal_id || settings.terminalId || '',
-            error_reason: `${err?.message || 'Webhook failed'} / Cancel exception: ${cancelErr?.message || String(cancelErr)}`
+            backendErrorReason: backendReason,
+            reversalErrorReason: revReason,
+            error_reason: `${backendReason} / Cancel exception: ${revReason}`
           });
           setErrorMsg(err.message || '결제 후 배정 처리 중 오류가 발생했습니다.');
         }
@@ -358,10 +426,16 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       }
     } else {
       setPayStep('INSERT_CARD');
-      setErrorMsg(res.error_message || '결제가 승인되지 않았습니다. 카드를 다시 확인해 주세요.');
+      const errCode = (res as any).errorCode || res.error_code;
+      if (errCode === 'E_USER_CANCEL' || isSilentCancelRef.current) {
+        isSilentCancelRef.current = false;
+        setErrorMsg('');
+      } else {
+        setErrorMsg(res.error_message || '결제가 승인되지 않았습니다. 카드를 다시 확인해 주세요.');
+      }
       isPayRequested.current = false;
     }
-  }, [productName, memberName, memberNo, resId, gradeDiscountAmt, couponDiscountAmt, appliedCoupon, vatYn, businessUnitType, businessMerchantId, settings, startPayment, completePaymentOnce]);
+  }, [productName, memberName, memberNo, resId, gradeDiscountAmt, couponDiscountAmt, appliedCoupon, vatYn, businessUnitType, businessMerchantId, proId, settings, startPayment, completePaymentOnce]);
 
   // 포인트 보유 회원의 경우 사용자가 포인트를 선택하고 결제를 시작할 수 있도록 제어
   const [isReadyToPay, setIsReadyToPay] = useState<boolean>(!memberNo || memberPoint === 0);
@@ -379,6 +453,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   };
 
   const handleUserCancel = () => {
+    isSilentCancelRef.current = true;
     cancelPayment();
     onCancel();
   };
@@ -507,7 +582,25 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 <input
                   type="text"
                   value={couponCode}
-                  onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                  onFocus={() => {
+                    if (isPayRequested.current && (vanState === 'WAITING_CARD' || vanState === 'READY')) {
+                      isSilentCancelRef.current = true;
+                      cancelPayment();
+                      isPayRequested.current = false;
+                      setIsReadyToPay(false);
+                      setErrorMsg('');
+                    }
+                  }}
+                  onChange={(e) => {
+                    setCouponCode(e.target.value.toUpperCase());
+                    if (isPayRequested.current && (vanState === 'WAITING_CARD' || vanState === 'READY')) {
+                      isSilentCancelRef.current = true;
+                      cancelPayment();
+                      isPayRequested.current = false;
+                      setIsReadyToPay(false);
+                      setErrorMsg('');
+                    }
+                  }}
                   onKeyDown={(e) => e.key === 'Enter' && handleVerifyCoupon()}
                   placeholder="쿠폰 번호 또는 시리얼 코드 입력"
                   style={{ flex: 1, height: '44px', padding: '0 14px', borderRadius: '12px', border: '1.5px solid #c4b5fd', fontSize: '15px', fontWeight: 600, outline: 'none', background: '#ffffff' }}
@@ -627,6 +720,30 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 {finalCardAmt === 0 ? '✅ 0원 전액 결제 승인' : `💳 ${finalCardAmt.toLocaleString()}원 카드 결제 시작`}
               </button>
             </div>
+          )}
+
+          {/* 쿠폰 변경 등으로 재결제 시작 대기 상태인 비포인트 회원/비회원용 결제 시작 버튼 */}
+          {(!memberNo || memberPoint === 0) && !isReadyToPay && (
+            <button
+              type="button"
+              onClick={handleStartPayment}
+              style={{
+                width: '100%',
+                height: '56px',
+                borderRadius: '16px',
+                background: finalCardAmt === 0 ? '#16a34a' : '#0071e3',
+                color: '#ffffff',
+                fontSize: '18px',
+                fontWeight: 900,
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(0, 113, 227, 0.25)'
+              }}
+            >
+              {finalCardAmt === 0
+                ? '✅ 0원 할인 전액 결제 승인'
+                : `💳 ${finalCardAmt.toLocaleString()}원 ${appliedCoupon ? '할인 금액으로 카드 결제 시작' : '카드 결제 시작'}`}
+            </button>
           )}
 
           {/* 단말기 투입구 모사 애니메이션 (결제 대기 시) */}

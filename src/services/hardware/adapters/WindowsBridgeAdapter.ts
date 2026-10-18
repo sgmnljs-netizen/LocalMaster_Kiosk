@@ -37,12 +37,18 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
       address: data.store_info?.address,
       receiptNo: data.receipt_no,
       tradeDate: data.trade_dt,
+      bayNo: data.bayNo ?? data.bay_no,
       memberName: data.member_name,
-      itemName: data.items?.[0]?.name,
+      itemName: data.items?.map((i) => i.name).join(', ') || data.items?.[0]?.name,
+      items: data.items,
+      useMinutes: data.useMinutes ?? data.use_minutes,
+      startTime: data.startTime ?? data.start_time,
+      endTime: data.endTime ?? data.end_time,
       payAmount: data.tax_summary?.pay_amt ?? data.tax_summary?.total_amt ?? 0,
       supplyAmt: data.tax_summary?.supply_amt,
       vatAmt: data.tax_summary?.tax_amt,
       taxFreeAmt: data.tax_summary?.tax_free_amt,
+      discountAmt: data.tax_summary?.discount_amt,
       barcodeText: data.barcode_text,
       cardIssuer: data.card_info?.issuer_name,
       cardNoMasked: data.card_info?.card_no_masked,
@@ -72,7 +78,7 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(3000),
       });
 
       if (res.ok) {
@@ -154,6 +160,8 @@ export class WindowsBridgeScannerAdapter implements IScannerAdapter {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
+        this.ws?.close();
+        this.ws = null;
       }
     };
   }

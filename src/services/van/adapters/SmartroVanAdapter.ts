@@ -130,9 +130,14 @@ export class SmartroVanAdapter extends BaseVanAdapter {
     params: CardCancelRequestParams
   ): Promise<CardCancelResult> {
     try {
+      const vat = params.isTaxFree ? 0 : (params.vat ?? Math.round(params.amount - params.amount / 1.1));
+      const installment = params.installmentMonths ?? 0;
       const payload = {
         service: 'CREDIT_CANCEL',
         total_amount: params.amount,
+        tax: vat,
+        vat,
+        installment,
         org_auth_no: params.orgAuthCode,
         org_auth_date: params.orgApprovedDate,
         cat_id: params.terminalId || this.config.terminalId,
@@ -189,6 +194,8 @@ export class SmartroVanAdapter extends BaseVanAdapter {
     params: CashReceiptRequestParams,
     onStateChange?: (state: VanPaymentState) => void
   ): Promise<CashReceiptResult> {
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
     onStateChange?.('WAITING_CARD');
     try {
       const payload = {
@@ -203,8 +210,12 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout((params.timeoutSeconds || 30) * 1000),
+        signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout((params.timeoutSeconds || 30) * 1000)]) : signal,
       });
+
+      if (!res.ok) {
+        throw new Error(`SMARTRO 현금영수증 응답 오류 (HTTP ${res.status})`);
+      }
 
       const data = await res.json();
       if (data.reply_code === '0000' || data.res_cd === '0000') {
@@ -232,7 +243,11 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         error_message: data.reply_msg || 'SMARTRO 현금영수증 발행 실패',
       };
     } catch (err: unknown) {
-      onStateChange?.('ERROR');
+      if (signal.aborted) {
+        onStateChange?.('CANCELLED');
+      } else {
+        onStateChange?.('ERROR');
+      }
       return {
         success: false,
         auth_code: '',
@@ -241,7 +256,8 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         identity_no_masked: '',
         amount: params.amount,
         terminal_id: this.config.terminalId,
-        error_message: err instanceof Error ? err.message : 'SMARTRO 단말기 통신 오류',
+        error_code: signal.aborted ? 'E_USER_CANCEL' : 'E_TIMEOUT',
+        error_message: signal.aborted ? '현금영수증 발행이 취소되었습니다.' : (err instanceof Error ? err.message : 'SMARTRO 단말기 통신 오류'),
       };
     }
   }
@@ -249,6 +265,8 @@ export class SmartroVanAdapter extends BaseVanAdapter {
   public async cancelCashReceipt(
     params: CashReceiptCancelParams
   ): Promise<CashReceiptResult> {
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
     try {
       const payload = {
         service: 'CASH_CANCEL',
@@ -262,8 +280,12 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : signal,
       });
+
+      if (!res.ok) {
+        throw new Error(`SMARTRO 현금영수증 취소 응답 오류 (HTTP ${res.status})`);
+      }
 
       const data = await res.json();
       if (data.reply_code === '0000' || data.res_cd === '0000') {
@@ -297,7 +319,8 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         identity_no_masked: '',
         amount: params.amount,
         terminal_id: this.config.terminalId,
-        error_message: err instanceof Error ? err.message : 'SMARTRO 단말기 통신 오류',
+        error_code: signal.aborted ? 'E_USER_CANCEL' : 'E_TIMEOUT',
+        error_message: signal.aborted ? '현금영수증 취소가 중단되었습니다.' : (err instanceof Error ? err.message : 'SMARTRO 단말기 통신 오류'),
       };
     }
   }

@@ -168,7 +168,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
     } finally {
       isFetchingRef.current = false;
     }
-  }, []);
+  }, [faceCaptured]);
 
   // 🛡️ 2단계 진입 시 수동 클릭 없이 자동 스캔 진입 & 모달 이탈 시 단말기 모드 안전 원복
   useEffect(() => {
@@ -190,11 +190,13 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
   // 휴대폰 번호 입력을 위한 텐키 콤팩트 키패드 클릭 핸들러
   const handleNumClick = (num: string) => {
     setErrorMsg('');
+    if (activeField === 'NAME') setActiveField(null);
     if (hp.length >= 11) return;
     setHp(prev => prev + num);
   };
 
   const handleBackspace = () => {
+    if (activeField === 'NAME') setActiveField(null);
     setHp(prev => prev.slice(0, -1));
   };
 
@@ -202,13 +204,20 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setActiveField(null);
 
-    if (!name.trim()) {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
       setErrorMsg('이름을 입력해 주세요.');
       return;
     }
-    if (hp.length < 10) {
-      setErrorMsg('올바른 휴대폰 번호를 입력해 주세요.');
+    if (trimmedName.length > 50) {
+      setErrorMsg('이름은 50자 이내로 입력해 주세요.');
+      return;
+    }
+    const cleanHp = hp.replace(/[^0-9]/g, '');
+    if (!/^01[016789]\d{7,8}$/.test(cleanHp)) {
+      setErrorMsg('올바른 휴대폰 번호(010 등 10~11자리)를 입력해 주세요.');
       return;
     }
 
@@ -238,9 +247,16 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
       if (res.success && res.member) {
         if (faceReg) {
           // 프런트포스 표준: 실물 안면 단말기 푸시 동기화 등록 (실제 카메라 캡처 이미지 전달)
-          const enrollResult = await api.enrollMemberFace(res.member.member_no, name, faceImageBase64 || undefined);
+          const enrollResult = await api.enrollMemberFace(res.member.member_no, name, faceImageBase64 || undefined).catch((err) => ({
+            success: false,
+            message: err?.message || '안면 단말기 동기화 통신 오류',
+          }));
           if (!enrollResult?.success) {
             console.warn('[Kiosk] 안면 단말기 동기화 실패 (가입은 정상 완료):', enrollResult?.message);
+            res.member.face_registered = false;
+            res.member.face_vector_id = null;
+            (res.member as any).face_enroll_warning = enrollResult?.message || '안면 단말기 동기화에 실패했습니다. 데스크에서 안면 재등록이 필요합니다.';
+            setErrorMsg('회원 가입은 완료되었으나 안면 단말기 등록에 실패했습니다. 안내 데스크에서 안면 재등록을 진행해 주세요.');
           }
         }
         onRegisterSuccess(res.member);
@@ -540,8 +556,10 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
               <label style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>이름 (실명 입력)</label>
               <input
                 type="text"
-                readOnly
+                maxLength={50}
                 onClick={() => setActiveField('NAME')}
+                onFocus={() => setActiveField('NAME')}
+                onChange={(e) => setName(e.target.value.slice(0, 50))}
                 value={name}
                 placeholder="여기를 터치하여 이름을 입력하세요"
                 style={{
@@ -910,8 +928,9 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
       {/* 하단 가상 키보드 영역 바인딩 (이름 입력 활성화 시 스르륵 올라옴) */}
       {!isFaceEnrollStep && activeField === 'NAME' && (
         <VirtualKeyboard
+          key={activeField}
           value={name}
-          onChange={(val) => setName(val)}
+          onChange={(val) => setName(val.slice(0, 50))}
           onClose={() => setActiveField(null)}
         />
       )}

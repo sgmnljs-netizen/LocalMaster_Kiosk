@@ -6,7 +6,8 @@ interface LockerExtendProps {
   member?: Member | null;
   memberNo: string;
   memberName: string;
-  onLockerPaymentTriggered: (lockerNo: number, prod: Product, extendDays: number) => void;
+  discountRate?: number;
+  onLockerPaymentTriggered: (lockerNo: number, prod: Product, extendDays: number, displayLockerNo?: string) => void;
   onCancel: () => void;
 }
 
@@ -14,6 +15,7 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
   member,
   memberNo,
   memberName,
+  discountRate,
   onLockerPaymentTriggered,
   onCancel
 }) => {
@@ -25,6 +27,8 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  const effDiscountRate = discountRate ?? member?.discount_rate ?? 0;
+
   const loadLockerData = async () => {
     setLoading(true);
     try {
@@ -33,17 +37,22 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
       let foundLockers = await api.getMemberLockers(effMemberNo);
       const memberLockerInfo = (member as any)?.locker_info;
       if ((!foundLockers || foundLockers.length === 0) && memberLockerInfo) {
-        const fallbackNo = Number(String(memberLockerInfo.locker_no || memberLockerInfo.locker_id || '1').replace(/[^0-9]/g, '')) || 1;
-        foundLockers = [
-          {
-            locker_no: fallbackNo,
-            status: memberLockerInfo.status || 'IN_USE',
-            member_no: effMemberNo,
-            member_name: member?.member_name || memberName,
-            end_dt: memberLockerInfo.end_dt || memberLockerInfo.expiry_date || '',
-            ...({ locker_id: memberLockerInfo.locker_id || fallbackNo, display_no: memberLockerInfo.locker_no || String(fallbackNo) } as any)
-          }
-        ];
+        const rawNoStr = String(memberLockerInfo.locker_no ?? memberLockerInfo.locker_id ?? '').replace(/[^0-9]/g, '');
+        const parsedNo = rawNoStr ? Number(rawNoStr) : 0;
+        if (parsedNo > 0) {
+          foundLockers = [
+            {
+              locker_no: parsedNo,
+              status: memberLockerInfo.status || 'IN_USE',
+              member_no: effMemberNo,
+              member_name: member?.member_name || memberName,
+              end_dt: memberLockerInfo.end_dt || memberLockerInfo.expiry_date || '',
+              ...({ locker_id: memberLockerInfo.locker_id || parsedNo, display_no: memberLockerInfo.locker_no || String(parsedNo) } as any)
+            }
+          ];
+        } else {
+          foundLockers = [];
+        }
       }
       setMyLockers(foundLockers);
 
@@ -51,9 +60,21 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
         setSelectedLockerNo(foundLockers[0].locker_no);
       }
 
-      // 라카 연장 전용 상품 목록 로드
+      // 라카 연장 전용 상품 목록 로드 (일일 타석/파3 FACILITY 상품 혼입 차단)
       const allProds = await api.getProducts();
-      const lockerProds = allProds.filter(p => p.logic_type === 'FACILITY' || p.logic_type === 'RENTAL');
+      const lockerProds = allProds.filter(p => {
+        const lt = (p.logic_type || '').toUpperCase();
+        const nm = (p.prod_nm || '').toLowerCase();
+        const cd = (p.prod_cd || '').toUpperCase();
+        if (lt === 'RENTAL') return true;
+        if (nm.includes('라카') || nm.includes('락커') || nm.includes('사물함') || cd.startsWith('LC') || cd.startsWith('RNT')) {
+          return true;
+        }
+        if (lt === 'FACILITY' && (p.days ?? 0) > 0 && !nm.includes('일일') && !nm.includes('당일') && !nm.includes('타석') && !nm.includes('par3') && !nm.includes('파3')) {
+          return true;
+        }
+        return false;
+      });
       setLockerProducts(lockerProds);
 
     } catch {
@@ -90,8 +111,15 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
       return;
     }
 
+    const displayLockerNo = String(
+      (selectedObj as any)?.display_no ||
+      selectedObj?.locker_no ||
+      (member as any)?.locker_info?.locker_no ||
+      targetLockerId
+    );
+
     // 신규 배정 불가, 기존 라카 연장만
-    onLockerPaymentTriggered(targetLockerId, prod, prod.days || 30);
+    onLockerPaymentTriggered(targetLockerId, prod, prod.days || 30, displayLockerNo);
   };
 
   return (
@@ -267,8 +295,17 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
             <h4 style={{ fontSize: '20px', fontWeight: 700, color: '#1d1d1f', margin: 0, letterSpacing: '-0.3px' }}>연장 상품 선택</h4>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {lockerProducts.map(prod => {
+              {lockerProducts.length > 0 ? lockerProducts.map(prod => {
                 const canExtend = myLockers.length > 0;
+                const effectivePrice =
+                  prod.sale_price !== undefined && prod.sale_price !== null && prod.sale_price > 0
+                    ? prod.sale_price
+                    : prod.standard_price;
+                const finalPrice =
+                  effDiscountRate > 0
+                    ? Math.max(0, effectivePrice - Math.round(effectivePrice * (effDiscountRate / 100)))
+                    : effectivePrice;
+                const hasSaleDiscount = prod.standard_price > finalPrice;
                 
                 return (
                   <div
@@ -309,22 +346,44 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                         <CalendarRange size={28} color="#0071e3" strokeWidth={2} />
                       </div>
                       <div>
-                        <h4 style={{ fontSize: '20px', fontWeight: 700, color: '#1d1d1f', margin: '0 0 4px 0' }}>{prod.prod_nm}</h4>
+                        <h4 style={{ fontSize: '20px', fontWeight: 700, color: '#1d1d1f', margin: '0 0 4px 0' }}>
+                          {prod.meta_data?.display_nm || prod.prod_nm}
+                        </h4>
                         <p style={{ fontSize: '15px', color: '#86868b', margin: 0, fontWeight: 500 }}>
-                          사물함 {prod.days}일 연장
+                          사물함 {prod.days || 30}일 연장{effDiscountRate > 0 ? ` (${effDiscountRate}% 등급할인 적용)` : ''}
                         </p>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
-                      <span style={{ fontSize: '28px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '-1px' }}>
-                        {prod.standard_price.toLocaleString()}
-                      </span>
-                      <span style={{ fontSize: '16px', fontWeight: 600, color: '#86868b', marginLeft: '2px' }}>원</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                      {hasSaleDiscount && (
+                        <span style={{ fontSize: '13px', color: '#86868b', textDecoration: 'line-through', fontWeight: 600 }}>
+                          {prod.standard_price.toLocaleString()}원
+                        </span>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
+                        <span style={{ fontSize: '28px', fontWeight: 800, color: hasSaleDiscount ? '#059669' : '#1d1d1f', letterSpacing: '-1px' }}>
+                          {finalPrice.toLocaleString()}
+                        </span>
+                        <span style={{ fontSize: '16px', fontWeight: 600, color: '#86868b', marginLeft: '2px' }}>원</span>
+                      </div>
                     </div>
                   </div>
                 );
-              })}
+              }) : (
+                <div style={{
+                  padding: '40px 24px',
+                  borderRadius: '24px',
+                  background: '#fbfbfd',
+                  border: '1px dashed #d2d2d7',
+                  textAlign: 'center',
+                  color: '#86868b',
+                  fontSize: '16px',
+                  fontWeight: 600
+                }}>
+                  현재 등록된 라카 연장 상품이 없습니다. 안내 데스크로 문의해 주세요.
+                </div>
+              )}
             </div>
 
           </div>

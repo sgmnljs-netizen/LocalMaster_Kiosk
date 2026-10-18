@@ -67,6 +67,9 @@ export interface CardCancelRequestParams {
   terminalId?: string; // 원거래 단말기 TID
   vanTrNo?: string; // 원거래 VAN 거래번호
   reason?: string; // 취소 사유
+  vat?: number; // 취소 부가세
+  isTaxFree?: boolean; // 면세 여부
+  installmentMonths?: number; // 원거래 할부 개월수
 }
 
 /** 단말기 결제 취소 결과 */

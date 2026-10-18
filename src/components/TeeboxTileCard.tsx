@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bay } from '../services/api';
+import { api, Bay } from '../services/api';
 import { Lock, Wrench, Clock } from 'lucide-react';
 import { TimeMaster } from '../utils/timeMaster';
 
@@ -29,6 +29,8 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
     (bay as any).is_active === false ||
     ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
   const isAvailable = canonicalStatus === 'AVAILABLE' && !isOccupied && !isPreOccupied && !isPrepare && !isMaintenance;
+  const isSelfLocked = isPreOccupied && (isSelected || (!!bay.lock_terminal_id && bay.lock_terminal_id === api.getTerminalId()));
+  const isClickable = !isMaintenance && (isAvailable || isOccupied || isPrepare || isSelected || isSelfLocked);
 
   const totalRemainingMin = (bay as any).status_info?.minutes_left ?? TimeMaster.getRemainingMinutes(bay);
   const finalEndTimeStr = TimeMaster.formatEndTime(bay);
@@ -43,7 +45,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
 
   return (
     <div
-      onClick={() => !isMaintenance && (isAvailable || isOccupied || isPrepare) && onSelect(bay.bay_no)}
+      onClick={() => isClickable && onSelect(bay.bay_no)}
       style={{
         position: 'relative',
         borderRadius: '24px',
@@ -52,7 +54,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         flexDirection: 'column',
         justifyContent: 'space-between',
         height: '170px',
-        cursor: (isAvailable || isOccupied) ? 'pointer' : 'not-allowed',
+        cursor: isClickable ? 'pointer' : 'not-allowed',
         transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         transform: isJustAllocated ? 'scale(1.05) translateY(-4px)' : isSelected ? 'scale(1.03) translateY(-4px)' : 'scale(1)',
         

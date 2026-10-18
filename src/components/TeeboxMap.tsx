@@ -44,25 +44,61 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const effMemberNo = member?.member_no || memberNo;
   const effMemberName = (member?.member_name || memberName || '').trim();
 
-  // 이동 모드 시 현재 회원이 점유 중인 타석 검색
-  const currentBay = isMoveMode
+  const [fallbackMoveBay, setFallbackMoveBay] = useState<Bay | null>(null);
+
+  useEffect(() => {
+    if (!isMoveMode || !effMemberNo) {
+      setFallbackMoveBay(null);
+      return;
+    }
+    let mounted = true;
+    api.getMemberCheckinReservations(effMemberNo).then((resList) => {
+      if (!mounted || !Array.isArray(resList)) return;
+      const activeRes = resList.find((r: any) =>
+        ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE', 'CHK', 'RSV', 'RESERVED'].includes(String(r.status_cd || '').toUpperCase())
+      );
+      if (activeRes && activeRes.bay_no) {
+        const matchedBay = bays.find(b => Number(b.bay_no) === Number(activeRes.bay_no));
+        setFallbackMoveBay(
+          matchedBay || ({
+            bay_no: Number(activeRes.bay_no),
+            floor_no: 1,
+            status: String(activeRes.status_cd || 'CHK').toUpperCase(),
+            current_member_no: effMemberNo,
+            current_user_name: effMemberName,
+            minutes_left: Number((activeRes as any).duration_min ?? 0),
+            end_time: activeRes.end_time || ''
+          } as any)
+        );
+      } else {
+        setFallbackMoveBay(null);
+      }
+    }).catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [isMoveMode, effMemberNo, effMemberName, bays]);
+
+  // 이동 모드 시 현재 회원이 점유/예약 중인 타석 검색 (동명이인 부분일치 차단 & CHK/RSV 예약 상태 지원)
+  const matchedBayInList = isMoveMode
     ? bays.find(b => {
         const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-        if (!['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(st)) return false;
-        if (
-          effMemberNo &&
-          (String((b as any).current_member_no || '') === String(effMemberNo) ||
-            b.current_user_name === effMemberNo)
-        ) {
-          return true;
+        const nextCheckinSt = String((b as any).next_res_checkin_status || '').toUpperCase();
+        const isTargetStatus =
+          ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE', 'CHK', 'RSV', 'RESERVED'].includes(st) ||
+          ['CHK', 'RSV'].includes(nextCheckinSt);
+        if (!isTargetStatus) return false;
+
+        const bayMemberNo = String((b as any).current_member_no || (b as any).member_no || '').trim();
+        if (effMemberNo) {
+          return bayMemberNo === String(effMemberNo) || b.current_user_name === String(effMemberNo);
         }
         const bayUserName = String((b as any).member_name || b.current_user_name || '').trim();
-        if (effMemberName !== '' && bayUserName !== '' && (bayUserName === effMemberName || bayUserName.includes(effMemberName))) {
-          return true;
-        }
-        return false;
+        return effMemberName !== '' && bayUserName !== '' && bayUserName === effMemberName;
       })
     : null;
+
+  const currentBay = isMoveMode ? (matchedBayInList || fallbackMoveBay) : null;
 
   // minutes_left 정밀 파싱 및 end_time/epoch SSOT fallback 계산
   const calculateRemMin = useCallback((bay: Bay | null | undefined): number => {
@@ -70,8 +106,18 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     return TimeMaster.getRemainingMinutes(bay);
   }, []);
 
+  const currentBayStatus = String((currentBay as any)?.status_info?.code || currentBay?.status || '').toUpperCase();
+  const isReservedNotStarted =
+    ['CHK', 'RSV', 'RESERVED'].includes(currentBayStatus) ||
+    (!['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(currentBayStatus) &&
+      ['CHK', 'RSV'].includes(String((currentBay as any)?.next_res_checkin_status || '').toUpperCase()));
   const currentRemMin = calculateRemMin(currentBay);
-  const isTimeRestricted = isMoveMode && currentBay && ((currentBay as any).status_info?.is_transferable === false || currentRemMin < 5);
+  const isTimeRestricted = Boolean(
+    isMoveMode &&
+    currentBay &&
+    !isReservedNotStarted &&
+    ((currentBay as any).status_info?.is_transferable === false || currentRemMin < 5)
+  );
   const hasNoActiveBay = isMoveMode && !currentBay;
 
   // 컴포넌트 마운트 시 최신 타석 정보 강제 갱신
@@ -89,6 +135,11 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   }, [selectedBayNo, onRefreshBays]);
 
   const isConfirmedRef = useRef(false);
+  const selectedBayNoRef = useRef<number | null>(selectedBayNo);
+
+  useEffect(() => {
+    selectedBayNoRef.current = selectedBayNo;
+  }, [selectedBayNo]);
 
   // 선점 락 제한시간 1초 간격 갱신
   useEffect(() => {
@@ -114,14 +165,14 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     return () => clearInterval(timer);
   }, [selectedBayNo, handleRelease, lang]);
 
-  // 컴포넌트 언마운트 시 미확정 선점 타석 자동 해제 Cleanup Guard
+  // 컴포넌트 실제 언마운트 시에만 미확정 선점 타석 자동 해제 Cleanup Guard
   useEffect(() => {
     return () => {
-      if (selectedBayNo !== null && !isConfirmedRef.current) {
-        api.releaseBay(selectedBayNo).catch(err => console.error('TeeboxMap cleanup release failed:', err));
+      if (selectedBayNoRef.current !== null && !isConfirmedRef.current) {
+        api.releaseBay(selectedBayNoRef.current).catch(err => console.error('TeeboxMap cleanup release failed:', err));
       }
     };
-  }, [selectedBayNo]);
+  }, []);
 
   // 타석 터치 - 원자적 선점(Pre-emption) 락 시도 (useCallback 가딩)
   const handleBayTouch = useCallback(async (bay: Bay) => {
@@ -137,11 +188,18 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       return;
     }
 
+    // 동일 타석 재터치 시 선택 해제
+    if (selectedBayNo === bay.bay_no) {
+      await handleRelease();
+      return;
+    }
+
     // 기존에 선택했던 타석이 있었다면 해제
     if (selectedBayNo !== null) {
       await api.releaseBay(selectedBayNo);
     }
 
+    isConfirmedRef.current = false;
     setErrorMsg('');
     setPreoccupyLoading(true);
 
@@ -158,13 +216,18 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       setPreoccupyLoading(false);
       onRefreshBays(); // 즉시 상태 갱신
     }
-  }, [isTimeRestricted, hasNoActiveBay, selectedBayNo, onRefreshBays, lang]);
+  }, [isTimeRestricted, hasNoActiveBay, selectedBayNo, onRefreshBays, lang, handleRelease]);
 
   // 배정 최종 확인 버튼 클릭 (useCallback 가딩)
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
     if (selectedBayNo !== null) {
       isConfirmedRef.current = true;
-      onBaySelected(selectedBayNo);
+      try {
+        await onBaySelected(selectedBayNo);
+      } catch (err) {
+        isConfirmedRef.current = false;
+        throw err;
+      }
     }
   }, [selectedBayNo, onBaySelected]);
 
@@ -185,6 +248,15 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
 
     return b.floor_no === activeFloor;
   });
+
+  const availableFloors = Array.from(
+    new Set(
+      bays
+        .filter(b => String((b as any).zone_code || (b as any).zoneCode || '').toUpperCase() !== 'PAR3')
+        .map(b => b.floor_no || 1)
+    )
+  ).sort((a, b) => a - b);
+  const floorTabs = availableFloors.length > 0 ? availableFloors : [1, 2];
 
   return (
     <div 
@@ -226,7 +298,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
 
         {/* 층별 탭 전환 스위치 */}
         <div className="glass-panel" style={{ display: 'flex', padding: '6px', borderRadius: '12px', background: 'rgba(0,0,0,0.2)' }}>
-          {[1, 2].map(f => (
+          {floorTabs.map(f => (
             <button
               key={f}
               onClick={() => setActiveFloor(f)}
@@ -316,7 +388,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                     ⏱️ 타석 이동 불가 (잔여시간 5분 미만)
                   </h3>
                   <p style={{ fontSize: '15px', color: '#fca5a5', margin: '4px 0 0 0' }}>
-                    현재 이용 중인 <strong>{currentBay.bay_no}번 타석</strong>의 남은 시간이 5분 미만(<strong>{currentRemMin}분 남음</strong>)이므로 자리 이동이 제한됩니다.
+                    현재 이용 중인 <strong>{currentBay?.bay_no}번 타석</strong>의 남은 시간이 5분 미만(<strong>{currentRemMin}분 남음</strong>)이므로 자리 이동이 제한됩니다.
                   </p>
                 </div>
               </div>

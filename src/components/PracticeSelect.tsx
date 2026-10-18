@@ -9,6 +9,7 @@ interface PracticeSelectProps {
   bays: Bay[];
   lang: 'KO' | 'EN';
   initialSelectedBayNo?: number | null;
+  externalSelectedBayNos?: number[];
   justAllocatedBayNo?: number | null;
   feedbackCountdown?: number | null;
   onCancelCountdown?: () => void;
@@ -23,6 +24,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   bays,
   lang,
   initialSelectedBayNo,
+  externalSelectedBayNos,
   justAllocatedBayNo = null,
   feedbackCountdown = null,
   onCancelCountdown,
@@ -38,7 +40,11 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   const [activeFloor, setActiveFloor] = useState<string>('1F');
   const [filterChip, setFilterChip] = useState<'ALL' | 'LEFT' | 'GDR' | 'LESSON' | 'AVAILABLE'>('ALL');
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(initialSelectedBayNo || null);
-  const [selectedBayNos, setSelectedBayNos] = useState<number[]>(initialSelectedBayNo ? [initialSelectedBayNo] : []);
+  const [selectedBayNos, setSelectedBayNos] = useState<number[]>(
+    externalSelectedBayNos && externalSelectedBayNos.length > 0
+      ? externalSelectedBayNos
+      : (initialSelectedBayNo ? [initialSelectedBayNo] : [])
+  );
   const [preoccupyLoading, setPreoccupyLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [countdown, setCountdown] = useState<number>(60);
@@ -48,6 +54,33 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 정상적인 단계 이동(Confirm) 시에만 언마운트 클린업 락 해제를 스킵하기 위한 Ref
   const isConfirmedRef = useRef(false);
+  const selectedBayNoRef = useRef<number | null>(selectedBayNo);
+  const selectedBayNosRef = useRef<number[]>(selectedBayNos);
+  const allocModeRef = useRef<'SINGLE' | 'GROUP'>(allocMode);
+
+  useEffect(() => {
+    selectedBayNoRef.current = selectedBayNo;
+  }, [selectedBayNo]);
+
+  useEffect(() => {
+    selectedBayNosRef.current = selectedBayNos;
+  }, [selectedBayNos]);
+
+  useEffect(() => {
+    allocModeRef.current = allocMode;
+  }, [allocMode]);
+
+  // 상위 KioskApp에서 모달 취소 등으로 타석 선택이 초기화된 경우 즉시 동기화
+  useEffect(() => {
+    if (initialSelectedBayNo === null && (!externalSelectedBayNos || externalSelectedBayNos.length === 0)) {
+      if (isConfirmedRef.current) {
+        isConfirmedRef.current = false;
+        setSelectedBayNo(null);
+        setSelectedBayNos([]);
+        setShowDecisionModal(false);
+      }
+    }
+  }, [initialSelectedBayNo, externalSelectedBayNos]);
 
   // 선점 락 제한시간 1초 간격 갱신
   useEffect(() => {
@@ -73,15 +106,17 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     return () => clearInterval(timer);
   }, [selectedBayNo, selectedBayNos, allocMode, lang]);
 
-  // 컴포넌트 언마운트 시 비정상 이탈(예: 광고 복귀, 홈 이동 등)인 경우 선점 락을 자동으로 즉시 해제하는 Cleanup Guard
+  // 컴포넌트 실제 언마운트 시에만 비정상 이탈(예: 광고 복귀, 홈 이동 등) 선점 락을 자동으로 즉시 해제하는 Cleanup Guard
   useEffect(() => {
     return () => {
-      const activeList = allocMode === 'SINGLE' ? (selectedBayNo !== null ? [selectedBayNo] : []) : selectedBayNos;
+      const activeList = allocModeRef.current === 'SINGLE'
+        ? (selectedBayNoRef.current !== null ? [selectedBayNoRef.current] : [])
+        : selectedBayNosRef.current;
       if (activeList.length > 0 && !isConfirmedRef.current) {
         api.releaseBays(activeList).catch(err => console.error('Cleanup release failed:', err));
       }
     };
-  }, [selectedBayNo, selectedBayNos, allocMode]);
+  }, []);
 
   // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 커스텀 구역 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출
   const practiceBays = bays.filter(bay => {
@@ -323,19 +358,23 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   // 현재 활성 층 타석 필터링 (practiceBays 기준 전면 동적 제외)
   const floorBays = practiceBays.filter(b => (b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor);
   const filteredBays = floorBays.filter(b => {
+    const stCode = String((b as any).status_info?.code || b.status || '').toUpperCase();
     if (filterChip === 'LEFT') {
       const h = b.handedness || (b.type === 'LEFT' ? 'LEFT' : 'RIGHT');
       return h === 'LEFT' || h === 'BOTH';
     }
     if (filterChip === 'GDR') return (b.simulator_type || 'GDR_PLUS') === 'GDR_PLUS';
     if (filterChip === 'LESSON') return !!b.is_lesson_only;
-    if (filterChip === 'AVAILABLE') return b.status === 'AVAILABLE';
+    if (filterChip === 'AVAILABLE') {
+      return stCode === 'AVAILABLE' || selectedBayNo === b.bay_no || selectedBayNos.includes(b.bay_no);
+    }
     return true;
   });
 
   // 모달 표기용 선택 타석 정보 추출
   const selectedBay = selectedBayNo !== null ? bays.find(b => b.bay_no === selectedBayNo) : null;
-  const isOccupied = !!selectedBay && ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(selectedBay.status as any);
+  const selectedBayStatus = selectedBay ? String((selectedBay as any).status_info?.code || selectedBay.status || '').toUpperCase() : '';
+  const isOccupied = !!selectedBay && ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(selectedBayStatus);
 
   return (
     <div 
@@ -351,7 +390,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         width: '100%',
         gap: '24px',
         boxSizing: 'border-box',
-        position: 'relative'
+        position: 'relative',
+        paddingBottom: '130px'
       }}
     >
       {/* 0. 애플 모션 스타일 전용 CSS 스타일 태그 주입 */}
@@ -696,6 +736,46 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               </span>
             )}
           </div>
+
+          {(allocMode === 'SINGLE' ? selectedBayNo !== null : selectedBayNos.length > 0) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <button
+                onClick={handleReleaseAll}
+                disabled={preoccupyLoading}
+                style={{
+                  padding: '12px 22px',
+                  borderRadius: '14px',
+                  border: '1px solid #d1d5db',
+                  background: '#ffffff',
+                  color: '#374151',
+                  fontSize: '16px',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              >
+                {lang === 'KO' ? '선택 초기화' : 'Clear Selection'}
+              </button>
+              <button
+                onClick={handleConfirmClick}
+                disabled={preoccupyLoading}
+                style={{
+                  padding: '12px 28px',
+                  borderRadius: '14px',
+                  border: 'none',
+                  background: '#059669',
+                  color: '#ffffff',
+                  fontSize: '17px',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  boxShadow: '0 6px 16px rgba(5, 150, 105, 0.28)'
+                }}
+              >
+                {allocMode === 'GROUP'
+                  ? (lang === 'KO' ? `👥 ${selectedBayNos.length}개 타석 동반 배정 진행` : `Confirm ${selectedBayNos.length} Group Bays`)
+                  : (lang === 'KO' ? '선택 타석 배정 진행' : 'Proceed to Allocate')}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

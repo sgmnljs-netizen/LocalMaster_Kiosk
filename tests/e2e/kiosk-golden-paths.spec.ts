@@ -14,6 +14,7 @@ function resetDatabaseForTests() {
       UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no IN (11, 14, 18);
       UPDATE member_items SET status = 'ACTIVE', rem_count = 99, end_dt = '2029-12-31' WHERE item_id = 1;
       INSERT OR REPLACE INTO members (id, member_no, store_cd, member_name, hp, grade_id, status_cd, total_point, unpaid_amt, is_group_leader, privacy_agree_yn, marketing_agree_yn, face_auth_yn, finger_auth_yn, use_yn) VALUES ('MEM-M260501', 'M260501', 'H01-SE-001', '김골프', '010-1234-5678', 'MANAGER', '10', 0, 0, 0, 'Y', 'Y', 'N', 'N', 'Y');
+      INSERT OR REPLACE INTO member_items (item_id, member_id, store_cd, product_id, product_nm, sub_type, start_dt, end_dt, total_count, rem_count, purchase_dt, status, deleted_at) VALUES (99901, 'MEM-M260501', 'H01-SE-001', 'PER-002', '타석이용권 1개월', 'PERIOD', '2026-01-01', '2029-12-31', 0, 0, '20260101', 'ACTIVE', 0);
       UPDATE lockers SET member_no = 'M260501', status = 'OCCUPIED', start_dt = '2026-01-01', end_dt = '2026-12-31' WHERE locker_no = 3;
       UPDATE store_info SET close_time = '05:00' WHERE store_cd = 'H01-SE-001';
     `.replace(/\n/g, ' ').trim();
@@ -99,7 +100,7 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(page.locator('text=골프 타석 배정표')).not.toBeVisible({ timeout: 5000 });
 
     // 10. 백엔드 DB 상태 교차 검증 (Zero-Assumption: 11번 타석이 M260501 회원에게 배정되었는지 확인)
-    const bayCheck11 = execSync(`sqlite3 "${DB_PATH}" "SELECT current_member_no FROM bays WHERE bay_no = 11;"`).toString().trim();
+    const bayCheck11 = execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "SELECT current_member_no FROM bays WHERE bay_no = 11;"`).toString().trim();
     expect(bayCheck11).toBe('M260501');
   });
 
@@ -274,17 +275,13 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await buyBtn.click();
 
     // 6. 가상 결제 단말기 자동 승인 및 완료 모달 표출 확인
-    const modalConfirmBtn = page.locator('button:has-text("확인")').last();
     await expect(
       page.getByRole('heading', { name: '결제 및 등록이 완료되었습니다!' })
-        .or(page.getByRole('heading', { name: '결제 완료 & 영수증 발행' }))
-        .or(modalConfirmBtn)
-        .first()
     ).toBeVisible({ timeout: 15000 });
 
-    if (await modalConfirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await modalConfirmBtn.click({ force: true });
-    }
+    const modalConfirmBtn = page.locator('button:has-text("확인")').last();
+    await expect(modalConfirmBtn).toBeVisible({ timeout: 5000 });
+    await modalConfirmBtn.click({ force: true });
 
     // 7. 메인 대시보드 안전 복귀 확인
     await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
@@ -339,33 +336,23 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     }
 
     // 6. 가상 결제 단말기 자동 승인 및 완료 모달 표출 확인
-    const lockerModalConfirmBtn = page.locator('button:has-text("확인")').last();
     await expect(
       page.getByRole('heading', { name: '결제 및 등록이 완료되었습니다!' })
-        .or(page.getByRole('heading', { name: '결제 완료 & 영수증 발행' }))
-        .or(lockerModalConfirmBtn)
-        .first()
     ).toBeVisible({ timeout: 15000 });
 
-    // 영수증/등록 완료 모달의 확인 버튼 안전 대기 및 클릭
-    if (await lockerModalConfirmBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await lockerModalConfirmBtn.click({ force: true });
-    } else {
-      const anyConfirmBtn = page.locator('button').filter({ hasText: /확인/ }).last();
-      if (await anyConfirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await anyConfirmBtn.click({ force: true });
-      }
-    }
+    const lockerModalConfirmBtn = page.locator('button:has-text("확인")').last();
+    await expect(lockerModalConfirmBtn).toBeVisible({ timeout: 5000 });
+    await lockerModalConfirmBtn.click({ force: true });
 
     await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
   });
 
   test('Pass 7: 모바일 사전 예약 타석 무인 체크인 전체 라이프사이클 (Check-in Golden Path)', async ({ page }) => {
-    // 0. 당일 예약 레코드 DB 세팅 및 이전 테스트 영향 완전 격리 (단일 트랜잭션 일괄 처리)
+    // 0. 당일 예약 레코드 DB 세팅 및 이전 테스트 영향 완전 격리 (당일 언제든 얼리 체크인 가능 검증: 2300 ~ 2350)
     const todayKst = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' })
       .format(new Date()).replace(/[^0-9]/g, '');
 
-    execSync(`sqlite3 "${DB_PATH}" "
+    execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "
       DELETE FROM reservation_master WHERE res_id LIKE 'KSK_%' OR (resource_type = 'BAY' AND resource_no IN ('11', '14', '15', '18'));
       DELETE FROM checkin_master WHERE res_id LIKE 'KSK_%' OR resource_no IN ('11', '14', '15', '18');
       UPDATE usage_master SET status_cd = 'FINISHED' WHERE facility_type = 'BAY' AND facility_no IN (11, 14, 15, 18) AND status_cd IN ('RUN', 'ACTIVE', 'IN_USE');
@@ -429,18 +416,18 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
 
     // 9. 백엔드 DB 상태 교차 검증 (Zero-Assumption: reservation_master status_cd = 'CHK'/'PREPARE', checkin_master COMPLETED)
-    const resStatus = execSync(`sqlite3 "${DB_PATH}" "SELECT status_cd FROM reservation_master WHERE res_id = 'KSK_CHK_001';"`)
+    const resStatus = execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "SELECT status_cd FROM reservation_master WHERE res_id = 'KSK_CHK_001';"`)
       .toString().trim();
     expect(['CHK', 'PREPARE', 'USE']).toContain(resStatus);
 
-    const checkinStatus = execSync(`sqlite3 "${DB_PATH}" "SELECT status_cd FROM checkin_master WHERE res_id = 'KSK_CHK_001';"`)
+    const checkinStatus = execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "SELECT status_cd FROM checkin_master WHERE res_id = 'KSK_CHK_001';"`)
       .toString().trim();
     expect(checkinStatus).toBe('COMPLETED');
   });
 
   test('Pass 8: 키패드 전화번호 조회 및 취소/예외 방어 (Keypad Search & Safe Cancel Guard)', async ({ page }) => {
     // 0. 타석 15번 상태 초기화 (이전 테스트 영향 격리)
-    execSync(`sqlite3 "${DB_PATH}" "UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no = 15;"`);
+    execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no = 15;"`);
 
     // 1. 대기 화면 진입
     await page.goto('/', { waitUntil: 'domcontentloaded' });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Delete, Globe, Smile } from 'lucide-react';
 
 interface VirtualKeyboardProps {
@@ -38,7 +38,7 @@ function assembleHangul(chars: string[]): string {
       result += flushHangul(choIdx, jungIdx, jongIdx);
       result += char;
       state = 0;
-      choIdx = -1; jungIdx = -1; jongIdx = 0;
+      choIdx = -1; jungIdx = -1; jongIdx = 0; doubleJong = '';
       continue;
     }
 
@@ -60,6 +60,7 @@ function assembleHangul(chars: string[]): string {
         if (choIdx === -1) {
           result += char;
           state = 0;
+          doubleJong = '';
         }
       }
     } else if (state === 2) {
@@ -74,6 +75,7 @@ function assembleHangul(chars: string[]): string {
           state = 1;
           jungIdx = -1;
           jongIdx = 0;
+          doubleJong = '';
         }
       } else {
         const combinedJung = combineJung(JUNG[jungIdx], char);
@@ -83,7 +85,7 @@ function assembleHangul(chars: string[]): string {
           result += flushHangul(choIdx, jungIdx, 0);
           result += char;
           state = 0;
-          choIdx = -1; jungIdx = -1; jongIdx = 0;
+          choIdx = -1; jungIdx = -1; jongIdx = 0; doubleJong = '';
         }
       }
     } else if (state === 3) {
@@ -102,6 +104,7 @@ function assembleHangul(chars: string[]): string {
           choIdx = CHO.indexOf(prevJong);
           jungIdx = JUNG.indexOf(char);
           jongIdx = 0;
+          doubleJong = '';
           state = 2;
         }
       } else {
@@ -212,7 +215,14 @@ function flushHangul(cho: number, jung: number, jong: number): string {
 export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChange, onClose }) => {
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
   const [isShift, setIsShift] = useState(false);
-  const [inputBuffer, setInputBuffer] = useState<string[]>(() => Hangul.disassemble(value));
+  const [inputBuffer, setInputBuffer] = useState<string[]>(() => Hangul.disassemble(value || ''));
+
+  useEffect(() => {
+    const currentAssembled = assembleHangul(inputBuffer);
+    if (value !== currentAssembled) {
+      setInputBuffer(value ? Hangul.disassemble(value) : []);
+    }
+  }, [value]);
 
   const handleKeyClick = (key: string) => {
     let finalKey = key;
@@ -243,11 +253,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
   };
 
   const updateValue = (buf: string[]) => {
-    if (lang === 'KO') {
-      onChange(assembleHangul(buf));
-    } else {
-      onChange(buf.join(''));
-    }
+    onChange(assembleHangul(buf));
   };
 
   const KO_LAYOUT = [

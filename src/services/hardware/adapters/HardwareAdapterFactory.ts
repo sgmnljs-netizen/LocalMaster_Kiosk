@@ -17,7 +17,11 @@ export const getIsMockHardware = (): boolean => {
   if (typeof window === 'undefined') return false;
   const stored = localStorage.getItem('HW_MOCK');
   if (stored !== null) return stored === 'true';
-  return !window.navigator.userAgent.includes('Windows');
+  const isRealWindows =
+    window.navigator.userAgent.includes('Windows') &&
+    Boolean(window.navigator.platform && window.navigator.platform.startsWith('Win')) &&
+    !window.navigator.webdriver;
+  return !isRealWindows;
 };
 
 export const DEFAULT_HARDWARE_CONFIG: HardwareConfig = {

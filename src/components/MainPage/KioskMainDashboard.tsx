@@ -18,7 +18,7 @@ const TRANSLATIONS = {
     moveBay: '타석 이동',
     moveBaySub: '현재 이용 중인 타석의 위치를 다른 비어있는 빈 타석으로 변경합니다.',
     lockerExtend: '라카 대여/연장',
-    lockerExtendSub: '이용 중인 라카의 만료 일정을 즉시 카드 결제하여 연장하거나 신규 사물함을 대여합니다.',
+    lockerExtendSub: '이용 중인 개인 사물함(라카)의 만료 기간을 즉시 연장 결제합니다.',
     signUp: '회원가입',
     signUpSub: '아직 회원이 아니신가요? 간편하게 신규 즉석 회원가입 후 혜택을 받아보세요.',
   },
@@ -35,7 +35,7 @@ const TRANSLATIONS = {
     moveBay: 'Change Teebox',
     moveBaySub: 'Move your current active teebox to another vacant teebox space.',
     lockerExtend: 'Locker Extend',
-    lockerExtendSub: 'Extend your locker expiration date or rent a new storage locker.',
+    lockerExtendSub: 'Extend your locker expiration date immediately with card payment.',
     signUp: 'Sign Up',
     signUpSub: 'Not a member yet? Register easily on site to enjoy exclusive club benefits.',
   }
@@ -101,18 +101,26 @@ export default function KioskMainDashboard({
     if (onMenuClick) {
       onMenuClick(menuId, zoneIds);
     }
-    if (menuId === 'ALLOCATE_DAILY') onPracticeTeebox();
+    if (menuId === 'ALLOCATE_DAILY' || menuId === 'ALLOCATION' || menuId === 'SCREEN_ROOM') onPracticeTeebox();
+    else if (menuId === 'CHECKIN') onCheckin?.();
     else if (menuId === 'PAR3') onPar3Allocation();
-    else if (menuId === 'PURCHASE_PRODUCT') onPurchaseMembership();
-    else if (menuId === 'MOVE_BAY') onMoveBay();
+    else if (menuId === 'PURCHASE_PRODUCT' || menuId === 'MEMBERSHIP' || menuId === 'PRODUCTS') onPurchaseMembership();
+    else if (menuId === 'MOVE_BAY' || menuId === 'CHANGE_BAY') onMoveBay();
     else if (menuId === 'LOCKER') onLockerExtend();
-    else if (menuId === 'SIGNUP') onSignUp();
+    else if (menuId === 'SIGNUP' || menuId === 'REGISTER') onSignUp();
   };
 
-  // 연습타석(ALLOCATE_DAILY) 및 회원가입(SIGNUP) 메뉴 분리
-  const heroMenu = activeMenus.find((m: any) => m.menu_id === 'ALLOCATE_DAILY');
-  const signupMenu = activeMenus.find((m: any) => m.menu_id === 'SIGNUP');
-  const gridSubMenus = activeMenus.filter((m: any) => m.menu_id !== 'ALLOCATE_DAILY' && m.menu_id !== 'SIGNUP');
+  // 연습타석(ALLOCATE_DAILY) 및 회원가입(SIGNUP) 메뉴 분리 (CHECKIN 중복 렌더링 방어 포함)
+  const heroMenu = activeMenus.find((m: any) => m.menu_id === 'ALLOCATE_DAILY' || m.menu_id === 'ALLOCATION');
+  const signupMenu = activeMenus.find((m: any) => m.menu_id === 'SIGNUP' || m.menu_id === 'REGISTER');
+  const gridSubMenus = activeMenus.filter(
+    (m: any) =>
+      m.menu_id !== 'ALLOCATE_DAILY' &&
+      m.menu_id !== 'ALLOCATION' &&
+      m.menu_id !== 'SIGNUP' &&
+      m.menu_id !== 'REGISTER' &&
+      !(onCheckin && m.menu_id === 'CHECKIN')
+  );
 
   // 서브 메뉴별 전용 3D 스쿼클 테마 컬러 매핑
   const getSubMenuTheme = (menuId: string) => {

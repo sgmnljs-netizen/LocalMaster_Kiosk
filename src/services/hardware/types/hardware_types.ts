@@ -51,6 +51,14 @@ export interface ReceiptPrintData {
   sale_id: string;
   receipt_no: string;
   trade_dt: string;
+  bay_no?: number | string;
+  bayNo?: number | string;
+  use_minutes?: number;
+  useMinutes?: number;
+  start_time?: string;
+  startTime?: string;
+  end_time?: string;
+  endTime?: string;
   member_name?: string;
   member_no?: string;
   pay_method: string;

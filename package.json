@@ -3,11 +3,14 @@
   "private": true,
   "version": "0.3.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "dev:app": "vite & (node scripts/launch_app.js)",
     "dev:app:dev": "vite & (node scripts/launch_app.js --dev)",
     "app": "node scripts/launch_app.js",
+    "app:kiosk": "node scripts/launch_app.js --kiosk",
+    "app:window": "node scripts/launch_app.js --window",
     "app:dev": "node scripts/launch_app.js --dev",
     "audit:hardcode": "node scripts/check-hardcode.js",
     "build": "npm run audit:hardcode && tsc && vite build",
@@ -33,6 +36,7 @@
     "@typescript-eslint/eslint-plugin": "^7.13.1",
     "@typescript-eslint/parser": "^7.13.1",
     "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^44.9.0",
     "typescript": "^5.2.2",
     "vite": "^5.3.1",
     "vitest": "^2.1.9"

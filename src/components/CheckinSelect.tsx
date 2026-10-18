@@ -52,19 +52,49 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
     loadReservations();
   }, [memberNo]);
 
+  const formatResTime = (t?: string) => {
+    if (!t) return '';
+    const clean = t.trim();
+    if (/^\d{4}$/.test(clean)) {
+      return `${clean.slice(0, 2)}:${clean.slice(2, 4)}`;
+    }
+    return clean;
+  };
+
   const handleVerifyCheckin = async (resId: string) => {
     setProcessingResId(resId);
     setErrorMsg('');
     try {
       const targetRes = reservations.find((r) => r.res_id === resId);
-      const res = await api.verifyKioskCheckin(memberNo, resId);
-      if (res.success && res.bay_no) {
+      if (targetRes && (targetRes.status_cd === 'PREPARE' || targetRes.status_cd === 'USE')) {
+        const reprintBayNo = parseInt(targetRes.resource_no || '1', 10) || 1;
         onCheckinSuccess(
-          res.bay_no,
+          reprintBayNo,
+          resId,
+          targetRes.duration_min,
+          formatResTime(targetRes.start_time) || targetRes.start_time,
+          formatResTime(targetRes.end_time) || targetRes.end_time
+        );
+        return;
+      }
+      const res = await api.verifyKioskCheckin(memberNo, resId);
+      if (res.success && (res.bay_no || targetRes?.resource_no)) {
+        const resolvedBayNo = res.bay_no || parseInt(targetRes?.resource_no || '1', 10) || 1;
+        onCheckinSuccess(
+          resolvedBayNo,
           resId,
           (res as any).duration_min ?? targetRes?.duration_min,
-          (res as any).start_time ?? targetRes?.start_time,
-          (res as any).end_time ?? targetRes?.end_time
+          formatResTime((res as any).start_time ?? targetRes?.start_time) || ((res as any).start_time ?? targetRes?.start_time),
+          formatResTime((res as any).end_time ?? targetRes?.end_time) || ((res as any).end_time ?? targetRes?.end_time)
+        );
+      } else if (targetRes && targetRes.status_cd === 'CHK') {
+        const reprintBayNo = parseInt(targetRes.resource_no || '1', 10) || 1;
+        onCheckinSuccess(
+          reprintBayNo,
+          resId,
+          targetRes.duration_min,
+          formatResTime(targetRes.start_time) || targetRes.start_time,
+          formatResTime(targetRes.end_time) || targetRes.end_time
         );
       } else {
         setErrorMsg(res.message || (lang === 'KO' ? '체크인 승인 처리 중 오류가 발생했습니다.' : 'Checkin failed.'));
@@ -122,17 +152,18 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
 
       {/* Main Content */}
       <div style={{ flex: 1, overflowY: 'auto', paddingRight: '6px' }}>
+        {errorMsg && (
+          <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', borderRadius: '12px', padding: '18px 20px', display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+            <AlertCircle size={28} color="#f87171" />
+            <span style={{ fontSize: '18px', color: '#fca5a5', fontWeight: 700 }}>{errorMsg}</span>
+          </div>
+        )}
         {loading ? (
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', gap: '16px' }}>
             <RefreshCw size={48} style={{ animation: 'spin 1s linear infinite' }} />
             <span style={{ fontSize: '18px', color: '#a7f3d0' }}>
               {lang === 'KO' ? '예약 타석 내역을 조회 중입니다...' : 'Loading reservations...'}
             </span>
-          </div>
-        ) : errorMsg ? (
-          <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <AlertCircle size={28} color="#f87171" />
-            <span style={{ fontSize: '18px', color: '#fca5a5' }}>{errorMsg}</span>
           </div>
         ) : reservations.length === 0 ? (
           <div style={{
@@ -219,7 +250,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '15px', color: '#d1fae5', marginBottom: '20px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Clock size={16} color="#34d399" />
-                        <span>예약시간: <strong>{res.start_time || '정시'} ~ {res.end_time || '종료'}</strong> ({res.duration_min}분)</span>
+                        <span>예약시간: <strong>{formatResTime(res.start_time) || '정시'} ~ {formatResTime(res.end_time) || '종료'}</strong> ({res.duration_min}분)</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Calendar size={16} color="#34d399" />

@@ -83,6 +83,60 @@ export function saveKioskSettings(settings: Partial<KioskSettings>): KioskSettin
   return next;
 }
 
+let bootstrapPromise: Promise<KioskSettings | null> | null = null;
+
+export async function bootstrapLocalKioskSettings(): Promise<KioskSettings | null> {
+  if (typeof window === 'undefined') return null;
+  const host = window.location.hostname;
+  const isLoopback = host === '127.0.0.1' || host === 'localhost';
+  if (!isLoopback) return null;
+
+  const current = getKioskSettings();
+  const hasExplicitSettings = Boolean(localStorage.getItem(STORAGE_KEY) && current.deviceKey);
+  if (hasExplicitSettings) {
+    return current;
+  }
+
+  if (bootstrapPromise) {
+    return bootstrapPromise;
+  }
+
+  bootstrapPromise = (async () => {
+    try {
+      const baseUrl = (
+        window.location.port === '8000'
+          ? window.location.origin
+          : current.apiUrl || DEFAULT_KIOSK_SETTINGS.apiUrl
+      )
+        .trim()
+        .replace(/\/+$/, '');
+      const existingStoreCd = localStorage.getItem('LM_STORE_CD') || '';
+      const query = existingStoreCd ? `?store_cd=${encodeURIComponent(existingStoreCd)}` : '';
+      const res = await fetch(`${baseUrl}/api/v1/kiosk/local-bootstrap${query}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data?.store_cd) return null;
+
+      return saveKioskSettings({
+        apiUrl: baseUrl,
+        storeCode: existingStoreCd || data.store_cd,
+        deviceKey: data.device_key || current.deviceKey,
+        deviceId: data.device_id || current.deviceId,
+        deviceName: data.device_name || current.deviceName,
+        terminalId: data.terminal_id || current.terminalId,
+        vcatPort: data.vcat_port || current.vcatPort,
+        providerType: data.provider_type || current.providerType,
+      });
+    } catch {
+      return null;
+    } finally {
+      bootstrapPromise = null;
+    }
+  })();
+
+  return bootstrapPromise;
+}
+
 export function useKioskSettings() {
   const [settings, setSettings] = useState<KioskSettings>(getKioskSettings());
 
@@ -91,6 +145,7 @@ export function useKioskSettings() {
       setSettings(getKioskSettings());
     };
     window.addEventListener('kiosk-settings-changed', handleUpdate);
+    void bootstrapLocalKioskSettings();
     return () => window.removeEventListener('kiosk-settings-changed', handleUpdate);
   }, []);
 

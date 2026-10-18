@@ -252,7 +252,7 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
         {/* 부가세 및 합계 금액 */}
         <div style={{ padding: '14px 0', borderBottom: '1px dashed #a1a19b', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-            <span>과세 공급가액:</span>
+            <span>{isTaxFree ? '면세 공급가액:' : '과세 공급가액:'}</span>
             <span>₩{formatAmount(taxFreeAmount)}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>

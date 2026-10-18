@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06281E" />
+      <stop offset="55%" stop-color="#041B14" />
+      <stop offset="100%" stop-color="#02100C" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2DD4BF" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="url(#bgGrad)" stroke="#14B8A6" stroke-width="10" stroke-opacity="0.55" />
+  <!-- Stylized G Monogram -->
+  <path d="M332 178 C306 146, 266 132, 224 132 C148 132, 96 184, 96 256 C96 328, 148 380, 226 380 C296 380, 346 336, 352 268 L236 268 L236 226 L402 226 L402 258 C402 356, 330 426, 224 426 C120 426, 46 354, 46 256 C46 158, 120 86, 224 86 C280 86, 328 106, 364 144 Z" transform="translate(22, -16) scale(0.88)" fill="#FFFFFF" />
+  <!-- Golf Ball / Teal-Emerald Dot Accent -->
+  <circle cx="386" cy="330" r="26" fill="url(#accentGrad)" />
+  <!-- KIOSK Pill Badge -->
+  <rect x="116" y="382" width="280" height="58" rx="29" fill="url(#accentGrad)" />
+  <text x="256" y="421" font-family="-apple-system, BlinkMacSystemFont, 'Pretendard', sans-serif" font-size="30" font-weight="900" fill="#02140E" text-anchor="middle" letter-spacing="2.5">GOLFOS KIOSK</text>
+</svg>

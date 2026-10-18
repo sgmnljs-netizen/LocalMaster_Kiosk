@@ -4,11 +4,13 @@ import { Wrench, ShieldAlert } from 'lucide-react';
 interface MaintenanceOverlayProps {
   isVisible: boolean;
   onHiddenTap: () => void;
+  noticeMessage?: string;
 }
 
 export const MaintenanceOverlay: React.FC<MaintenanceOverlayProps> = ({
   isVisible,
   onHiddenTap,
+  noticeMessage,
 }) => {
   if (!isVisible) return null;
 
@@ -97,14 +99,20 @@ export const MaintenanceOverlay: React.FC<MaintenanceOverlayProps> = ({
           <h1 style={{ fontSize: '28px', fontWeight: 900, color: '#ffffff', margin: '8px 0 0 0', letterSpacing: '-0.5px' }}>
             현재 시스템 점검 중입니다
           </h1>
-          <p style={{ fontSize: '15px', color: '#9ca3af', lineHeight: 1.6, margin: '8px 0 0 0' }}>
-            더 안정적인 서비스 제공을 위해 장비 점검을 진행하고 있습니다.<br />
-            타석 배정 및 결제는 <strong style={{ color: '#34d399', fontWeight: 700 }}>카운터 포스</strong>를 이용해 주시기 바랍니다.
-          </p>
+          {noticeMessage ? (
+            <p style={{ fontSize: '15px', color: '#e5e7eb', lineHeight: 1.6, margin: '8px 0 0 0', whiteSpace: 'pre-line', wordBreak: 'keep-all' }}>
+              {noticeMessage}
+            </p>
+          ) : (
+            <p style={{ fontSize: '15px', color: '#9ca3af', lineHeight: 1.6, margin: '8px 0 0 0' }}>
+              더 안정적인 서비스 제공을 위해 장비 점검을 진행하고 있습니다.<br />
+              타석 배정 및 결제는 <strong style={{ color: '#34d399', fontWeight: 700 }}>카운터 포스</strong>를 이용해 주시기 바랍니다.
+            </p>
+          )}
         </div>
 
         <div style={{ paddingTop: '32px', fontSize: '12px', color: '#4b5563', fontFamily: 'monospace' }}>
-          GOLFOS Kiosk Engine v0.3.0
+          GOLFOS Kiosk Engine {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'v0.3.0'}
         </div>
       </div>
     </div>

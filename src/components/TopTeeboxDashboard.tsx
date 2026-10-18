@@ -241,7 +241,10 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
         {sortedFloors.map(floor => {
           const floorBays = floorsMap[floor];
           let brandLabel = floor;
-          const availableCount = floorBays.filter(b => b.status === 'AVAILABLE').length;
+          const availableCount = floorBays.filter(b => {
+            const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+            return st === 'AVAILABLE' && !isBayBlocked(b);
+          }).length;
 
           return (
             <div key={floor} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>

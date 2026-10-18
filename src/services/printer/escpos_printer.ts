@@ -14,6 +14,14 @@ export interface KioskReceiptPrintData {
   bayNo?: number | string;
   memberName?: string;
   itemName?: string;
+  items?: Array<{
+    name: string;
+    qty: number;
+    unit_price: number;
+    amount: number;
+    discount_amt?: number;
+    is_tax_free?: boolean;
+  }>;
   useMinutes?: number;
   startTime?: string;
   endTime?: string;
@@ -21,6 +29,7 @@ export interface KioskReceiptPrintData {
   supplyAmt?: number;
   vatAmt?: number;
   taxFreeAmt?: number;
+  discountAmt?: number;
   cardIssuer?: string;
   cardNoMasked?: string;
   terminalId?: string;
@@ -134,7 +143,8 @@ export class KioskEscPosPrinterService {
     // 4. 이용 시간 / 고객 정보
     appendBytes(0x1b, 0x61, 0x00); // Left Align
     if (data.memberName) append(`${formatTwoCol('회 원 명', data.memberName, colWidth)}\n`);
-    if (data.itemName) append(`${formatTwoCol('상 품 명', data.itemName, colWidth)}\n`);
+    const resolvedItemName = data.itemName || (data.items && data.items.length > 0 ? data.items.map((i) => i.name).join(', ') : undefined);
+    if (resolvedItemName) append(`${formatTwoCol('상 품 명', resolvedItemName, colWidth)}\n`);
     if (data.useMinutes) append(`${formatTwoCol('이용시간', `${data.useMinutes}분`, colWidth)}\n`);
     if (data.startTime && data.endTime) append(`${formatTwoCol('이용구간', `${data.startTime} ~ ${data.endTime}`, colWidth)}\n`);
     append(`${formatTwoCol('거래일시', data.tradeDate, colWidth)}\n`);
@@ -142,6 +152,9 @@ export class KioskEscPosPrinterService {
     append(`${divider}\n`);
 
     // 5. 과세/면세 세액 및 결제 금액
+    if (data.discountAmt !== undefined && data.discountAmt > 0) {
+      append(`${formatTwoCol('할인금액', `-${data.discountAmt.toLocaleString()}원`, colWidth)}\n`);
+    }
     if (data.supplyAmt !== undefined) {
       append(`${formatTwoCol('공급가액', `${data.supplyAmt.toLocaleString()}원`, colWidth)}\n`);
     }
@@ -233,19 +246,38 @@ export class KioskEscPosPrinterService {
       }
     }
 
-    // 2. WebSerial API 시도 (직접 연결 프린터)
+    // 2. WebSerial API 시도 (직접 연결 프린터, 3000ms 타임아웃 + 안전 리소스 해제)
     if (typeof navigator !== 'undefined' && 'serial' in navigator) {
       try {
         // @ts-expect-error WebSerial experimental
         const ports = await navigator.serial.getPorts();
         if (ports.length > 0) {
           const port = ports[0];
-          await port.open({ baudRate: 9600 });
-          const writer = port.writable.getWriter();
-          await writer.write(buffer);
-          writer.releaseLock();
-          await port.close();
-          return { success: true, message: '서멀 프린터(WebSerial) 출력 완료' };
+          let writer: any = null;
+          let timeoutId: ReturnType<typeof setTimeout> | null = null;
+          try {
+            await Promise.race([
+              (async () => {
+                await port.open({ baudRate: 9600 });
+                writer = port.writable.getWriter();
+                await writer.write(buffer);
+              })(),
+              new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error('WebSerial print timeout (3000ms)')), 3000);
+              }),
+            ]);
+            return { success: true, message: '서멀 프린터(WebSerial) 출력 완료' };
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+            if (writer) {
+              try {
+                writer.releaseLock();
+              } catch {
+                // ignore releaseLock error
+              }
+            }
+            await port.close().catch(() => {});
+          }
         }
       } catch (e) {
         console.warn('[KioskPrinter] WebSerial print error:', e);

@@ -1,0 +1,29 @@
+{
+  "name": "GOLFOS KIOSK",
+  "short_name": "GOLFOS KIOSK",
+  "description": "GOLFOS 스마트 골프연습장 무인 타석배정·결제 키오스크",
+  "start_url": "/kiosk",
+  "scope": "/kiosk",
+  "display": "standalone",
+  "background_color": "#041B14",
+  "theme_color": "#041B14",
+  "icons": [
+    {
+      "src": "/golfos-kiosk-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/golfos-kiosk-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/golfos-kiosk-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

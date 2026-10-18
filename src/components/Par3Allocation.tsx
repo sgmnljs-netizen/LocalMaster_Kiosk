@@ -150,14 +150,47 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }
   }, [slots]);
 
-  const getAssignableAssets = (m?: Member | null): MemberAsset[] => {
-    return (m?.assets || []).filter(
-      (a) =>
-        a.is_assignable !== false &&
-        (a.rem_count === null || a.rem_count === undefined || a.rem_count > 0) &&
-        ((a as any).remain_cnt === null || (a as any).remain_cnt === undefined || (a as any).remain_cnt > 0)
-    );
-  };
+  // 선점된 파3 예약 ID 추적 (결제 취소/거절 시 즉시 락 해제용)
+  const currentHoldResIdRef = useRef<string | null>(null);
+
+  // 언마운트 시 미완료 보류(HOLD) 예약 해제 및 VAN 단말기 요청 취소 클린업
+  useEffect(() => {
+    return () => {
+      if (currentHoldResIdRef.current) {
+        api.cancelHoldReservation(currentHoldResIdRef.current).catch(() => {});
+        currentHoldResIdRef.current = null;
+      }
+      kioskVanClient.cancelCurrentRequest();
+    };
+  }, []);
+
+  const getAssignableAssets = useCallback((m?: Member | null, isReplacingLeader = false): MemberAsset[] => {
+    const usedCounts = new Map<string, number>();
+    players.forEach((p, idx) => {
+      if (isReplacingLeader && idx === 0) return;
+      if (p.use_ticket_id) {
+        usedCounts.set(p.use_ticket_id, (usedCounts.get(p.use_ticket_id) || 0) + 1);
+      }
+    });
+
+    return (m?.assets || []).filter((a) => {
+      if (a.is_assignable === false) return false;
+      if (typeof a.remain_days === 'number' && a.remain_days < 0) return false;
+
+      const logicType = (a.logic_type || a.pass_type || '').toUpperCase();
+      const alreadyUsed = usedCounts.get(a.member_item_id) || 0;
+
+      if (logicType === 'PERIOD' || logicType === 'MEMBERSHIP') {
+        return alreadyUsed === 0;
+      }
+
+      const rawRem = a.rem_count ?? a.remain_cnt;
+      if (rawRem === null || rawRem === undefined) {
+        return alreadyUsed === 0;
+      }
+      return rawRem - alreadyUsed > 0;
+    });
+  }, [players]);
 
   // 3. 대표자 마운트 세팅
   useEffect(() => {
@@ -180,7 +213,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           ]);
           
           // 만약 사용 가능한 이용권이 존재하면, 즉석에서 대표자 이용권 자동 매칭 팝업 작동 유도
-          const assignable = getAssignableAssets(detail);
+          const assignable = getAssignableAssets(detail, true);
           if (detail && assignable.length > 0) {
             setSelectedMemberForTicket({ member: { ...detail, assets: assignable }, isLeader: true });
             setModalState('TICKET_SELECT');
@@ -267,7 +300,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         if (member) {
           // 회원 조회 성공
           const isLeaderSlot = players.length === 0;
-          const assignable = getAssignableAssets(member);
+          const assignable = getAssignableAssets(member, isLeaderSlot);
           if (assignable.length > 0) {
             // 사용 가능한 이용권이 있는 경우 ➔ 이용권 선택 팝업 오픈
             setSelectedMemberForTicket({ member: { ...member, assets: assignable }, isLeader: isLeaderSlot });
@@ -297,7 +330,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }
 
     const isLeaderSlot = players.length === 0;
-    const assignable = getAssignableAssets(member);
+    const assignable = getAssignableAssets(member, isLeaderSlot);
 
     if (assignable.length > 0) {
       // 사용 가능한 이용권이 있는 경우 ➔ 이용권 선택 팝업 오픈
@@ -308,7 +341,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       addMemberSlot(member, isLeaderSlot);
       setModalState('NONE');
     }
-  }, [players]);
+  }, [players, getAssignableAssets]);
 
   const addMemberSlot = (member: Member, isLeader: boolean, ticket?: MemberAsset) => {
     const slotId = isLeader ? 'LEADER' : `PLAYER_${Date.now()}`;
@@ -437,6 +470,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       );
 
       if (res.success && res.res_id) {
+        currentHoldResIdRef.current = res.res_id;
         // 예약 선점 성공 -> 실물 VAN 단말기 승인 파이프라인 진입
         runRealCardPayment(res.res_id, totalAmount);
       } else {
@@ -483,6 +517,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       );
 
       if (!approval.success) {
+        await api.cancelHoldReservation(resId).catch(() => {});
+        currentHoldResIdRef.current = null;
+        fetchSlots();
         setErrorMsg(approval.error_message || '카드 결제가 거절되었습니다.');
         resetPaymentState();
         return;
@@ -491,6 +528,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       setAuthProgress(100);
       await executeConfirmWebhook(resId, amount, approval.auth_code, approval.card_no_masked, approval);
     } catch (err: unknown) {
+      await api.cancelHoldReservation(resId).catch(() => {});
+      currentHoldResIdRef.current = null;
+      fetchSlots();
       const errMsg = err instanceof Error ? err.message : '단말기 통신 오류가 발생했습니다.';
       setErrorMsg(`[결제 실패]: ${errMsg}`);
       resetPaymentState();
@@ -498,7 +538,16 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   };
 
   const rollbackVanApprovalIfNeeded = async (resId: string, amount: number, vanResult?: any, reason?: string) => {
-    if (amount <= 0 || !vanResult?.auth_code) return;
+    const authCodeStr = String(vanResult?.auth_code || '');
+    if (
+      amount <= 0 ||
+      !authCodeStr ||
+      authCodeStr.startsWith('FREE-') ||
+      authCodeStr.startsWith('MEMBERSHIP') ||
+      (vanResult?.amount !== undefined && vanResult.amount <= 0)
+    ) {
+      return;
+    }
     const orgApprovedDate = (vanResult.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) || new Date().toISOString().slice(0, 10).replace(/-/g, '');
     try {
       const cancelRes = await kioskVanClient.cancelCardPayment({
@@ -510,6 +559,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         ...({ orgAuthNo: vanResult.auth_code, orgAuthDate: orgApprovedDate, orgVanTrNo: vanResult.van_tr_no } as any)
       });
       if (!cancelRes || !cancelRes.success) {
+        const backendReason = reason || 'Par3 webhook failed';
+        const revReason = cancelRes?.error_message || 'Unknown';
         await api.reportGhostCharge({
           store_cd: STORE_CODE,
           member_no: players[0]?.member_no || memberNo,
@@ -519,11 +570,16 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           card_no_masked: vanResult.card_no_masked || '',
           issuer_name: vanResult.issuer_name || '',
           van_tr_no: vanResult.van_tr_no || '',
+          approvedAt: vanResult.approved_at,
           terminal_id: vanResult.terminal_id || '',
-          error_reason: `${reason || 'Par3 webhook failed'} / Cancel failed: ${cancelRes?.error_message || 'Unknown'}`
+          backendErrorReason: backendReason,
+          reversalErrorReason: revReason,
+          error_reason: `${backendReason} / Cancel failed: ${revReason}`
         });
       }
     } catch (cancelErr: any) {
+      const backendReason = reason || `Par3 webhook failed (resId=${resId})`;
+      const revReason = cancelErr?.message || String(cancelErr);
       await api.reportGhostCharge({
         store_cd: STORE_CODE,
         member_no: players[0]?.member_no || memberNo,
@@ -533,18 +589,38 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         card_no_masked: vanResult.card_no_masked || '',
         issuer_name: vanResult.issuer_name || '',
         van_tr_no: vanResult.van_tr_no || '',
+        approvedAt: vanResult.approved_at,
         terminal_id: vanResult.terminal_id || '',
-        error_reason: `${reason || 'Par3 webhook failed (resId=' + resId + ')'} / Cancel exception: ${cancelErr?.message || String(cancelErr)}`
+        backendErrorReason: backendReason,
+        reversalErrorReason: revReason,
+        error_reason: `${backendReason} / Cancel exception: ${revReason}`
       });
     }
   };
 
-  const executeConfirmWebhook = async (resId: string, amount: number, authNo?: string, cardMasked?: string, vanResult?: any) => {
+  const executeConfirmWebhook = async (
+    resId: string,
+    amount: number,
+    authNo?: string,
+    cardMasked?: string,
+    vanResult?: any,
+    usedPoints: number = 0
+  ) => {
     try {
-      const confirmRes = await api.confirmKioskPaymentWebhook(resId, amount, amount === 0 ? 'TICKET' : 'OFFLINE_CARD');
+      const webhookOptions = {
+        ...(vanResult || {}),
+        usedPoints: vanResult?.usedPoints ?? usedPoints ?? 0,
+      };
+      const confirmRes = await api.confirmKioskPaymentWebhook(
+        resId,
+        amount,
+        amount === 0 ? 'TICKET' : 'CARD',
+        webhookOptions
+      );
       const isSuccess = typeof confirmRes === 'boolean' ? confirmRes : !!(confirmRes as any)?.success;
 
       if (isSuccess) {
+        currentHoldResIdRef.current = null;
         const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
         const formattedDate = TimeMaster.formatKstDateTime(new Date());
         const validApprNo = authNo || (amount === 0 ? 'MEMBERSHIP_TICKET' : `APPR_${Math.floor(10000000 + Math.random() * 90000000)}`);
@@ -566,11 +642,17 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         setPaymentState('DONE');
       } else {
         await rollbackVanApprovalIfNeeded(resId, amount, vanResult, (confirmRes as any)?.message || 'Par3 webhook returned false');
+        await api.cancelHoldReservation(resId).catch(() => {});
+        currentHoldResIdRef.current = null;
+        fetchSlots();
         setErrorMsg('결제 웹훅 승인 처리에 실패하여 카드 승인이 자동 취소되었습니다.');
         resetPaymentState();
       }
     } catch (err: any) {
       await rollbackVanApprovalIfNeeded(resId, amount, vanResult, err?.message || 'Par3 webhook exception');
+      await api.cancelHoldReservation(resId).catch(() => {});
+      currentHoldResIdRef.current = null;
+      fetchSlots();
       setErrorMsg('결제 서버 통신 중 오류가 발생하여 카드 승인이 자동 취소되었습니다.');
       resetPaymentState();
     }
@@ -584,6 +666,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
   // 모의 결제 실패 강제 트리거 (QA용)
   const handleSimulateFail = (reason: string) => {
+    if (currentHoldResIdRef.current) {
+      api.cancelHoldReservation(currentHoldResIdRef.current).catch(() => {});
+      currentHoldResIdRef.current = null;
+      fetchSlots();
+    }
     setErrorMsg(`[결제 실패 모의]: ${reason}`);
     resetPaymentState();
   };
@@ -894,26 +981,24 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                       )}
                     </div>
 
-                    {/* 대표자가 아닌 동반자는 개별 삭제 허용 */}
-                    {idx > 0 && (
-                      <button
-                        onClick={() => handleRemovePlayer(p.id)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: '#ff3b30',
-                          cursor: 'pointer',
-                          padding: '6px',
-                          borderRadius: '50%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        title="제거"
-                      >
-                        <X size={20} />
-                      </button>
-                    )}
+                    {/* 대표자 및 동반자 개별 삭제 허용 (오입력 수정 지원) */}
+                    <button
+                      onClick={() => handleRemovePlayer(p.id)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#ff3b30',
+                        cursor: 'pointer',
+                        padding: '6px',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                      title="제거"
+                    >
+                      <X size={20} />
+                    </button>
                   </div>
                 ))
               )}
@@ -1320,31 +1405,41 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '240px', overflowY: 'auto' }} className="kiosk-ultra-scrollbar">
-              {getAssignableAssets(selectedMemberForTicket.member).map(ticket => (
-                <button
-                  key={ticket.member_item_id}
-                  onClick={() => addMemberSlot(selectedMemberForTicket.member, selectedMemberForTicket.isLeader, ticket)}
-                  style={{
-                    padding: '16px 20px',
-                    borderRadius: '12px',
-                    border: '1.5px solid #2e7559',
-                    background: 'rgba(46, 117, 89, 0.04)',
-                    color: '#2e7559',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <span style={{ fontSize: '16px', fontWeight: 800 }}>{ticket.item_name}</span>
-                    <span style={{ fontSize: '13px', color: '#86868b' }}>잔여 횟수: {ticket.rem_count}회</span>
-                  </div>
-                  <Ticket size={24} />
-                </button>
-              ))}
+              {getAssignableAssets(selectedMemberForTicket.member, selectedMemberForTicket.isLeader).map(ticket => {
+                const logicType = (ticket.logic_type || ticket.pass_type || '').toUpperCase();
+                const isPeriod = logicType === 'PERIOD' || logicType === 'MEMBERSHIP';
+                const expDate = ticket.expiry_date || ticket.end_date || ticket.end_dt || '';
+                const remCount = ticket.rem_count ?? ticket.remain_cnt ?? 0;
+                return (
+                  <button
+                    key={ticket.member_item_id}
+                    onClick={() => addMemberSlot(selectedMemberForTicket.member, selectedMemberForTicket.isLeader, ticket)}
+                    style={{
+                      padding: '16px 20px',
+                      borderRadius: '12px',
+                      border: '1.5px solid #2e7559',
+                      background: 'rgba(46, 117, 89, 0.04)',
+                      color: '#2e7559',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '16px', fontWeight: 800 }}>{ticket.item_name}</span>
+                      <span style={{ fontSize: '13px', color: '#86868b' }}>
+                        {isPeriod
+                          ? `유효기간: ${expDate ? `~${expDate}` : '기간권 (일일 무제한)'}`
+                          : `잔여 횟수: ${remCount}회`}
+                      </span>
+                    </div>
+                    <Ticket size={24} />
+                  </button>
+                );
+              })}
             </div>
 
             {/* 일반 결제 옵션 제공 */}

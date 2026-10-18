@@ -126,7 +126,8 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const handleSave = () => {
     const cleanStoreCd = formStoreCode.trim();
     const cleanDeviceId = formDeviceId.trim();
-    const cleanTerminalId = formTerminalId.trim();
+    const rawTerminalId = formTerminalId.trim();
+    const cleanTerminalId = rawTerminalId === 'custom' ? '88010003' : (rawTerminalId || '88010003');
     const cleanVcatPort = formVcatPort.trim();
 
     const updated: Partial<KioskSettings> = {
@@ -144,7 +145,8 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
 
     try {
       if (cleanStoreCd) localStorage.setItem('LM_STORE_CD', cleanStoreCd);
-      if (cleanDeviceId) localStorage.setItem('LM_KIOSK_TERMINAL_ID', cleanDeviceId);
+      if (cleanDeviceId) localStorage.setItem('LM_KIOSK_DEVICE_ID', cleanDeviceId);
+      if (cleanTerminalId) localStorage.setItem('LM_KIOSK_TERMINAL_ID', cleanTerminalId);
     } catch (e) {
       console.warn('[KioskSettingsModal] Failed to sync localStorage keys:', e);
     }

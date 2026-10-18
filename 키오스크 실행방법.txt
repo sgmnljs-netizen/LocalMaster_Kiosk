@@ -1,0 +1,31 @@
+===============================================================================
+  GOLFOS 무인 타석배정·결제 키오스크 (LocalMaster_Kiosk) 실행 가이드
+===============================================================================
+
+1. [권장 - 상용 매장 운영 모드] GOLFOS KIOSK 전용 데스크톱 앱(Electron App Shell) 실행
+   - 크롬 브라우저가 아닌 독립 프로그램 [GOLFOS KIOSK] 전용 아이콘과 앱 이름으로 구동됩니다.
+   - 하단 독(Dock)/작업표시줄 아이콘이나 바탕화면 바로가기를 다시 눌러도 빈 크롬창이 뜨지 않고
+     열려 있는 기존 GOLFOS KIOSK 화면만 최상단으로 포커스됩니다.
+   - 카메라(안면인식/QR), WebSerial(영수증 프린터/스캐너), USB/HID 하드웨어 권한이 OS 팝업 없이
+     자동 승인되며, 터치 스와이프 뒤로가기와 핀치 줌이 원천 잠금됩니다.
+   - 백엔드 서버(Port 8000)가 자체 내장 서빙(http://127.0.0.1:8000/kiosk)하며, 로컬 DB 가맹점과
+     키오스크 기기 인증키/단말기 번호(TID)를 자동으로 바인딩하여 초기 설정 없이 즉시 실행됩니다.
+
+   (1) 바탕화면 바로가기 최초 1회 생성 (Windows 키오스크 PC):
+       scripts\windows\install_kiosk_shortcut.bat 더블클릭
+       (※ GOLFOS KIOSK 전용 아이콘(golfos-kiosk-icon.ico)이 자동 적용됩니다.)
+       (※ 윈도우 부팅 시 무인 자동 실행까지 등록하려면: install_kiosk_shortcut.bat --autostart)
+
+   (2) 전용 KIOSK 앱 즉시 실행:
+       - Windows: 바탕화면 [골포스 무인키오스크] 아이콘 더블클릭 (또는 scripts\windows\run_kiosk_app.bat)
+       - macOS / 터미널 명령어:
+         * 일반 전체창 모드: npm run app (또는 npm run app:window)
+         * 무인 키오스크 전체화면 잠금 모드: npm run app:kiosk
+
+-------------------------------------------------------------------------------
+
+2. [개발자 모드] Vite 핫리로드 개발 서버 실행 (Port 5179)
+   - 폴더 이동: cd LocalMaster_Kiosk
+   - 개발 서버 단독 실행: npm run dev
+   - 개발 서버 + 전용 GOLFOS KIOSK 앱 동시 실행: npm run dev:app
+   - 접속 주소: http://localhost:5179

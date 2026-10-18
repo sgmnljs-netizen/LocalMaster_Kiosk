@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, User, X, Sparkles, Smartphone, Radio, QrCode, Delete } from 'lucide-react';
-import { api, Member, WS_BASE_URL, STORE_CODE } from '../services/api';
+import { api, Member } from '../services/api';
 import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
 
 export type AuthMode = 'SMART_TAG' | 'PHONE_KEYPAD' | 'QR_SCAN' | 'FACE';
+
+function buildMaskedName(name?: string): string {
+  if (!name) return '';
+  if (name.length < 2) return name;
+  if (name.length === 2) return `${name[0]}*`;
+  return `${name[0]}${'*'.repeat(name.length - 2)}${name[name.length - 1]}`;
+}
 
 interface MemberAuthProps {
   initialAuthMode?: AuthMode;
@@ -48,7 +55,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   const nfcBleWsRef = useRef<WebSocket | null>(null);
 
   // 스마트 태그 (NFC/BLE) 감지 시 회원 수신 처리 (3번 본인 확인 팝업 유도)
-  const handleSmartTagDetected = useCallback(async (tokenOrUid: string) => {
+  const handleSmartTagDetected = useCallback(async (tokenOrUid: string, fallbackMember?: Member) => {
     setIsSearching(true);
     setErrorMsg('');
     try {
@@ -57,19 +64,30 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         ? await (api as any).authenticateSmartTag(tokenOrUid)
         : await api.getMember(tokenOrUid);
       if (Array.isArray(member) && member.length > 1) {
+        setPhoneDigits('');
         setErrorMsg('동일한 뒷번호 회원이 여러 명 있습니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
       } else if ((member as any)?.duplicate || (member as any)?.error === 'DUPLICATE_PHONE') {
+        setPhoneDigits('');
         setErrorMsg('동일한 뒷번호 회원이 여러 명 있습니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
       } else if (member) {
-        setDetectedMember(Array.isArray(member) ? member[0] : member);
+        const resolved = Array.isArray(member) ? member[0] : member;
+        if (!resolved.masked_name && resolved.member_name) {
+          resolved.masked_name = buildMaskedName(resolved.member_name);
+        }
+        setDetectedMember(resolved);
+      } else if (fallbackMember) {
+        setDetectedMember(fallbackMember);
       } else {
         setErrorMsg('등록되지 않은 모바일 회원 또는 NFC 카드입니다.');
       }
     } catch (err: any) {
-      const status = err?.response?.status;
+      const status = err?.response?.status || err?.status;
       const detail = String(err?.response?.data?.detail || err?.message || '');
-      if (status === 409 || detail.includes('DUPLICATE') || detail.includes('중복') || detail.includes('여러 명')) {
+      if (status === 409 || err?.duplicate || detail.includes('DUPLICATE') || detail.includes('중복') || detail.includes('여러 명')) {
+        setPhoneDigits('');
         setErrorMsg('동일한 뒷번호 회원이 여러 명 있습니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
+      } else if (fallbackMember) {
+        setDetectedMember(fallbackMember);
       } else {
         setErrorMsg('스마트 인증 처리 중 서버 통신 에러가 발생했습니다.');
       }
@@ -94,13 +112,13 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     };
   }, [handleSmartTagDetected]);
 
-  // 🛡️ 바코드/QR 하드웨어 스캐너 전역 자동 감지 (USB HID 및 브릿지 데몬)
+  // 🛡️ 바코드/QR 하드웨어 스캐너 전역 자동 감지 (본인확인 모달 열림, 안면 매칭 완료 대기, 또는 검색 중일 때는 중복 스캔 차단)
   useHardwareScanner({
     onScan: (scanned) => {
       console.log('[MemberAuth] Hardware QR/Barcode scanned:', scanned);
       handleSmartTagDetected(scanned);
     },
-    enabled: true,
+    enabled: !isSearching && !detectedMember && !faceMatchResult,
   });
 
   // 전화번호 키패드 입력 제어 핸들러
@@ -225,55 +243,17 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     };
   }, [authMode, triggerFaceScan]);
 
-  // 📡 SMART_TAG 탭 진입 시 백엔드 NFC/BLE WebSocket 연결 (handleSmartTagDetected 연결체)
+  // 📡 SMART_TAG 탭 이탈 시 잔여 리소스 안전 정리 (NFC/BLE 이벤트는 전역 lm-nfc-tag 및 하드웨어 스캐너로 수신)
   useEffect(() => {
     if (authMode !== 'SMART_TAG') {
-      // SMART_TAG 탭 이탈 시 WS 즉시 종료 (Cleanup)
       nfcBleWsRef.current?.close();
       nfcBleWsRef.current = null;
-      return;
     }
-
-    const wsUrl = `${WS_BASE_URL}/api/v1/kiosk/ws/nfc-ble?store_cd=${STORE_CODE}`;
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(wsUrl);
-    } catch {
-      setErrorMsg('NFC/BLE 감지 서버 연결에 실패했습니다. 네트워크를 확인해 주세요.');
-      return;
-    }
-
-    // Keep-alive ping 30초마다 전송
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) ws.send('ping');
-    }, 25000);
-
-    ws.onmessage = async (evt) => {
-      try {
-        const data = JSON.parse(evt.data);
-        if (
-          data.event === 'NFC_MEMBER_TAPPED' ||
-          data.event === 'NEARBY_MEMBER_DETECTED'
-        ) {
-          if (data.member_no) {
-            // handleSmartTagDetected 연결 완료: member_no 전달 → 백엔드 조회 → 확인 팝업
-            await handleSmartTagDetected(data.member_no);
-          }
-        }
-      } catch (e) {
-        console.warn('[Smart Auth WS] 파싱 오류:', e);
-      }
-    };
-
-    ws.onerror = () => setErrorMsg('NFC/BLE 감지 서버 연결 오류가 발생했습니다.');
-    nfcBleWsRef.current = ws;
-
     return () => {
-      clearInterval(pingInterval);
-      ws.close();
+      nfcBleWsRef.current?.close();
       nfcBleWsRef.current = null;
     };
-  }, [authMode, handleSmartTagDetected]);
+  }, [authMode]);
 
   return (
     <div 
@@ -436,13 +416,14 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         <div 
           className="neon-border-red"
           style={{ 
-            background: 'rgba(239, 68, 68, 0.08)', 
+            background: '#FEF2F2', 
+            border: '1.5px solid rgba(239, 68, 68, 0.35)',
             padding: '16px', 
-            borderRadius: '12px', 
+            borderRadius: '14px', 
             textAlign: 'center',
-            color: '#fca5a5',
+            color: '#DC2626',
             fontSize: '18px',
-            fontWeight: 700
+            fontWeight: 800
           }}
         >
           {errorMsg}
@@ -696,7 +677,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
                 <button 
-                  onClick={() => setDetectedMember({
+                  onClick={() => handleSmartTagDetected('M260501', {
                     member_no: 'M260501',
                     member_name: '김골프',
                     masked_name: '김*프',
@@ -737,7 +718,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   <Smartphone size={18} color="#059669" /> 안드로이드 NFC (김골프)
                 </button>
                 <button 
-                  onClick={() => setDetectedMember({
+                  onClick={() => handleSmartTagDetected('M260502', {
                     member_no: 'M260502',
                     member_name: '이프로',
                     masked_name: '이*로',
@@ -1086,13 +1067,13 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             display: 'flex', 
             justifyContent: 'space-between', 
             alignItems: 'center',
-            border: '1.5px dashed rgba(16, 185, 129, 0.3)',
-            background: 'rgba(16, 185, 129, 0.02)'
+            border: '1.5px dashed rgba(16, 185, 129, 0.35)',
+            background: 'rgba(16, 185, 129, 0.04)'
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span style={{ fontSize: '18px', fontWeight: 800, color: '#fff' }}>아직 회원이 아니신가요?</span>
-            <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+            <span style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A' }}>아직 회원이 아니신가요?</span>
+            <p style={{ fontSize: '14px', color: '#475569', fontWeight: 600 }}>
               골포스 앱을 다운로드 받아 스마트 체크인을 이용해보세요.
             </p>
           </div>

@@ -31,6 +31,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const [result, setResult] = useState<CardApprovalResult | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isTimeoutRef = useRef<boolean>(false);
 
   // 키오스크 로컬 설정이 변경되면 vanClient 설정도 동기화
   useEffect(() => {
@@ -54,6 +55,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
   const reset = useCallback(() => {
     clearTimer();
+    isTimeoutRef.current = false;
     setState('IDLE');
     setRemainingSeconds(30);
     setError(null);
@@ -61,6 +63,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   }, [clearTimer]);
 
   const cancelPayment = useCallback(() => {
+    isTimeoutRef.current = false;
     kioskVanClient.cancelCurrentRequest();
     clearTimer();
     setState('CANCELLED');
@@ -70,6 +73,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const startPayment = useCallback(
     async (params: CardPaymentRequestParams): Promise<CardApprovalResult> => {
       reset();
+      isTimeoutRef.current = false;
       const totalTimeout = params.timeoutSeconds || 30;
       setRemainingSeconds(totalTimeout);
 
@@ -78,8 +82,9 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         setRemainingSeconds((prev) => {
           if (prev <= 1) {
             clearTimer();
+            isTimeoutRef.current = true;
             kioskVanClient.cancelCurrentRequest();
-            setState('CANCELLED');
+            setState('TIMEOUT');
             setError('결제 시간이 초과되어 취소되었습니다.');
             return 0;
           }
@@ -89,16 +94,31 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
       try {
         const res = await kioskVanClient.requestCardPayment(params, (newState) => {
-          setState(newState);
+          if (newState === 'CANCELLED' && isTimeoutRef.current) {
+            setState('TIMEOUT');
+          } else {
+            setState(newState);
+          }
         });
 
         clearTimer();
-        setResult(res);
 
         if (!res.success) {
-          setError(res.error_message || '결제가 승인되지 않았습니다.');
+          if (res.error_code === 'E_USER_CANCEL' || (res as any).errorCode === 'E_USER_CANCEL') {
+            if (isTimeoutRef.current) {
+              setState('TIMEOUT');
+              setError('결제 시간이 초과되어 취소되었습니다.');
+              res.error_code = 'E_TIMEOUT';
+            } else {
+              setState('CANCELLED');
+              setError(res.error_message || '결제가 취소되었습니다.');
+            }
+          } else {
+            setError(res.error_message || '결제가 승인되지 않았습니다.');
+          }
         }
 
+        setResult(res);
         return res;
       } catch (err: unknown) {
         clearTimer();

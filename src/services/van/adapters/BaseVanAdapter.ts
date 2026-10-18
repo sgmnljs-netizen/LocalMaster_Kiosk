@@ -18,12 +18,23 @@ import type {
   TerminalHealthResult,
 } from '../van_types';
 
+export const getIsMockVan = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const stored = localStorage.getItem('VAN_MOCK');
+  if (stored !== null) return stored === 'true';
+  const isRealWindows =
+    window.navigator.userAgent.includes('Windows') &&
+    Boolean(window.navigator.platform && window.navigator.platform.startsWith('Win')) &&
+    !window.navigator.webdriver;
+  return !isRealWindows;
+};
+
 export const DEFAULT_VAN_CONFIG: VanConfig = {
   provider: 'KCP',
   vcatHost: 'http://127.0.0.1',
   vcatPort: 9099,
   terminalId: '88010003',
-  isMock: typeof window !== 'undefined' && (!window.navigator.userAgent.includes('Windows') || localStorage.getItem('VAN_MOCK') !== 'false'),
+  isMock: getIsMockVan(),
   timeoutSeconds: 30,
 };
 
