@@ -1,12 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { Settings, X, Monitor, Wifi, Shield, Zap, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { useKioskSettings, KioskSettings } from '../stores/kioskSettings';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Settings, X, Monitor, Wifi, Shield, Zap, Loader2, CheckCircle2, AlertTriangle, LayoutGrid, RotateCcw, Star } from 'lucide-react';
+import {
+  useKioskSettings,
+  KioskSettings,
+  KioskAuthModeKey,
+  KioskAuthMethodsConfig,
+  KioskMenuVisibilityMap,
+  DEFAULT_AUTH_METHODS,
+  canonicalizeKioskMenuId,
+  isKioskMenuEnabled,
+} from '../stores/kioskSettings';
 import { api } from '../services/api';
 import { kioskVanClient } from '../services/van/van_client';
 
 interface KioskSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  kioskMenuConfigs?: any[];
+  checkinPolicy?: string;
+  faceTerminalEnabled?: boolean;
 }
 
 interface TerminalDeviceItem {
@@ -18,6 +30,23 @@ interface TerminalDeviceItem {
   vcat_port: number;
 }
 
+const STANDARD_KIOSK_MENUS = [
+  { id: 'CHECKIN', label: '예약 타석 체크인', desc: '사전 예약 본인인증 및 체크인', emoji: '📌' },
+  { id: 'ALLOCATE_DAILY', label: '연습타석 배정', desc: '회원권/일일권 연습타석 배정', emoji: '🎯' },
+  { id: 'PAR3', label: '파3 코스 배정', desc: '야외 파3 라운딩 티오프 예약', emoji: '⛳' },
+  { id: 'PURCHASE_PRODUCT', label: '회원권/상품 구매', desc: '기간권·횟수권·일일권 구매', emoji: '🛍️' },
+  { id: 'LOCKER', label: '라카 대여/연장', desc: '개인 사물함 기간 연장 결제', emoji: '🔑' },
+  { id: 'MOVE_BAY', label: '타석 이동', desc: '이용 중인 타석 위치 변경', emoji: '🔄' },
+  { id: 'SIGNUP', label: '신규 회원가입', desc: '30초 즉석 회원가입 배너/버튼', emoji: '👤' },
+];
+
+const AUTH_METHOD_ITEMS: { key: KioskAuthModeKey; label: string; desc: string; emoji: string }[] = [
+  { key: 'SMART_TAG', label: '스마트폰 태그 (NFC/BLE)', desc: '안드로이드 NFC 및 아이폰 스마트 체크인', emoji: '📱' },
+  { key: 'PHONE_KEYPAD', label: '전화번호 입력 (키패드)', desc: '휴대폰 뒷 4자리 / 전체 번호 키패드 조회', emoji: '🔢' },
+  { key: 'QR_SCAN', label: '출입 QR / 바코드 스캔', desc: '하드웨어 리더기로 모바일/알림톡 QR 인식', emoji: '📷' },
+  { key: 'FACE', label: 'AI 안면 인식 (카메라)', desc: '전면 카메라 비접촉 안면 인증 및 등록', emoji: '🙂' },
+];
+
 const FALLBACK_KIOSK_OPTIONS: TerminalDeviceItem[] = [
   { device_id: 'DEV_KIOSK_01', device_name: '입구 무인 키오스크 1호기', terminal_id: '88010003', vcat_port: 9099, van_provider: 'SMARTRO', device_type: 'KIOSK' },
   { device_id: 'DEV_KIOSK_02', device_name: '2층 무인 키오스크 2호기', terminal_id: '88010004', vcat_port: 9099, van_provider: 'KCP', device_type: 'KIOSK' },
@@ -27,10 +56,13 @@ const FALLBACK_KIOSK_OPTIONS: TerminalDeviceItem[] = [
 export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   isOpen,
   onClose,
+  kioskMenuConfigs = [],
+  checkinPolicy = 'CHECKIN_REQUIRED',
+  faceTerminalEnabled = true,
 }) => {
   const { settings, updateSettings } = useKioskSettings();
 
-  const [activeTab, setActiveTab] = useState<'device' | 'connection' | 'maintenance'>('device');
+  const [activeTab, setActiveTab] = useState<'device' | 'menus' | 'connection' | 'maintenance'>('device');
   const [terminalList, setTerminalList] = useState<TerminalDeviceItem[]>(FALLBACK_KIOSK_OPTIONS);
   const [formDeviceId, setFormDeviceId] = useState(settings.deviceId);
   const [formDeviceName, setFormDeviceName] = useState(settings.deviceName);
@@ -45,9 +77,48 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const [formAdminPin, setFormAdminPin] = useState(settings.adminPin);
   const [formIsMaintenance, setFormIsMaintenance] = useState(settings.isMaintenanceMode);
 
+  const [formMenuOverrides, setFormMenuOverrides] = useState<KioskMenuVisibilityMap>(settings.menuOverrides || {});
+  const [formAuthMethods, setFormAuthMethods] = useState<KioskAuthMethodsConfig>({
+    ...DEFAULT_AUTH_METHODS,
+    ...(settings.authMethods || {}),
+  });
+  const [formDefaultAuthMode, setFormDefaultAuthMode] = useState<KioskAuthModeKey>(
+    settings.defaultAuthMode || 'SMART_TAG'
+  );
+  const [policyGuardMsg, setPolicyGuardMsg] = useState<string | null>(null);
+
   const [isPinging, setIsPinging] = useState(false);
   const [pingStatus, setPingStatus] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const configurableMenus = useMemo(() => {
+    const builtinCanonicalSet = new Set(STANDARD_KIOSK_MENUS.map((m) => m.id));
+    const customMenus = (kioskMenuConfigs || [])
+      .filter((m: any) => m?.menu_id && !builtinCanonicalSet.has(canonicalizeKioskMenuId(m.menu_id)))
+      .map((m: any) => ({
+        id: String(m.menu_id),
+        label: m.menu_name || String(m.menu_id),
+        desc: m.description || '파트너센터 커스텀 메뉴',
+        emoji: '✨',
+      }));
+    return [...STANDARD_KIOSK_MENUS, ...customMenus];
+  }, [kioskMenuConfigs]);
+
+  const getPartnerMenuDefault = (menuId: string): boolean => {
+    const canonical = canonicalizeKioskMenuId(menuId);
+    if (canonical === 'CHECKIN' && checkinPolicy === 'DISABLED') {
+      return false;
+    }
+    if (kioskMenuConfigs && kioskMenuConfigs.length > 0) {
+      const matched = kioskMenuConfigs.find(
+        (m: any) => canonicalizeKioskMenuId(m.menu_id) === canonical || m.menu_id === menuId
+      );
+      if (matched) {
+        return matched.is_active !== false;
+      }
+    }
+    return true;
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -61,6 +132,13 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       setFormDeviceKey(settings.deviceKey);
       setFormAdminPin(settings.adminPin);
       setFormIsMaintenance(settings.isMaintenanceMode);
+      setFormMenuOverrides(settings.menuOverrides || {});
+      setFormAuthMethods({
+        ...DEFAULT_AUTH_METHODS,
+        ...(settings.authMethods || {}),
+      });
+      setFormDefaultAuthMode(settings.defaultAuthMode || 'SMART_TAG');
+      setPolicyGuardMsg(null);
       setPingStatus(null);
       setSaveSuccess(false);
 
@@ -91,6 +169,57 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   }, [isOpen, settings]);
 
   if (!isOpen) return null;
+
+  const handleToggleMenu = (menuId: string) => {
+    setPolicyGuardMsg(null);
+    const partnerDefault = getPartnerMenuDefault(menuId);
+    const currentEnabled = isKioskMenuEnabled(menuId, formMenuOverrides, partnerDefault);
+    const nextEnabled = !currentEnabled;
+
+    if (!nextEnabled) {
+      const enabledCount = configurableMenus.filter((m) =>
+        isKioskMenuEnabled(m.id, formMenuOverrides, getPartnerMenuDefault(m.id))
+      ).length;
+      if (enabledCount <= 1) {
+        setPolicyGuardMsg('최소 1개 이상의 메뉴는 활성화(ON)되어 있어야 합니다.');
+        return;
+      }
+    }
+
+    setFormMenuOverrides((prev) => ({
+      ...prev,
+      [menuId]: nextEnabled,
+    }));
+  };
+
+  const handleResetMenuOverrides = () => {
+    setPolicyGuardMsg(null);
+    setFormMenuOverrides({});
+  };
+
+  const handleToggleAuthMethod = (key: KioskAuthModeKey) => {
+    setPolicyGuardMsg(null);
+    const currentEnabled = formAuthMethods[key] !== false;
+    const nextEnabled = !currentEnabled;
+
+    if (!nextEnabled) {
+      const activeKeys = (['SMART_TAG', 'PHONE_KEYPAD', 'QR_SCAN', 'FACE'] as KioskAuthModeKey[]).filter(
+        (k) => (k === key ? false : formAuthMethods[k] !== false && (k !== 'FACE' || faceTerminalEnabled !== false))
+      );
+      if (activeKeys.length === 0) {
+        setPolicyGuardMsg('최소 1개 이상의 회원인증 방식은 활성화(ON)되어 있어야 합니다.');
+        return;
+      }
+      if (formDefaultAuthMode === key) {
+        setFormDefaultAuthMode(activeKeys[0]);
+      }
+    }
+
+    setFormAuthMethods((prev) => ({
+      ...prev,
+      [key]: nextEnabled,
+    }));
+  };
 
   const handleDeviceSelect = (devId: string) => {
     const matched = terminalList.find((d) => d.device_id === devId);
@@ -141,6 +270,9 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       deviceKey: formDeviceKey.trim(),
       adminPin: formAdminPin.trim() || '0000',
       isMaintenanceMode: formIsMaintenance,
+      menuOverrides: formMenuOverrides,
+      authMethods: formAuthMethods,
+      defaultAuthMode: formDefaultAuthMode,
     };
 
     try {
@@ -182,7 +314,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
     >
       <div
         style={{
-          width: '560px',
+          width: '660px',
           maxWidth: '94vw',
           background: 'linear-gradient(145deg, #1e222d 0%, #12151c 100%)',
           borderRadius: '32px',
@@ -227,7 +359,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 무인 키오스크 시스템 설정
               </h2>
               <p style={{ fontSize: '12px', color: '#9ca3af', margin: '2px 0 0 0' }}>
-                단말기(TID) 및 무인 운영 정책을 설정합니다.
+                단말기(TID), 기기별 노출 메뉴 및 회원인증 방식을 설정합니다.
               </p>
             </div>
           </div>
@@ -260,6 +392,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
         >
           {[
             { key: 'device', label: '기기 식별 & 단말기', icon: <Monitor size={15} /> },
+            { key: 'menus', label: '메뉴 & 인증 설정', icon: <LayoutGrid size={15} /> },
             { key: 'connection', label: '서버 / 연결 설정', icon: <Wifi size={15} /> },
             { key: 'maintenance', label: '운영 모드 & PIN', icon: <Shield size={15} /> },
           ].map((tab) => (
@@ -291,7 +424,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
         </div>
 
         {/* Tab Body */}
-        <div style={{ padding: '28px', minHeight: '320px', boxSizing: 'border-box' }}>
+        <div style={{ padding: '24px 28px', minHeight: '320px', maxHeight: '68vh', overflowY: 'auto', boxSizing: 'border-box' }}>
           {/* Tab 1: Device */}
           {activeTab === 'device' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -432,6 +565,234 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                     {pingStatus}
                   </p>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Tab 1.5: Menus & Auth Methods */}
+          {activeTab === 'menus' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {policyGuardMsg && (
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    background: 'rgba(245, 158, 11, 0.14)',
+                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                    borderRadius: '12px',
+                    color: '#fbbf24',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <AlertTriangle size={16} />
+                  <span>{policyGuardMsg}</span>
+                </div>
+              )}
+
+              {/* Section 1: Kiosk Menu On/Off */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <div>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', margin: 0 }}>
+                      메인 화면 메뉴 노출 제어 (기기별 개별 설정)
+                    </h4>
+                    <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0 0' }}>
+                      파트너센터 설정과 무관하게 현재 키오스크에서 특정 메뉴만 개별 ON/OFF 할 수 있습니다.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetMenuOverrides}
+                    disabled={Object.keys(formMenuOverrides).length === 0}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '10px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      background: Object.keys(formMenuOverrides).length > 0 ? 'rgba(52, 211, 153, 0.12)' : 'rgba(255, 255, 255, 0.04)',
+                      border: Object.keys(formMenuOverrides).length > 0 ? '1px solid rgba(52, 211, 153, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
+                      color: Object.keys(formMenuOverrides).length > 0 ? '#34d399' : '#6b7280',
+                      cursor: Object.keys(formMenuOverrides).length > 0 ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    <RotateCcw size={12} />
+                    파트너센터 기본값 복원
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  {configurableMenus.map((menu) => {
+                    const partnerDefault = getPartnerMenuDefault(menu.id);
+                    const isOverridden = Object.prototype.hasOwnProperty.call(formMenuOverrides, menu.id);
+                    const isEnabled = isKioskMenuEnabled(menu.id, formMenuOverrides, partnerDefault);
+
+                    return (
+                      <div
+                        key={menu.id}
+                        onClick={() => handleToggleMenu(menu.id)}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '12px',
+                          background: isEnabled ? 'rgba(16, 185, 129, 0.09)' : 'rgba(255, 255, 255, 0.03)',
+                          border: isEnabled ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                          cursor: 'pointer',
+                          opacity: isEnabled ? 1 : 0.65,
+                        }}
+                      >
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '14px' }}>{menu.emoji}</span>
+                            <span style={{ fontSize: '13px', fontWeight: 800, color: isEnabled ? '#ffffff' : '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {menu.label}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                padding: '1px 6px',
+                                borderRadius: '6px',
+                                background: isOverridden ? 'rgba(245, 158, 11, 0.18)' : 'rgba(255, 255, 255, 0.07)',
+                                color: isOverridden ? '#fbbf24' : '#9ca3af',
+                              }}
+                            >
+                              {isOverridden ? '기기 개별설정' : `파트너센터(${partnerDefault ? 'ON' : 'OFF'})`}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '999px',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            background: isEnabled ? '#10b981' : '#374151',
+                            color: isEnabled ? '#051b14' : '#9ca3af',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {isEnabled ? 'ON' : 'OFF'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section 2: Member Auth Methods On/Off & Default Tab */}
+              <div style={{ paddingTop: '14px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <div style={{ marginBottom: '10px' }}>
+                  <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', margin: 0 }}>
+                    회원인증 수단 ON/OFF 및 기본 시작 탭
+                  </h4>
+                  <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0 0' }}>
+                    이 키오스크에 장착된 하드웨어(카메라, QR리더기, NFC)에 맞춰 인증 탭을 켜거나 끄고 첫 화면 기본 탭을 지정합니다.
+                  </p>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  {AUTH_METHOD_ITEMS.map((item) => {
+                    const isServerDisabledFace = item.key === 'FACE' && faceTerminalEnabled === false;
+                    const isEnabled = formAuthMethods[item.key] !== false && !isServerDisabledFace;
+                    const isDefault = formDefaultAuthMode === item.key && isEnabled;
+
+                    return (
+                      <div
+                        key={item.key}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '12px',
+                          background: isEnabled ? 'rgba(59, 130, 246, 0.09)' : 'rgba(255, 255, 255, 0.03)',
+                          border: isDefault
+                            ? '1.5px solid #34d399'
+                            : isEnabled
+                            ? '1px solid rgba(59, 130, 246, 0.35)'
+                            : '1px solid rgba(255, 255, 255, 0.08)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                          opacity: isEnabled ? 1 : 0.65,
+                        }}
+                      >
+                        <div
+                          onClick={() => !isServerDisabledFace && handleToggleAuthMethod(item.key)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '8px',
+                            cursor: isServerDisabledFace ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontSize: '14px' }}>{item.emoji}</span>
+                              <span style={{ fontSize: '12.5px', fontWeight: 800, color: isEnabled ? '#ffffff' : '#9ca3af' }}>
+                                {item.label}
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '10.5px', color: '#9ca3af', margin: '3px 0 0 0' }}>
+                              {isServerDisabledFace ? '매장 정책상 안면인식 비활성화됨' : item.desc}
+                            </p>
+                          </div>
+
+                          <div
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: '999px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              background: isEnabled ? '#3b82f6' : '#374151',
+                              color: '#ffffff',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {isEnabled ? 'ON' : 'OFF'}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                          <button
+                            type="button"
+                            disabled={!isEnabled}
+                            onClick={() => isEnabled && setFormDefaultAuthMode(item.key)}
+                            style={{
+                              width: '100%',
+                              padding: '4px 8px',
+                              borderRadius: '8px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '4px',
+                              background: isDefault ? 'rgba(52, 211, 153, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                              border: isDefault ? '1px solid rgba(52, 211, 153, 0.5)' : '1px solid transparent',
+                              color: isDefault ? '#34d399' : isEnabled ? '#d1d5db' : '#6b7280',
+                              cursor: isEnabled ? 'pointer' : 'not-allowed',
+                            }}
+                          >
+                            <Star size={11} fill={isDefault ? '#34d399' : 'none'} />
+                            {isDefault ? '현재 기본 시작 탭' : '기본 시작 탭으로 지정'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}

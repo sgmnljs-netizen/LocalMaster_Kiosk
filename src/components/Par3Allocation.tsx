@@ -5,13 +5,16 @@ import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
 import { MemberAuth } from './MemberAuth';
 import { TimeMaster } from '../utils/timeMaster';
 import { kioskVanClient } from '../services/van/van_client';
+import { useKioskSettings } from '../stores/kioskSettings';
 
 interface Par3AllocationProps {
   memberNo?: string;
   memberName?: string;
   faceTerminalEnabled?: boolean;
   selectedZoneIds?: (string | number)[];
-  onBookingSelected: (prod: Product) => void;
+  lang?: 'KO' | 'EN';
+  onVanBusyChange?: (busy: boolean) => void;
+  onBookingSelected?: (prod: Product) => void;
   onCancel: () => void;
 }
 
@@ -24,8 +27,10 @@ interface PlayerSlot {
   guest_nm: string;
   hp_no: string;
   is_member: boolean;
+  discount_rate?: number;
   use_ticket_id?: string;
   use_ticket_name?: string;
+  ticket_allowed_categories?: string[];
 }
 
 export const Par3Allocation: React.FC<Par3AllocationProps> = ({
@@ -33,9 +38,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   memberName,
   faceTerminalEnabled = true,
   selectedZoneIds = [],
-  onBookingSelected,
+  lang = 'KO',
+  onVanBusyChange,
   onCancel
 }) => {
+  const { settings } = useKioskSettings();
   const [zones, setZones] = useState<KioskZone[]>([]);
   const [course, setCourse] = useState<string>(''); // zone_code 매핑
   const [slots, setSlots] = useState<Par3Slot[]>([]);
@@ -62,11 +69,27 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  // 동기식 중복 터치(Double-Tap) 방어 Ref
+  const isSubmittingRef = useRef(false);
+  const isPhoneSubmittingRef = useRef(false);
+
   // 스크롤 컨테이너 참조용 Ref
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // 0. 활성화된 구역(Zone) 목록 및 상품, 상점 정보 로드
   const [categoryUuid, setCategoryUuid] = useState<string>(''); // 실제 백엔드 카테고리 UUID 저장
+
+  // [BUG-P3-04] 자체 VAN 카드 결제 진행 중 KioskApp 전역 Idle Timer 동작 차단
+  useEffect(() => {
+    const isBusy =
+      paymentState === 'INSERT_WAIT' ||
+      paymentState === 'READING' ||
+      paymentState === 'DISPATCHING';
+    onVanBusyChange?.(isBusy);
+    return () => {
+      onVanBusyChange?.(false);
+    };
+  }, [paymentState, onVanBusyChange]);
 
   useEffect(() => {
     const initData = async () => {
@@ -115,11 +138,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   }, [selectedZoneIds]);
 
   const getTodayStr = () => {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}${mm}${dd}`;
+    return TimeMaster.getKstYmd(TimeMaster.getSyncedDate()).replace(/-/g, '');
   };
 
   // 1. 슬롯 데이터 불러오기
@@ -138,6 +157,35 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   useEffect(() => {
     fetchSlots();
   }, [fetchSlots]);
+
+  // [BUG-P3-06] 코스(course) 전환 시 특정 코스 전용 이용권이 새 코스와 호환되지 않으면 자동 해제
+  useEffect(() => {
+    if (!course) return;
+    const curZoneUpper = course.toUpperCase();
+    setPlayers(prev =>
+      prev.map(p => {
+        if (!p.use_ticket_id || !p.ticket_allowed_categories || p.ticket_allowed_categories.length === 0) {
+          return p;
+        }
+        const allowedUpper = p.ticket_allowed_categories.map(c => String(c).toUpperCase());
+        const isCompatible =
+          allowedUpper.includes('PAR3') ||
+          allowedUpper.includes('ALL') ||
+          allowedUpper.includes('FACILITY') ||
+          allowedUpper.includes('GOLF_PAR3') ||
+          allowedUpper.includes(curZoneUpper);
+        if (!isCompatible) {
+          return {
+            ...p,
+            use_ticket_id: undefined,
+            use_ticket_name: undefined,
+            ticket_allowed_categories: undefined,
+          };
+        }
+        return p;
+      })
+    );
+  }, [course]);
 
   // 2. 예약 가능 최초 슬롯으로 자동 스크롤 포커싱
   useEffect(() => {
@@ -173,9 +221,26 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       }
     });
 
+    const curZoneUpper = (course || 'PAR3').toUpperCase();
+
     return (m?.assets || []).filter((a) => {
       if (a.is_assignable === false) return false;
       if (typeof a.remain_days === 'number' && a.remain_days < 0) return false;
+
+      // [BUG-P3-02] 파3 이용 가능 카테고리 필터링 (일반 타석 전용 BAY 이용권 오노출 차단)
+      if (Array.isArray(a.allowed_categories) && a.allowed_categories.length > 0) {
+        const allowedUpper = a.allowed_categories.map(c => String(c).toUpperCase());
+        const itemNmUpper = (a.item_name || '').toUpperCase();
+        const isNamePar3 = itemNmUpper.includes('PAR3') || itemNmUpper.includes('파3');
+        const isAllowedForPar3 =
+          allowedUpper.includes('PAR3') ||
+          allowedUpper.includes('ALL') ||
+          allowedUpper.includes('FACILITY') ||
+          allowedUpper.includes('GOLF_PAR3') ||
+          allowedUpper.includes(curZoneUpper) ||
+          isNamePar3;
+        if (!isAllowedForPar3) return false;
+      }
 
       const logicType = (a.logic_type || a.pass_type || '').toUpperCase();
       const alreadyUsed = usedCounts.get(a.member_item_id) || 0;
@@ -190,27 +255,29 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       }
       return rawRem - alreadyUsed > 0;
     });
-  }, [players]);
+  }, [players, course]);
 
   // 3. 대표자 마운트 세팅
   useEffect(() => {
+    let cancelled = false;
     const setupLeader = async () => {
       // 로그인 회원인 경우 대표자로 즉시 자동 추가
       if (memberNo && memberName) {
         setLoading(true);
         try {
           const detail = await api.getMember(memberNo);
-          setPlayers([
-            {
-              id: 'LEADER',
-              member_no: memberNo,
-              guest_nm: memberName,
-              hp_no: detail?.hp || '',
-              is_member: true,
-              use_ticket_id: undefined,
-              use_ticket_name: undefined
-            }
-          ]);
+          if (cancelled) return;
+          const leaderSlot: PlayerSlot = {
+            id: 'LEADER',
+            member_no: memberNo,
+            guest_nm: memberName,
+            hp_no: detail?.hp || '',
+            is_member: true,
+            discount_rate: detail?.discount_rate || 0,
+            use_ticket_id: undefined,
+            use_ticket_name: undefined
+          };
+          setPlayers(prev => (prev.length === 0 ? [leaderSlot] : [leaderSlot, ...prev.slice(1)]));
           
           // 만약 사용 가능한 이용권이 존재하면, 즉석에서 대표자 이용권 자동 매칭 팝업 작동 유도
           const assignable = getAssignableAssets(detail, true);
@@ -219,18 +286,18 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             setModalState('TICKET_SELECT');
           }
         } catch {
-          // Fallback
-          setPlayers([
-            {
-              id: 'LEADER',
-              member_no: memberNo,
-              guest_nm: memberName,
-              hp_no: '',
-              is_member: true
-            }
-          ]);
+          if (cancelled) return;
+          const fallbackSlot: PlayerSlot = {
+            id: 'LEADER',
+            member_no: memberNo,
+            guest_nm: memberName,
+            hp_no: '',
+            is_member: true,
+            discount_rate: 0
+          };
+          setPlayers(prev => (prev.length === 0 ? [fallbackSlot] : [fallbackSlot, ...prev.slice(1)]));
         } finally {
-          setLoading(false);
+          if (!cancelled) setLoading(false);
         }
       } else {
         // 비회원 대표자 대기
@@ -238,6 +305,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       }
     };
     setupLeader();
+    return () => {
+      cancelled = true;
+    };
   }, [memberNo, memberName]);
 
   // 휴대폰 번호 포맷팅 (010-1234-5678)
@@ -262,6 +332,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
   // 4. 인원 추가 모달 서브밋
   const handlePhoneModalSubmit = async () => {
+    if (isPhoneSubmittingRef.current || loading) return;
     if (modalPhone.length < 10) {
       setModalError('올바른 연락처 번호를 입력해 주세요.');
       return;
@@ -293,11 +364,17 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     } 
     else if (modalState === 'ADD_MEMBER_PHONE') {
       // 4-2. 회원 동반자 추가 (검색)
+      isPhoneSubmittingRef.current = true;
       setLoading(true);
       setModalError('');
       try {
         const member = await api.getMember(formatted);
         if (member) {
+          const memberHpClean = (member.hp || '').replace(/[^0-9]/g, '');
+          if (players.some(p => (memberHpClean && (p.hp_no || '').replace(/[^0-9]/g, '') === memberHpClean) || (p.member_no && p.member_no === member.member_no))) {
+            setModalError('이미 배정 목록에 등록된 회원입니다.');
+            return;
+          }
           // 회원 조회 성공
           const isLeaderSlot = players.length === 0;
           const assignable = getAssignableAssets(member, isLeaderSlot);
@@ -312,18 +389,29 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         } else {
           setModalError('등록된 회원 정보를 찾을 수 없습니다. 번호를 확인해 주세요.');
         }
-      } catch {
-        setModalError('회원 조회 중 서버 통신 에러가 발생했습니다.');
+      } catch (err: any) {
+        if (err?.inactive || err?.status === 403 || err?.duplicate || err?.status === 409) {
+          setModalError(err.message || '동일 번호 중복 또는 이용 제한 회원입니다.');
+        } else {
+          setModalError('회원 조회 중 서버 통신 에러가 발생했습니다.');
+        }
       } finally {
+        isPhoneSubmittingRef.current = false;
         setLoading(false);
       }
     }
   };
 
-  // 4-3. 3종 통합 회원 인증(MemberAuth) 성공 처리 핸들러
+  // 4-3. 3종 통합 회원 인증(MemberAuth) 성공 처리 핸들러 (BUG-M09: 하이픈 유무 무관 숫자 정규화 대조)
   const handleMemberAuthSuccess = useCallback((member: Member) => {
-    const memberHp = member.hp || '';
-    if (players.some(p => (memberHp && p.hp_no === memberHp) || (p.member_no && p.member_no === member.member_no))) {
+    const memberHpClean = (member.hp || '').replace(/[^0-9]/g, '');
+    if (
+      players.some(
+        p =>
+          (memberHpClean && (p.hp_no || '').replace(/[^0-9]/g, '') === memberHpClean) ||
+          (p.member_no && p.member_no === member.member_no)
+      )
+    ) {
       setErrorMsg('이미 배정 목록에 등록된 회원입니다.');
       setModalState('NONE');
       return;
@@ -353,12 +441,14 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       guest_nm: displayName,
       hp_no: formatHp(member.hp),
       is_member: true,
+      discount_rate: member.discount_rate || 0,
       use_ticket_id: ticket?.member_item_id,
-      use_ticket_name: ticket?.item_name
+      use_ticket_name: ticket?.item_name,
+      ticket_allowed_categories: ticket?.allowed_categories
     };
 
     if (isLeader) {
-      setPlayers([newSlot]);
+      setPlayers(prev => (prev.length === 0 ? [newSlot] : [newSlot, ...prev.filter(p => p.id !== 'LEADER' && p.member_no !== member.member_no)]));
     } else {
       setPlayers(prev => [...prev, newSlot]);
     }
@@ -377,53 +467,82 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     setPlayers(prev => prev.filter(p => p.id !== id));
   };
 
-  // 인당 코스 일반 요금 산출
-  const getCoursePriceLabel = () => {
+  // 선택된 코스에 매칭되는 파3 상품 엔티티 조회 (단가, prod_cd, vat_yn, 단말기 라우팅용)
+  const getMatchedCourseProduct = useCallback((): Product | null => {
     const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
-    
-    // 파3 전체 상품 필터링
-    const par3Products = products.filter(p => 
-      p.prod_nm.includes('Par3') || p.prod_nm.includes('파3') || p.prod_nm.includes('PAR3')
+    const par3Products = products.filter(p =>
+      p.prod_nm.includes('Par3') ||
+      p.prod_nm.includes('파3') ||
+      p.prod_nm.includes('PAR3') ||
+      String(p.logic_type || '').toUpperCase() === 'PAR3'
     );
+    if (par3Products.length === 0) return null;
 
-    const getValidPrice = (p: Product) => {
-      const price = (p.sale_price && p.sale_price > 0) ? p.sale_price : (p.standard_price || 0);
-      return price > 0 ? price : 30000;
-    };
-
-    // 1순위: 선택한 코스명/코드가 명시적으로 포함된 상품 검색
-    const matchedCourseProducts = par3Products.filter(p => 
-      p.prod_nm.includes(selectedZoneName) || p.prod_nm.includes(course)
+    const matchedCourseProducts = par3Products.filter(p =>
+      (selectedZoneName && p.prod_nm.includes(selectedZoneName)) ||
+      (course && p.prod_nm.includes(course))
     );
-
     if (matchedCourseProducts.length > 0) {
-      return getValidPrice(matchedCourseProducts[matchedCourseProducts.length - 1]);
+      return matchedCourseProducts[matchedCourseProducts.length - 1];
+    }
+    return par3Products[par3Products.length - 1];
+  }, [zones, course, products]);
+
+  // 인당 코스 일반 기준 요금 산출
+  const getCoursePriceLabel = () => {
+    const matchedProd = getMatchedCourseProduct();
+    if (matchedProd) {
+      const price = (matchedProd.sale_price && matchedProd.sale_price > 0)
+        ? matchedProd.sale_price
+        : (matchedProd.standard_price || 0);
+      if (price > 0) return price;
     }
 
-    // 2순위: 특정 코스명이 없는 일반 파3 등록 상품이 있는 경우
-    if (par3Products.length > 0) {
-      return getValidPrice(par3Products[par3Products.length - 1]);
-    }
-
-    // 3순위: 백엔드 상품 미등록 시 폴백 로직
-    const isComplex = course.toLowerCase().includes('complex') || (selectedSlot?.course_nm || '').includes('복합') || (selectedSlot?.course_nm || '').includes('18');
+    // 백엔드 상품 미등록 시 폴백 로직
+    const isComplex =
+      course.toLowerCase().includes('complex') ||
+      (selectedSlot?.course_nm || '').includes('복합') ||
+      (selectedSlot?.course_nm || '').includes('18');
     return isComplex ? 45000 : 30000;
   };
 
-  // 최종 결제 금액 연산 (이용권 사용자는 요금 ₩0)
+  // [BUG-P3-03] 개별 플레이어 결제 요금 계산 (이용권 사용 시 0원, 인증 회원 일반 결제 시 등급 할인 반영)
+  const calculatePlayerPrice = (p: PlayerSlot, baseUnitPrice: number): number => {
+    if (p.use_ticket_id) return 0;
+    if (p.is_member && p.discount_rate && p.discount_rate > 0) {
+      const rawRate = Number(p.discount_rate);
+      const ratePct = rawRate > 0 && rawRate < 1 ? rawRate * 100 : rawRate;
+      const clampedPct = Math.min(100, Math.max(0, ratePct));
+      const discAmt = Math.floor((baseUnitPrice * clampedPct) / 100);
+      return Math.max(0, baseUnitPrice - discAmt);
+    }
+    return baseUnitPrice;
+  };
+
+  // 최종 결제 금액 연산 (이용권 사용자는 요금 ₩0, 회원 등급 할인 반영)
   const calculateTotalAmount = () => {
     const unitPrice = getCoursePriceLabel();
     let sum = 0;
     players.forEach(p => {
-      if (!p.use_ticket_id) {
-        sum += unitPrice;
-      }
+      sum += calculatePlayerPrice(p, unitPrice);
     });
     return sum;
   };
 
+  const calculateTotalGradeDiscount = () => {
+    const unitPrice = getCoursePriceLabel();
+    let discSum = 0;
+    players.forEach(p => {
+      if (!p.use_ticket_id) {
+        discSum += Math.max(0, unitPrice - calculatePlayerPrice(p, unitPrice));
+      }
+    });
+    return discSum;
+  };
+
   // 파3 예약 최종 확정 및 결제창 전환
   const handleConfirmBooking = async () => {
+    if (isSubmittingRef.current || loading) return;
     if (!selectedSlot) {
       setErrorMsg('원하시는 티오프 시간대를 선택해 주세요.');
       return;
@@ -433,10 +552,12 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       return;
     }
 
+    isSubmittingRef.current = true;
     setLoading(true);
     setErrorMsg('');
 
     const totalAmount = calculateTotalAmount();
+    const matchedProd = getMatchedCourseProduct();
 
     // 백엔드 preoccupy 페이로드 포맷 빌드
     const leaderSlot = players[0];
@@ -466,13 +587,15 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         selectedSlot.time,
         totalAmount,
         leaderPayload,
-        companionsPayload
+        companionsPayload,
+        matchedProd?.prod_cd
       );
 
       if (res.success && res.res_id) {
         currentHoldResIdRef.current = res.res_id;
-        // 예약 선점 성공 -> 실물 VAN 단말기 승인 파이프라인 진입
-        runRealCardPayment(res.res_id, totalAmount);
+        // 예약 선점 성공 -> 서버가 확정 산출한 pay_amt(res.price)가 있으면 최우선 사용하여 실물 VAN 단말기 승인 진입
+        const serverValidatedAmt = typeof (res as any).price === 'number' && (res as any).price >= 0 ? (res as any).price : totalAmount;
+        await runRealCardPayment(res.res_id, serverValidatedAmt);
       } else {
         setErrorMsg(res.message);
         setLoading(false);
@@ -480,18 +603,28 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     } catch {
       setErrorMsg('예약 처리 중 오류가 발생했습니다.');
       setLoading(false);
+    } finally {
+      isSubmittingRef.current = false;
     }
   };
 
   // 3단계 실물 VAN 카드 결제 승인 연동
   const runRealCardPayment = async (resId: string, amount: number) => {
+    const matchedProd = getMatchedCourseProduct();
+    const prodCd = matchedProd?.prod_cd;
+    const isTaxFree = matchedProd?.vat_yn === 'N';
+    const vat = isTaxFree ? 0 : Math.round(amount / 11);
+
     // 만약 전원 이용권 사용 등으로 최종 결제금액이 ₩0 이라면 카드 리더기 연출 생략하고 즉시 승인!
     if (amount === 0) {
       setPaymentState('DISPATCHING');
       setAuthProgress(50);
       setTimeout(async () => {
         setAuthProgress(100);
-        await executeConfirmWebhook(resId, 0, 'MEMBERSHIP_TICKET');
+        await executeConfirmWebhook(resId, 0, 'MEMBERSHIP_TICKET', undefined, {
+          prodCd,
+          gradeDiscountAmount: calculateTotalGradeDiscount(),
+        });
       }, 500);
       return;
     }
@@ -500,8 +633,34 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     setAuthProgress(20);
 
     try {
+      // [BUG-P3-03] 사업장/서브가맹점 단말기 라우팅(resolveTerminalRoute) 검증 연동
+      let routedTerminalId: string | undefined = undefined;
+      if (typeof (api as any).resolveTerminalRoute === 'function') {
+        const routeRes = await api.resolveTerminalRoute(
+          prodCd || `PAR3_${course || 'COURSE'}`,
+          matchedProd?.business_unit_type,
+          matchedProd?.business_merchant_id || undefined,
+          matchedProd?.pro_id ? String(matchedProd.pro_id) : undefined
+        );
+        if (routeRes && routeRes.success === false) {
+          await api.cancelHoldReservation(resId).catch(() => {});
+          currentHoldResIdRef.current = null;
+          fetchSlots();
+          setErrorMsg(routeRes.message || '결제 단말기 가맹점 라우팅 설정 오류로 결제를 진행할 수 없습니다.');
+          resetPaymentState();
+          return;
+        }
+        routedTerminalId = routeRes?.terminal_id || undefined;
+      }
+
       const approval = await kioskVanClient.requestCardPayment(
-        { amount, timeoutSeconds: 30 },
+        {
+          amount,
+          vat,
+          isTaxFree,
+          terminalId: routedTerminalId,
+          timeoutSeconds: 30,
+        } as any,
         (vanState) => {
           if (vanState === 'READY' || vanState === 'WAITING_CARD') {
             setPaymentState('INSERT_WAIT');
@@ -526,7 +685,17 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       }
 
       setAuthProgress(100);
-      await executeConfirmWebhook(resId, amount, approval.auth_code, approval.card_no_masked, approval);
+      await executeConfirmWebhook(
+        resId,
+        amount,
+        approval.auth_code,
+        approval.card_no_masked,
+        {
+          ...approval,
+          prodCd,
+          gradeDiscountAmount: calculateTotalGradeDiscount(),
+        }
+      );
     } catch (err: unknown) {
       await api.cancelHoldReservation(resId).catch(() => {});
       currentHoldResIdRef.current = null;
@@ -543,20 +712,34 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       amount <= 0 ||
       !authCodeStr ||
       authCodeStr.startsWith('FREE-') ||
+      authCodeStr.startsWith('POINT-') ||
       authCodeStr.startsWith('MEMBERSHIP') ||
       (vanResult?.amount !== undefined && vanResult.amount <= 0)
     ) {
       return;
     }
-    const orgApprovedDate = (vanResult.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) || new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const matchedProd = getMatchedCourseProduct();
+    const isTaxFree = matchedProd?.vat_yn === 'N';
+    const orgApprovedDate = (vanResult.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) || TimeMaster.getKstYmd(TimeMaster.getSyncedDate()).replace(/-/g, '');
+    const cancelAmt = vanResult.amount || amount;
+    const cancelVat = isTaxFree ? 0 : Math.round(cancelAmt / 11);
+    const cancelInstallment = vanResult.installment_months || 0;
+    const resolvedProdCd = vanResult?.prodCd || matchedProd?.prod_cd || `PAR3_${course || 'COURSE'}`;
     try {
       const cancelRes = await kioskVanClient.cancelCardPayment({
-        amount: vanResult.amount || amount,
+        amount: cancelAmt,
+        vat: cancelVat,
+        installmentMonths: cancelInstallment,
         orgAuthCode: vanResult.auth_code,
         orgApprovedDate,
         terminalId: vanResult.terminal_id,
         vanTrNo: vanResult.van_tr_no,
-        ...({ orgAuthNo: vanResult.auth_code, orgAuthDate: orgApprovedDate, orgVanTrNo: vanResult.van_tr_no } as any)
+        ...({
+          orgAuthNo: vanResult.auth_code,
+          orgAuthDate: orgApprovedDate,
+          orgVanTrNo: vanResult.van_tr_no,
+          vatAmount: cancelVat,
+        } as any)
       });
       if (!cancelRes || !cancelRes.success) {
         const backendReason = reason || 'Par3 webhook failed';
@@ -564,8 +747,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         await api.reportGhostCharge({
           store_cd: STORE_CODE,
           member_no: players[0]?.member_no || memberNo,
-          prod_cd: `PAR3_${course || 'COURSE'}`,
-          amount: vanResult.amount || amount,
+          prod_cd: resolvedProdCd,
+          amount: cancelAmt,
           auth_code: vanResult.auth_code,
           card_no_masked: vanResult.card_no_masked || '',
           issuer_name: vanResult.issuer_name || '',
@@ -583,8 +766,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       await api.reportGhostCharge({
         store_cd: STORE_CODE,
         member_no: players[0]?.member_no || memberNo,
-        prod_cd: `PAR3_${course || 'COURSE'}`,
-        amount: vanResult.amount || amount,
+        prod_cd: resolvedProdCd,
+        amount: cancelAmt,
         auth_code: vanResult.auth_code,
         card_no_masked: vanResult.card_no_masked || '',
         issuer_name: vanResult.issuer_name || '',
@@ -607,8 +790,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     usedPoints: number = 0
   ) => {
     try {
+      const matchedProd = getMatchedCourseProduct();
       const webhookOptions = {
         ...(vanResult || {}),
+        prodCd: vanResult?.prodCd || matchedProd?.prod_cd,
+        gradeDiscountAmount: vanResult?.gradeDiscountAmount ?? calculateTotalGradeDiscount(),
         usedPoints: vanResult?.usedPoints ?? usedPoints ?? 0,
       };
       const confirmRes = await api.confirmKioskPaymentWebhook(
@@ -622,14 +808,14 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       if (isSuccess) {
         currentHoldResIdRef.current = null;
         const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
-        const formattedDate = TimeMaster.formatKstDateTime(new Date());
+        const formattedDate = TimeMaster.formatKstDateTime(TimeMaster.getSyncedDate());
         const validApprNo = authNo || (amount === 0 ? 'MEMBERSHIP_TICKET' : `APPR_${Math.floor(10000000 + Math.random() * 90000000)}`);
 
-        // 영수증 DTO 주입 (api.getStoreInfo 동적 데이터 사용)
+        // [BUG-P3-06] 영수증 DTO 주입 (하드코딩 주소/전화번호 제거, api.getStoreInfo 동적 데이터 사용)
         setCreatedReceipt({
-          branchNm: storeInfo?.store_nm || 'SGM Golf Academy',
-          address: storeInfo?.address || '서울특별시 광진구 워커힐로 177',
-          tel: storeInfo?.tel || '02-450-4500',
+          branchNm: storeInfo?.store_nm || 'GOLFOS',
+          address: storeInfo?.address || '',
+          tel: storeInfo?.tel || '',
           tradeDate: formattedDate,
           apprNo: validApprNo,
           cardNo: cardMasked,
@@ -664,14 +850,26 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     setLoading(false);
   };
 
-  // 모의 결제 실패 강제 트리거 (QA용)
+  // 모의 결제 실패 강제 트리거 (QA용) 및 단말기 요청 즉시 중단
   const handleSimulateFail = (reason: string) => {
+    kioskVanClient.cancelCurrentRequest();
     if (currentHoldResIdRef.current) {
       api.cancelHoldReservation(currentHoldResIdRef.current).catch(() => {});
       currentHoldResIdRef.current = null;
       fetchSlots();
     }
     setErrorMsg(`[결제 실패 모의]: ${reason}`);
+    resetPaymentState();
+  };
+
+  // 고객 직접 결제 대기 취소 (INSERT_WAIT 단계)
+  const handleCancelInsertWait = () => {
+    kioskVanClient.cancelCurrentRequest();
+    if (currentHoldResIdRef.current) {
+      api.cancelHoldReservation(currentHoldResIdRef.current).catch(() => {});
+      currentHoldResIdRef.current = null;
+      fetchSlots();
+    }
     resetPaymentState();
   };
 
@@ -794,11 +992,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             }}
           >
             {(() => {
-              const now = new Date();
-              const curHourMin = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+              const kstNow = TimeMaster.getSyncedDate();
+              const curHourMin = `${String(kstNow.getHours()).padStart(2, '0')}${String(kstNow.getMinutes()).padStart(2, '0')}`;
               
-              // 준비시간 Cutoff (10분 이내) 계산 (프론트 2중 방어)
-              const cutoffNow = new Date(now.getTime() + 10 * 60 * 1000);
+              // 준비시간 Cutoff (10분 이내) 계산 (프론트 2중 방어 - KST 서버 동기화 시각 기준)
+              const cutoffNow = new Date(TimeMaster.getSyncedNowMs() + 10 * 60 * 1000);
               const cutoffHourMin = `${String(cutoffNow.getHours()).padStart(2, '0')}${String(cutoffNow.getMinutes()).padStart(2, '0')}`;
 
               // 현재시각 이전 과거 시각만 필터링하고, 준비시간(10분 이내) 슬롯은 목록에 표시하되 마감 처리
@@ -979,6 +1177,15 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                           </span>
                         </div>
                       )}
+
+                      {/* 회원 등급 할인 배지 */}
+                      {!p.use_ticket_id && p.is_member && (p.discount_rate || 0) > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#1d523e', marginTop: '2px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 800 }}>
+                            👑 회원 등급 {p.discount_rate! < 1 ? Math.round(p.discount_rate! * 100) : p.discount_rate}% 할인 적용 (₩{calculatePlayerPrice(p, getCoursePriceLabel()).toLocaleString()})
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* 대표자 및 동반자 개별 삭제 허용 (오입력 수정 지원) */}
@@ -1126,7 +1333,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-            <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>총 결제 금액</span>
+            <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>
+              총 결제 금액{calculateTotalGradeDiscount() > 0 ? ` (회원할인 -₩${calculateTotalGradeDiscount().toLocaleString()})` : ''}
+            </span>
             <span style={{ 
               fontSize: '32px', 
               fontWeight: 900, 
@@ -1497,21 +1706,23 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               position: 'relative'
             }}
           >
-            {/* 가상 QA 에러 모의 버튼 (우측 상단 콤팩트 배치) */}
-            <div style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '8px' }}>
-              <button
-                onClick={() => handleSimulateFail('한도초과 에러')}
-                style={{ fontSize: '11px', background: '#ffebeb', border: '1px solid #ffb3b3', color: '#d12424', padding: '4px 8px', borderRadius: '6px', cursor: 'pointer' }}
-              >
-                한도초과 모의
-              </button>
-              <button
-                onClick={() => handleSimulateFail('칩 인식 실패')}
-                style={{ fontSize: '11px', background: '#f5f5f7', border: '1px solid #d2d2d7', color: '#1d1d1f', padding: '4px 8px', borderRadius: '6px', cursor: 'pointer' }}
-              >
-                리더기 에러 모의
-              </button>
-            </div>
+            {/* 가상 QA 에러 모의 버튼 (모의 결제 모드 전용 노출) */}
+            {(settings.providerType === 'MOCK_VAN' || import.meta.env.VITE_DEMO_MODE === 'true' || import.meta.env.DEV) && (
+              <div style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => handleSimulateFail('한도초과 에러')}
+                  style={{ fontSize: '11px', background: '#ffebeb', border: '1px solid #ffb3b3', color: '#d12424', padding: '4px 8px', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  한도초과 모의
+                </button>
+                <button
+                  onClick={() => handleSimulateFail('칩 인식 실패')}
+                  style={{ fontSize: '11px', background: '#f5f5f7', border: '1px solid #d2d2d7', color: '#1d1d1f', padding: '4px 8px', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  리더기 에러 모의
+                </button>
+              </div>
+            )}
 
             {/* 메인 아이콘 */}
             <div style={{
@@ -1560,6 +1771,25 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             <div style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>
               결제 요청 금액 : <span style={{ color: '#2e7559', fontWeight: 800 }}>₩{calculateTotalAmount().toLocaleString()}</span>
             </div>
+
+            {paymentState === 'INSERT_WAIT' && (
+              <button
+                onClick={handleCancelInsertWait}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  borderRadius: '12px',
+                  border: '1.5px solid #d2d2d7',
+                  background: '#f5f5f7',
+                  color: '#4b5563',
+                  fontSize: '15px',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                결제 취소
+              </button>
+            )}
           </div>
         </div>
       )}

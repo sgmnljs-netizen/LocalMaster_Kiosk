@@ -109,11 +109,21 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
   const captureCountdownRef = useRef<any>(null);
 
   const isFetchingRef = useRef<boolean>(false);
+  const isSubmittingRef = useRef<boolean>(false);
   const isFaceEnrollStepRef = useRef<boolean>(isFaceEnrollStep);
 
   useEffect(() => {
     isFaceEnrollStepRef.current = isFaceEnrollStep;
   }, [isFaceEnrollStep]);
+
+  // 🛡️ 안면 캡처(25초) 또는 가입 통신 중 키오스크 전역 60초 비활동 타이머 리셋 방어 (BUG-M10)
+  useEffect(() => {
+    if (!faceCapturing && !loading && !isFaceEnrollStep) return;
+    const keepAlive = setInterval(() => {
+      window.dispatchEvent(new Event('keydown'));
+    }, 10000);
+    return () => clearInterval(keepAlive);
+  }, [faceCapturing, loading, isFaceEnrollStep]);
 
   // 안면 등록 캡처 수행 (Front POS 표준: 자동 캡처 모드 및 실시간 감지 연동)
   const triggerFaceCapture = useCallback(async () => {
@@ -155,7 +165,11 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
         // Timeout 또는 실패 시
         if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
         setFaceCapturing(false);
-        setErrorMsg('단말기 정면에 안면이 감지되지 않았습니다. 카메라를 정면으로 바라보신 후 다시 시도해 주세요.');
+        setErrorMsg(
+          lang === 'EN'
+            ? 'Face not detected. Please look directly at the camera and try again.'
+            : '단말기 정면에 안면이 감지되지 않았습니다. 카메라를 정면으로 바라보신 후 다시 시도해 주세요.'
+        );
         api.cancelFaceCaptureMode().catch(console.warn);
       }
     } catch (err: any) {
@@ -163,12 +177,16 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
       if (!isFaceEnrollStepRef.current) return;
       if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
       setFaceCapturing(false);
-      setErrorMsg('단말기 안면 캡처 통신 예외가 발생했습니다.');
+      setErrorMsg(
+        lang === 'EN'
+          ? 'Face camera communication error occurred.'
+          : '단말기 안면 캡처 통신 예외가 발생했습니다.'
+      );
       api.cancelFaceCaptureMode().catch(console.warn);
     } finally {
       isFetchingRef.current = false;
     }
-  }, [faceCaptured]);
+  }, [faceCaptured, lang]);
 
   // 🛡️ 2단계 진입 시 수동 클릭 없이 자동 스캔 진입 & 모달 이탈 시 단말기 모드 안전 원복
   useEffect(() => {
@@ -200,63 +218,39 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
     setHp(prev => prev.slice(0, -1));
   };
 
-  // 회원가입 1차 입력 제출 (안면 등록 단계로 진입)
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('');
-    setActiveField(null);
-
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      setErrorMsg('이름을 입력해 주세요.');
-      return;
-    }
-    if (trimmedName.length > 50) {
-      setErrorMsg('이름은 50자 이내로 입력해 주세요.');
-      return;
-    }
-    const cleanHp = hp.replace(/[^0-9]/g, '');
-    if (!/^01[016789]\d{7,8}$/.test(cleanHp)) {
-      setErrorMsg('올바른 휴대폰 번호(010 등 10~11자리)를 입력해 주세요.');
-      return;
-    }
-
-    if (!privacyAgree) {
-      setErrorMsg('필수 개인정보 수집 및 키오스크 이용약관에 동의해 주세요.');
-      return;
-    }
-
-    // 안면인식 사용 여부에 따라 분기
-    if (faceTerminalEnabled) {
-      setIsFaceEnrollStep(true);
-    } else {
-      // 안면인식 미사용 시 2단계를 건너뛰고 바로 가입 완료 처리
-      handleFinalRegister(false);
-    }
-  };
-
   // 최종 회원 가입 완료 (useCallback)
   const handleFinalRegister = useCallback(async (faceReg: boolean) => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     setLoading(true);
     setErrorMsg('');
     try {
+      const cleanName = name.trim();
       const formattedHp = formatPhoneNumber(hp);
       const faceVectorId = faceReg ? `FACE_${hp.replace(/[^0-9]/g, '')}` : null;
       
-      const res = await api.registerMember(name, formattedHp, '', faceReg, faceVectorId, gender, marketingAgree);
+      const res = await api.registerMember(cleanName, formattedHp, '', faceReg, faceVectorId, gender, marketingAgree);
       if (res.success && res.member) {
         if (faceReg) {
           // 프런트포스 표준: 실물 안면 단말기 푸시 동기화 등록 (실제 카메라 캡처 이미지 전달)
-          const enrollResult = await api.enrollMemberFace(res.member.member_no, name, faceImageBase64 || undefined).catch((err) => ({
+          const enrollResult = await api.enrollMemberFace(res.member.member_no, cleanName, faceImageBase64 || undefined).catch((err) => ({
             success: false,
             message: err?.message || '안면 단말기 동기화 통신 오류',
           }));
-          if (!enrollResult?.success) {
+          if (enrollResult?.success) {
+            res.member.face_registered = true;
+            res.member.face_vector_id = faceVectorId;
+          } else {
             console.warn('[Kiosk] 안면 단말기 동기화 실패 (가입은 정상 완료):', enrollResult?.message);
             res.member.face_registered = false;
             res.member.face_vector_id = null;
             (res.member as any).face_enroll_warning = enrollResult?.message || '안면 단말기 동기화에 실패했습니다. 데스크에서 안면 재등록이 필요합니다.';
-            setErrorMsg('회원 가입은 완료되었으나 안면 단말기 등록에 실패했습니다. 안내 데스크에서 안면 재등록을 진행해 주세요.');
+            setErrorMsg(
+              lang === 'EN'
+                ? 'Registration completed, but face terminal sync failed. Please re-register your face at the front desk.'
+                : '회원 가입은 완료되었으나 안면 단말기 등록에 실패했습니다. 안내 데스크에서 안면 재등록을 진행해 주세요.'
+            );
+            await new Promise(resolve => setTimeout(resolve, 1500));
           }
         }
         onRegisterSuccess(res.member);
@@ -265,15 +259,112 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
         setIsFaceEnrollStep(false);
       }
     } catch {
-      setErrorMsg('회원가입 요청 처리 중 서버 통신 에러가 발생했습니다.');
+      setErrorMsg(
+        lang === 'EN'
+          ? 'Server communication error occurred during registration.'
+          : '회원가입 요청 처리 중 서버 통신 에러가 발생했습니다.'
+      );
       setIsFaceEnrollStep(false);
     } finally {
+      isSubmittingRef.current = false;
       setLoading(false);
     }
-  }, [name, hp, gender, marketingAgree, faceImageBase64, onRegisterSuccess]);
+  }, [name, hp, gender, marketingAgree, faceImageBase64, onRegisterSuccess, lang]);
+
+  // 회원가입 1차 입력 제출 (중복 번호 선제 검증 후 안면 등록 단계로 진입 - BUG-M08, BUG-R06)
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmittingRef.current || loading) return;
+    setErrorMsg('');
+    setActiveField(null);
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setErrorMsg(lang === 'EN' ? 'Please enter your name.' : '이름을 입력해 주세요.');
+      return;
+    }
+    if (trimmedName.length < 2) {
+      setErrorMsg(lang === 'EN' ? 'Please enter at least 2 characters for your name.' : '이름을 2글자 이상 정확히 입력해 주세요.');
+      return;
+    }
+    if (trimmedName.length > 50) {
+      setErrorMsg(lang === 'EN' ? 'Name must be 50 characters or less.' : '이름은 50자 이내로 입력해 주세요.');
+      return;
+    }
+    if (/[ㄱ-ㅎㅏ-ㅣ]/.test(trimmedName)) {
+      setErrorMsg(lang === 'EN' ? 'Please complete all Korean characters in your name.' : '이름에 완성되지 않은 자음/모음이 포함되어 있습니다. 정확히 입력해 주세요.');
+      return;
+    }
+    if (!/^[가-힣a-zA-Z\s]+$/.test(trimmedName)) {
+      setErrorMsg(lang === 'EN' ? 'Name can only contain Korean or English letters.' : '이름은 한글 또는 영문으로만 입력해 주세요.');
+      return;
+    }
+
+    const cleanHp = hp.replace(/[^0-9]/g, '');
+    if (!/^01[016789]\d{7,8}$/.test(cleanHp)) {
+      setErrorMsg(lang === 'EN' ? 'Please enter a valid 10-11 digit mobile number.' : '올바른 휴대폰 번호(010 등 10~11자리)를 입력해 주세요.');
+      return;
+    }
+
+    if (!privacyAgree) {
+      setErrorMsg(lang === 'EN' ? 'Please agree to the required privacy policy.' : '필수 개인정보 수집 및 키오스크 이용약관에 동의해 주세요.');
+      return;
+    }
+
+    // 🛡️ BUG-M08 & BUG-R01: 휴대폰 번호 중복/휴면 가입 여부를 1단계에서 선제 검증
+    isSubmittingRef.current = true;
+    setLoading(true);
+    try {
+      const existing = await api.getMember(cleanHp);
+      if (existing) {
+        setErrorMsg(
+          lang === 'EN'
+            ? 'This phone number is already registered. Please sign in.'
+            : '이미 가입된 휴대폰 번호입니다. 회원 인증(로그인)을 이용해 주세요.'
+        );
+        isSubmittingRef.current = false;
+        setLoading(false);
+        return;
+      }
+    } catch (err: any) {
+      const status = err?.status || err?.response?.status;
+      if (status === 403 || err?.inactive) {
+        setErrorMsg(
+          lang === 'EN'
+            ? 'This phone number belongs to a dormant or restricted account. Please contact the front desk.'
+            : '이미 등록된 휴대폰 번호(휴면/탈퇴/이용제한 상태)입니다. 프런트 데스크에 문의해 주세요.'
+        );
+        isSubmittingRef.current = false;
+        setLoading(false);
+        return;
+      }
+      if (status === 409 || err?.duplicate) {
+        setErrorMsg(
+          lang === 'EN'
+            ? 'This phone number is already registered. Please sign in or contact the front desk.'
+            : '이미 등록된 휴대폰 번호입니다. 회원 인증 또는 프런트 데스크에 문의해 주세요.'
+        );
+        isSubmittingRef.current = false;
+        setLoading(false);
+        return;
+      }
+    }
+    isSubmittingRef.current = false;
+    setLoading(false);
+
+    if (faceTerminalEnabled) {
+      setIsFaceEnrollStep(true);
+    } else {
+      // 안면인식 미사용 시 2단계를 건너뛰고 바로 가입 완료 처리
+      await handleFinalRegister(false);
+    }
+  };
 
   return (
     <div 
+      onClick={() => {
+        if (activeField === 'NAME') setActiveField(null);
+      }}
       style={{
         width: '980px',
         maxWidth: '100%',
@@ -306,7 +397,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <h2 style={{ fontSize: '32px', fontWeight: 950, color: '#1d1d1f', margin: 0, letterSpacing: '-0.8px' }}>
-                무인 스튜디오 30초 즉석 회원가입
+                {lang === 'EN' ? '30-Second Quick Sign Up' : '무인 스튜디오 30초 즉석 회원가입'}
               </h2>
               <span 
                 style={{ 
@@ -319,11 +410,13 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                   border: '1px solid rgba(5, 150, 105, 0.2)'
                 }}
               >
-                ⚡ 간편 30초
+                {lang === 'EN' ? '⚡ Quick 30s' : '⚡ 간편 30초'}
               </span>
             </div>
             <p style={{ fontSize: '16px', color: '#86868b', margin: '4px 0 0 0', fontWeight: 600 }}>
-              간단한 기본 정보 입력 후 정기권 회원 혜택과 타석 예약을 시작하세요.
+              {lang === 'EN'
+                ? 'Enter basic details to enjoy membership benefits and teebox booking.'
+                : '간단한 기본 정보 입력 후 정기권 회원 혜택과 타석 예약을 시작하세요.'}
             </p>
           </div>
         </div>
@@ -344,7 +437,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
           onMouseOver={(e) => e.currentTarget.style.background = '#e8e8ed'}
           onMouseOut={(e) => e.currentTarget.style.background = '#f5f5f7'}
         >
-          취소
+          {lang === 'EN' ? 'Cancel' : '취소'}
         </button>
       </div>
 
@@ -361,9 +454,13 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
         /* 안면 정보 등록 UI */
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '30px' }}>
           <div style={{ textAlign: 'center' }}>
-            <h3 style={{ fontSize: '26px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>[단계 2/2] 페이스 ID 안면 등록</h3>
+            <h3 style={{ fontSize: '26px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
+              {lang === 'EN' ? '[Step 2/2] Face ID Registration' : '[단계 2/2] 페이스 ID 안면 등록'}
+            </h3>
             <p style={{ fontSize: '16px', color: '#86868b', marginTop: '8px', fontWeight: 600 }}>
-              무인 기기 입장 시 신속한 본인 확인을 위해 페이스 ID 정보를 등록합니다.
+              {lang === 'EN'
+                ? 'Register your Face ID for instant touchless authentication at the kiosk.'
+                : '무인 기기 입장 시 신속한 본인 확인을 위해 페이스 ID 정보를 등록합니다.'}
             </p>
           </div>
 
@@ -503,7 +600,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                   cursor: loading ? 'not-allowed' : 'pointer'
                 }}
               >
-                등록 건너뛰기
+                {lang === 'EN' ? 'Skip Face ID' : '등록 건너뛰기'}
               </button>
 
               <button
@@ -523,7 +620,9 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                   boxShadow: '0 4px 14px rgba(5, 150, 105, 0.3)'
                 }}
               >
-                {loading ? '가입 처리 중...' : '안면 등록 가입'}
+                {loading
+                  ? (lang === 'EN' ? 'Registering...' : '가입 처리 중...')
+                  : (lang === 'EN' ? 'Complete with Face ID' : '안면 등록 가입')}
               </button>
             </div>
 
@@ -540,7 +639,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 fontWeight: 600
               }}
             >
-              ‹ 이전 단계(정보 수정)로 돌아가기
+              {lang === 'EN' ? '‹ Back to Edit Details' : '‹ 이전 단계(정보 수정)로 돌아가기'}
             </button>
           </div>
         </div>
@@ -553,15 +652,20 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
             
             {/* 이름 입력 필드 */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>이름 (실명 입력)</label>
+              <label style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>
+                {lang === 'EN' ? 'Full Name' : '이름 (실명 입력)'}
+              </label>
               <input
                 type="text"
                 maxLength={50}
-                onClick={() => setActiveField('NAME')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveField('NAME');
+                }}
                 onFocus={() => setActiveField('NAME')}
                 onChange={(e) => setName(e.target.value.slice(0, 50))}
                 value={name}
-                placeholder="여기를 터치하여 이름을 입력하세요"
+                placeholder={lang === 'EN' ? 'Touch here to enter your name' : '여기를 터치하여 이름을 입력하세요'}
                 style={{
                   width: '100%',
                   height: '68px',
@@ -583,15 +687,20 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
 
             {/* 성별 선택 (애플 세그먼트 컨트롤) */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>성별</label>
+              <label style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f' }}>
+                {lang === 'EN' ? 'Gender' : '성별'}
+              </label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                {([['M', '남성 ♂'], ['F', '여성 ♀']] as const).map(([val, label]) => {
+                {([['M', lang === 'EN' ? 'Male ♂' : '남성 ♂'], ['F', lang === 'EN' ? 'Female ♀' : '여성 ♀']] as const).map(([val, label]) => {
                   const isSelected = gender === val;
                   return (
                     <button
                       key={val}
                       type="button"
-                      onClick={() => setGender(val)}
+                      onClick={() => {
+                        if (activeField === 'NAME') setActiveField(null);
+                        setGender(val);
+                      }}
                       style={{
                         height: '64px',
                         fontSize: '18px',
@@ -619,6 +728,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  if (activeField === 'NAME') setActiveField(null);
                   const nextState = !(privacyAgree && marketingAgree);
                   setPrivacyAgree(nextState);
                   setMarketingAgree(nextState);
@@ -652,7 +762,11 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 }}>
                   {(privacyAgree && marketingAgree) && <Check size={14} strokeWidth={3} />}
                 </div>
-                <span>⚡ 전체 약관 동의 (필수 + 선택 혜택 알림)</span>
+                <span>
+                  {lang === 'EN'
+                    ? '⚡ Agree to All Terms (Required + Optional)'
+                    : '⚡ 전체 약관 동의 (필수 + 선택 혜택 알림)'}
+                </span>
               </button>
 
               {/* [필수] 개인정보 수집 및 키오스크 이용약관 */}
@@ -667,7 +781,10 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 gap: '12px'
               }}>
                 <div 
-                  onClick={() => setPrivacyAgree(!privacyAgree)}
+                  onClick={() => {
+                    if (activeField === 'NAME') setActiveField(null);
+                    setPrivacyAgree(!privacyAgree);
+                  }}
                   style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: 1 }}
                 >
                   <div style={{
@@ -685,15 +802,16 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                     {privacyAgree && <Check size={12} strokeWidth={3} />}
                   </div>
                   <span style={{ fontSize: '14px', fontWeight: 800, color: '#1d1d1f' }}>
-                    [필수] 개인정보 수집 및 이용 동의
+                    {lang === 'EN' ? '[Required] Privacy Policy Agreement' : '[필수] 개인정보 수집 및 이용 동의'}
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
+                    if (activeField === 'NAME') setActiveField(null);
                     const fallback = (lang === 'EN' || lang === 'en') ? DEFAULT_TERMS.EN : DEFAULT_TERMS.KO;
                     setModalTerms({
-                      title: termsData?.privacy_title || fallback.privacy_title,
+                      title: (lang === 'EN' ? fallback.privacy_title : termsData?.privacy_title) || fallback.privacy_title,
                       content: termsData?.privacy_content || fallback.privacy_content
                     });
                   }}
@@ -708,7 +826,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                     cursor: 'pointer'
                   }}
                 >
-                  전문보기
+                  {lang === 'EN' ? 'Details' : '전문보기'}
                 </button>
               </div>
 
@@ -724,7 +842,10 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 gap: '12px'
               }}>
                 <div 
-                  onClick={() => setMarketingAgree(!marketingAgree)}
+                  onClick={() => {
+                    if (activeField === 'NAME') setActiveField(null);
+                    setMarketingAgree(!marketingAgree);
+                  }}
                   style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: 1 }}
                 >
                   <div style={{
@@ -742,15 +863,16 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                     {marketingAgree && <Check size={12} strokeWidth={3} />}
                   </div>
                   <span style={{ fontSize: '14px', fontWeight: 700, color: '#4b5563' }}>
-                    [선택] 혜택 및 이벤트 알림(마케팅) 수신
+                    {lang === 'EN' ? '[Optional] Marketing & Event Notifications' : '[선택] 혜택 및 이벤트 알림(마케팅) 수신'}
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
+                    if (activeField === 'NAME') setActiveField(null);
                     const fallback = (lang === 'EN' || lang === 'en') ? DEFAULT_TERMS.EN : DEFAULT_TERMS.KO;
                     setModalTerms({
-                      title: termsData?.marketing_title || fallback.marketing_title,
+                      title: (lang === 'EN' ? fallback.marketing_title : termsData?.marketing_title) || fallback.marketing_title,
                       content: termsData?.marketing_content || fallback.marketing_content
                     });
                   }}
@@ -765,7 +887,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                     cursor: 'pointer'
                   }}
                 >
-                  전문보기
+                  {lang === 'EN' ? 'Details' : '전문보기'}
                 </button>
               </div>
             </div>
@@ -775,7 +897,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
               <label style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f', textAlign: 'center' }}>
-                휴대폰 번호 입력
+                {lang === 'EN' ? 'Mobile Number' : '휴대폰 번호 입력'}
               </label>
               <div 
                 style={{
@@ -832,7 +954,10 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
               ))}
               <button 
                 type="button" 
-                onClick={() => setHp('')} 
+                onClick={() => {
+                  if (activeField === 'NAME') setActiveField(null);
+                  setHp('');
+                }} 
                 style={{ 
                   height: '68px', 
                   fontSize: '15px', 
@@ -847,7 +972,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 }} 
                 className="apple-card-hover"
               >
-                전체 지움
+                {lang === 'EN' ? 'Clear' : '전체 지움'}
               </button>
               <button 
                 type="button" 
@@ -918,7 +1043,11 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
               className="apple-card-hover"
             >
               <Sparkles size={24} />
-              {loading ? '가입 처리 중...' : (faceTerminalEnabled ? '다음 단계 (안면 등록) ›' : '⚡ 3초 즉석 회원가입 완료 ›')}
+              {loading
+                ? (lang === 'EN' ? 'Processing...' : '가입 처리 중...')
+                : (faceTerminalEnabled
+                    ? (lang === 'EN' ? 'Next Step (Face ID) ›' : '다음 단계 (안면 등록) ›')
+                    : (lang === 'EN' ? '⚡ Complete Sign Up ›' : '⚡ 3초 즉석 회원가입 완료 ›'))}
             </button>
           </div>
 
@@ -990,7 +1119,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                   cursor: 'pointer'
                 }}
               >
-                확인 및 닫기
+                {lang === 'EN' ? 'Close' : '확인 및 닫기'}
               </button>
             </div>
           </div>

@@ -72,6 +72,16 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   const [dailyPrice, setDailyPrice] = useState<number>(defaultDailyPrice || 15000);
   const [companionMembers, setCompanionMembers] = useState<Record<number, Member>>({});
 
+  // 🛡️ [BUG-P02 Fix] selectedDurationMin이 0으로 전달되더라도 대표자 유효 이용권 시간 또는 60분으로 안전 폴백
+  const leaderFirstBay = bays.find(b => b.bay_no === selectedBayNos[0]);
+  const leaderDefaultAsset = getFirstAssignableAsset(leaderMember, leaderFirstBay);
+  const effectiveDurationMin =
+    selectedDurationMin && selectedDurationMin > 0
+      ? selectedDurationMin
+      : Number((leaderDefaultAsset as any)?.duration_min) > 0
+        ? Number((leaderDefaultAsset as any)?.duration_min)
+        : 60;
+
   // 각 타석별 배정 설정 상태
   const [targets, setTargets] = useState<CompanionTargetItem[]>(() => {
     const initialDailyPrice = defaultDailyPrice || 15000;
@@ -80,7 +90,8 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       if (idx === 0) {
         // 대표자 타석
         const validAsset = getFirstAssignableAsset(leaderMember, targetBay);
-        const durMin = (validAsset as any)?.duration_min || selectedDurationMin;
+        const assetDur = Number((validAsset as any)?.duration_min);
+        const durMin = assetDur > 0 ? assetDur : effectiveDurationMin;
         const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
         return {
           bayNo,
@@ -104,8 +115,8 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           hp: '',
           isGuest: true,
           ticketType: 'DAILY',
-          ticketName: `일일 타석권 ${selectedDurationMin}분`,
-          durationMin: selectedDurationMin,
+          ticketName: `일일 타석권 ${effectiveDurationMin}분`,
+          durationMin: effectiveDurationMin,
           price: initialDailyPrice
         };
       }
@@ -121,19 +132,29 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
         (p) => (p.logic_type || '').toUpperCase() === 'DAILY' || (p.prod_nm || '').includes('일일')
       );
       const matched =
-        dailyProds.find((p) => Number(p.duration_min) === Number(selectedDurationMin)) || dailyProds[0];
+        dailyProds.find((p) => Number(p.duration_min) === Number(effectiveDurationMin)) || dailyProds[0];
       const resolvedPrice = Number(matched?.sale_price || matched?.standard_price || defaultDailyPrice || 0);
+      const matchedDur = Number(matched?.duration_min) > 0 ? Number(matched?.duration_min) : effectiveDurationMin;
       if (resolvedPrice > 0) {
         setDailyPrice(resolvedPrice);
         setTargets((prev) =>
-          prev.map((t) => (t.ticketType === 'DAILY' ? { ...t, price: resolvedPrice } : t))
+          prev.map((t) =>
+            t.ticketType === 'DAILY'
+              ? {
+                  ...t,
+                  price: resolvedPrice,
+                  durationMin: t.durationMin > 0 ? t.durationMin : matchedDur,
+                  ticketName: `일일 타석권 ${t.durationMin > 0 ? t.durationMin : matchedDur}분`,
+                }
+              : t
+          )
         );
       }
     }).catch(() => {});
     return () => {
       mounted = false;
     };
-  }, [selectedDurationMin, defaultDailyPrice]);
+  }, [effectiveDurationMin, defaultDailyPrice]);
 
   // 120초 타이머 및 30초 주기 Heartbeat 락 갱신
   useEffect(() => {
@@ -147,12 +168,18 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       });
     }, 1000);
 
-    // 30초마다 preoccupyBays Heartbeat 백그라운드 갱신
+    // 30초마다 preoccupyBays Heartbeat 백그라운드 갱신 (BUG-P08: false 반환 감지 보강)
     const hbInterval = setInterval(() => {
-      api.preoccupyBays(selectedBayNos).catch(err => {
-        console.error('Heartbeat lock extension failed:', err);
-        setSearchError(lang === 'KO' ? '네트워크 상태 불안정으로 선점 락 갱신이 지연되고 있습니다.' : 'Network unstable. Lock extension delayed.');
-      });
+      api.preoccupyBays(selectedBayNos)
+        .then(ok => {
+          if (!ok) {
+            setSearchError(lang === 'KO' ? '네트워크 지연 또는 시간 초과로 일부 타석의 선점 락이 만료되었습니다. 다시 선택해 주세요.' : 'Teebox lock expired. Please re-select.');
+          }
+        })
+        .catch(err => {
+          console.error('Heartbeat lock extension failed:', err);
+          setSearchError(lang === 'KO' ? '네트워크 상태 불안정으로 선점 락 갱신이 지연되고 있습니다.' : 'Network unstable. Lock extension delayed.');
+        });
     }, 30000);
 
     return () => {
@@ -188,7 +215,13 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
         if (slotBayNo !== undefined) {
           setCompanionMembers(prev => ({ ...prev, [slotBayNo]: member }));
         }
-        const alreadyAssignedSlot = targets.find((t, i) => i !== activeBayIdx && t.memberNo === member.member_no);
+        const memberHpClean = (member.hp || '').replace(/[^0-9]/g, '');
+        const alreadyAssignedSlot = targets.find(
+          (t, i) =>
+            i !== activeBayIdx &&
+            (t.memberNo === member.member_no ||
+              (!t.memberNo && memberHpClean && (t.hp || '').replace(/[^0-9]/g, '') === memberHpClean))
+        );
         const validAsset = getFirstAssignableAsset(member, targetBay);
         const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
         const assetLogic = String((validAsset as any)?.logic_type || '').toUpperCase();
@@ -204,6 +237,9 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           parsedId &&
           (!alreadyAssignedSlot || (isCountAsset && assetRemCnt > usedCountForSameAsset))
         );
+        const companionAssetDur = Number((validAsset as any)?.duration_min);
+        const resolvedCompanionDur =
+          canUseMembership && companionAssetDur > 0 ? companionAssetDur : effectiveDurationMin;
 
         updateTarget(activeBayIdx, {
           isGuest: false,
@@ -212,7 +248,8 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           hp: member.hp,
           ticketType: canUseMembership ? 'MEMBERSHIP' : 'DAILY',
           memberItemId: canUseMembership ? parsedId : undefined,
-          ticketName: canUseMembership && validAsset ? resolveAssetTicketName(validAsset) : `일일 타석권 ${selectedDurationMin}분`,
+          ticketName: canUseMembership && validAsset ? resolveAssetTicketName(validAsset) : `일일 타석권 ${resolvedCompanionDur}분`,
+          durationMin: resolvedCompanionDur,
           price: canUseMembership ? 0 : dailyPrice
         });
         if (alreadyAssignedSlot && !canUseMembership) {
@@ -223,7 +260,9 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
         setSearchError(lang === 'KO' ? '일치하는 회원을 찾을 수 없습니다. 번호를 다시 확인하거나 비회원으로 진행해주세요.' : 'Member not found.');
       }
     } catch (err: any) {
-      if (err?.duplicate || err?.status === 409) {
+      if (err?.inactive || err?.status === 403) {
+        setSearchError(err.message || '현재 휴면 또는 이용 제한(일시정지/탈퇴) 상태인 회원입니다.');
+      } else if (err?.duplicate || err?.status === 409) {
         setSearchError(err.message || '동일한 뒷번호 회원이 2명 이상 존재합니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
       } else {
         setSearchError(err?.message || (lang === 'KO' ? '회원 검색 중 오류가 발생했습니다.' : 'Failed to search member.'));
@@ -544,7 +583,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                               memberItemId: assetId,
                               price: 0,
                               ticketName: assetName,
-                              durationMin: Number((asset as any).duration_min || currentTarget.durationMin || selectedDurationMin)
+                              durationMin: Number((asset as any).duration_min || currentTarget.durationMin || effectiveDurationMin)
                             });
                           }}
                           style={{

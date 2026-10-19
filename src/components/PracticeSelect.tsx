@@ -38,7 +38,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   const [chainedInfo, setChainedInfo] = useState<{ startTimeStr: string; minutesWait: number } | null>(null);
   const [allocMode, setAllocMode] = useState<'SINGLE' | 'GROUP'>('SINGLE');
   const [activeFloor, setActiveFloor] = useState<string>('1F');
-  const [filterChip, setFilterChip] = useState<'ALL' | 'LEFT' | 'GDR' | 'LESSON' | 'AVAILABLE'>('ALL');
+  const [filterChip, setFilterChip] = useState<'ALL' | 'RIGHT' | 'LEFT' | 'GDR' | 'LESSON' | 'AVAILABLE'>('ALL');
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(initialSelectedBayNo || null);
   const [selectedBayNos, setSelectedBayNos] = useState<number[]>(
     externalSelectedBayNos && externalSelectedBayNos.length > 0
@@ -54,9 +54,13 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 정상적인 단계 이동(Confirm) 시에만 언마운트 클린업 락 해제를 스킵하기 위한 Ref
   const isConfirmedRef = useRef(false);
+  const isLockingRef = useRef(false);
   const selectedBayNoRef = useRef<number | null>(selectedBayNo);
   const selectedBayNosRef = useRef<number[]>(selectedBayNos);
   const allocModeRef = useRef<'SINGLE' | 'GROUP'>(allocMode);
+  const chainedInfoRef = useRef<{ startTimeStr: string; minutesWait: number } | null>(chainedInfo);
+  const prevInitialBayRef = useRef<number | null | undefined>(initialSelectedBayNo);
+  const prevExternalBaysLenRef = useRef<number>(externalSelectedBayNos?.length || 0);
 
   useEffect(() => {
     selectedBayNoRef.current = selectedBayNo;
@@ -70,16 +74,30 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     allocModeRef.current = allocMode;
   }, [allocMode]);
 
-  // 상위 KioskApp에서 모달 취소 등으로 타석 선택이 초기화된 경우 즉시 동기화
   useEffect(() => {
-    if (initialSelectedBayNo === null && (!externalSelectedBayNos || externalSelectedBayNos.length === 0)) {
-      if (isConfirmedRef.current) {
-        isConfirmedRef.current = false;
-        setSelectedBayNo(null);
-        setSelectedBayNos([]);
-        setShowDecisionModal(false);
-      }
+    chainedInfoRef.current = chainedInfo;
+  }, [chainedInfo]);
+
+  // 상위 KioskApp에서 모달 취소/배정 완료 등으로 타석 선택이 초기화된 경우 즉시 동기화
+  useEffect(() => {
+    const wasParentSelected =
+      (prevInitialBayRef.current !== null && prevInitialBayRef.current !== undefined) ||
+      prevExternalBaysLenRef.current > 0;
+    const isNowParentEmpty =
+      initialSelectedBayNo === null && (!externalSelectedBayNos || externalSelectedBayNos.length === 0);
+
+    if (isNowParentEmpty && (isConfirmedRef.current || wasParentSelected)) {
+      isConfirmedRef.current = false;
+      setSelectedBayNo(null);
+      setSelectedBayNos([]);
+      setChainedInfo(null);
+      setShowDecisionModal(false);
+    } else if (initialSelectedBayNo !== null && initialSelectedBayNo !== undefined) {
+      setSelectedBayNo(initialSelectedBayNo);
+      setSelectedBayNos([initialSelectedBayNo]);
     }
+    prevInitialBayRef.current = initialSelectedBayNo;
+    prevExternalBaysLenRef.current = externalSelectedBayNos?.length || 0;
   }, [initialSelectedBayNo, externalSelectedBayNos]);
 
   // 선점 락 제한시간 1초 간격 갱신
@@ -112,7 +130,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       const activeList = allocModeRef.current === 'SINGLE'
         ? (selectedBayNoRef.current !== null ? [selectedBayNoRef.current] : [])
         : selectedBayNosRef.current;
-      if (activeList.length > 0 && !isConfirmedRef.current) {
+      if (activeList.length > 0 && !isConfirmedRef.current && !chainedInfoRef.current) {
         api.releaseBays(activeList).catch(err => console.error('Cleanup release failed:', err));
       }
     };
@@ -164,8 +182,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 매장/구역 전체 타석 중 동반자 배정 허용 타석이 1개라도 존재하는지 체크
   const hasAnyCompanionBay = React.useMemo(() => {
-    return bays.some(b => isCompanionAllowed(b));
-  }, [bays]);
+    return practiceBays.some(b => isCompanionAllowed(b));
+  }, [practiceBays]);
 
   // 동반자 허용 타석이 없으면 무조건 1인 단일 타석 모드로 강제 고정
   useEffect(() => {
@@ -177,7 +195,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 타석 터치 - 단일 및 다중 원자적 선점(Pre-emption) 락 시도
   const handleBayTouch = async (bayNo: number) => {
-    const bay = bays.find(b => b.bay_no === bayNo);
+    if (isLockingRef.current || preoccupyLoading) return;
+    const bay = practiceBays.find(b => b.bay_no === bayNo) || bays.find(b => b.bay_no === bayNo);
     if (!bay) return;
 
     const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
@@ -186,11 +205,26 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
     if (isBlockedStatus) return;
 
+    // 🎓 레슨 전용 타석 일반 셀프 배정 차단 (BUG-P03)
+    if (bay.is_lesson_only) {
+      setErrorMsg(lang === 'KO' ? '레슨 전용 타석입니다. 일반 연습 배정은 다른 타석을 선택해 주세요.' : 'This teebox is reserved for lessons only.');
+      return;
+    }
+
     const isBayOccupiedStatus = ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus);
     if (isBayOccupiedStatus) {
       if (allocMode === 'GROUP') {
         setErrorMsg(lang === 'KO' ? '다중(그룹) 배정 모드에서는 빈 타석만 선택할 수 있습니다.' : 'Only empty teeboxes can be selected in group mode.');
         return;
+      }
+      if (selectedBayNo === bayNo && !showDecisionModal) {
+        await handleReleaseAll();
+        return;
+      }
+      // 🛡️ [BUG-P01 Fix] 기존에 빈 타석을 선점한 상태에서 사용 중 타석(연속 대기 배정)으로 변경 시 이전 빈 타석 선점 락 즉시 해제
+      if (selectedBayNo !== null && selectedBayNo !== bayNo && !chainedInfo) {
+        await api.releaseBay(selectedBayNo).catch(console.error);
+        onRefreshBays();
       }
       let mwMin = 0;
       if (bay.config_json) {
@@ -222,13 +256,14 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       const startDate = new Date(nowMs + totalWaitMin * 60 * 1000);
       const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
 
+      setErrorMsg('');
       setChainedInfo({ startTimeStr, minutesWait: totalWaitMin });
       setSelectedBayNo(bayNo);
       setSelectedBayNos([bayNo]);
+      const bayFloor = bay.floor || (bay.floor_no ? `${bay.floor_no}F` : '1F');
+      if (bayFloor !== activeFloor) setActiveFloor(bayFloor);
       setShowDecisionModal(true);
       return;
-    } else {
-      setChainedInfo(null);
     }
     
     // 이미 타인에 의해 선점된 경우
@@ -240,14 +275,16 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     if (allocMode === 'SINGLE') {
       // --- 1인 단일 타석 모드 ---
       if (selectedBayNo === bayNo) {
-        handleReleaseAll();
+        await handleReleaseAll();
         return;
       }
-      if (selectedBayNo !== null) {
-        await api.releaseBay(selectedBayNo);
+      if (selectedBayNo !== null && !chainedInfo) {
+        await api.releaseBay(selectedBayNo).catch(console.error);
       }
+      setChainedInfo(null);
 
       setErrorMsg('');
+      isLockingRef.current = true;
       setPreoccupyLoading(true);
 
       try {
@@ -265,12 +302,14 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       } catch {
         setErrorMsg(lang === 'KO' ? '타석 선점 중 오류가 발생했습니다.' : 'Error occurred while securing teebox.');
       } finally {
+        isLockingRef.current = false;
         setPreoccupyLoading(false);
         onRefreshBays();
       }
     } else {
       // --- 👥 동반자 다중 타석 배정 모드 ---
       setErrorMsg('');
+      setChainedInfo(null);
 
       // 선택하려는 타석이 1인 전용 타석인 경우 동반자 배정 불가 처리
       if (!isCompanionAllowed(bay)) {
@@ -304,6 +343,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         }
       }
 
+      isLockingRef.current = true;
       setPreoccupyLoading(true);
       const nextList = [...selectedBayNos, bayNo];
       try {
@@ -316,6 +356,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       } catch {
         setErrorMsg(lang === 'KO' ? '다중 선점 처리 중 오류가 발생했습니다.' : 'Error securing group teeboxes.');
       } finally {
+        isLockingRef.current = false;
         setPreoccupyLoading(false);
         onRefreshBays();
       }
@@ -326,9 +367,12 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   const handleReleaseAll = async () => {
     const activeList = allocMode === 'SINGLE' ? (selectedBayNo !== null ? [selectedBayNo] : []) : selectedBayNos;
     if (activeList.length > 0) {
-      await api.releaseBays(activeList);
+      if (!chainedInfo) {
+        await api.releaseBays(activeList).catch(console.error);
+      }
       setSelectedBayNo(null);
       setSelectedBayNos([]);
+      setChainedInfo(null);
       onRefreshBays();
     }
   };
@@ -359,17 +403,38 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   const floorBays = practiceBays.filter(b => (b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor);
   const filteredBays = floorBays.filter(b => {
     const stCode = String((b as any).status_info?.code || b.status || '').toUpperCase();
+    const h = String(b.handedness || (b.type === 'LEFT' ? 'LEFT' : 'RIGHT')).toUpperCase();
+    if (filterChip === 'RIGHT') {
+      return h === 'RIGHT' || h === 'BOTH';
+    }
     if (filterChip === 'LEFT') {
-      const h = b.handedness || (b.type === 'LEFT' ? 'LEFT' : 'RIGHT');
       return h === 'LEFT' || h === 'BOTH';
     }
-    if (filterChip === 'GDR') return (b.simulator_type || 'GDR_PLUS') === 'GDR_PLUS';
+    if (filterChip === 'GDR') return String(b.simulator_type || '').toUpperCase() === 'GDR_PLUS';
     if (filterChip === 'LESSON') return !!b.is_lesson_only;
     if (filterChip === 'AVAILABLE') {
-      return stCode === 'AVAILABLE' || selectedBayNo === b.bay_no || selectedBayNos.includes(b.bay_no);
+      return (stCode === 'AVAILABLE' && !b.is_lesson_only) || selectedBayNo === b.bay_no || selectedBayNos.includes(b.bay_no);
     }
     return true;
   });
+
+  // ⚡ 빠른 자동 선택 핸들러 (현재 필터/층 우선 -> 전체 층 빈 타석 탐색)
+  const handleQuickAutoSelect = async () => {
+    const isQuickAssignable = (b: Bay) => {
+      const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+      return st === 'AVAILABLE' && (b as any).is_active !== false && !b.is_lesson_only;
+    };
+    const candidate = filteredBays.find(isQuickAssignable) || practiceBays.find(isQuickAssignable);
+    if (!candidate) {
+      setErrorMsg(
+        lang === 'KO'
+          ? '현재 즉시 배정 가능한 빈 타석이 없습니다. 사용 중인 타석을 터치하여 대기 배정을 이용해 주세요.'
+          : 'No empty teebox available right now. Tap an occupied teebox for waitlist booking.'
+      );
+      return;
+    }
+    await handleBayTouch(candidate.bay_no);
+  };
 
   // 모달 표기용 선택 타석 정보 추출
   const selectedBay = selectedBayNo !== null ? bays.find(b => b.bay_no === selectedBayNo) : null;
@@ -447,7 +512,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       {/* 1. 상단 실시간 타석 종합 전광판 (Apple Bento Panel) */}
       <div style={{ width: '100%', background: '#ffffff', borderRadius: '24px', border: '1px solid rgba(229, 229, 234, 0.8)', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)' }}>
         <TopTeeboxDashboard 
-          bays={bays} 
+          bays={practiceBays} 
           onBayClick={handleBayTouch} 
           lang={lang} 
         />
@@ -473,8 +538,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               <button
                 onClick={() => {
                   if (allocMode !== 'SINGLE') {
-                    if (selectedBayNos.length > 0) api.releaseBays(selectedBayNos);
-                    handleReleaseAll();
+                    void handleReleaseAll();
                     setAllocMode('SINGLE');
                   }
                 }}
@@ -497,8 +561,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               <button
                 onClick={() => {
                   if (allocMode !== 'GROUP') {
-                    if (selectedBayNos.length > 0) api.releaseBays(selectedBayNos);
-                    handleReleaseAll();
+                    void handleReleaseAll();
                     setAllocMode('GROUP');
                   }
                 }}
@@ -530,7 +593,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
         {/* 층 전환 iOS Segmented Control 탭바 & 퀵 필터 칩 바 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '12px' }}>
             <div style={{ display: 'flex', padding: '4px', borderRadius: '16px', background: '#f4f4f5', gap: '4px', flexWrap: 'nowrap', overflowX: 'auto', border: '1px solid #e4e4e7' }}>
               {floorList.map(f => {
                 return (
@@ -559,6 +622,28 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                 );
               })}
             </div>
+
+            {allocMode === 'SINGLE' && (
+              <button
+                type="button"
+                onClick={handleQuickAutoSelect}
+                disabled={preoccupyLoading}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '14px',
+                  border: '1px solid rgba(5, 150, 105, 0.3)',
+                  background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                  color: '#ffffff',
+                  fontSize: '15px',
+                  fontWeight: 800,
+                  cursor: preoccupyLoading ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {lang === 'KO' ? '⚡ 빈 타석 자동 선택' : '⚡ Quick Auto-Select'}
+              </button>
+            )}
           </div>
 
           {/* ⚡ 퀵 필터 칩 바 (Apple Pill Chips) */}
@@ -566,6 +651,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
             {[
               { id: 'ALL', label: '전체' },
               { id: 'AVAILABLE', label: '🟢 이용 가능만' },
+              { id: 'RIGHT', label: '⛳ 우타석' },
               { id: 'LEFT', label: '⛳ 좌타석' },
               { id: 'GDR', label: '⚡ GDR+' },
               { id: 'LESSON', label: '🎓 레슨전용' },

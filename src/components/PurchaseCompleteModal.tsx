@@ -6,6 +6,7 @@ import { useKioskSettings } from '../stores/kioskSettings';
 import { api } from '../services/api';
 
 export interface CompletedPurchaseInfo {
+  memberNo?: string;
   memberName: string;
   memberHp?: string;
   productName: string;
@@ -16,7 +17,10 @@ export interface CompletedPurchaseInfo {
   apprNo: string;
   tradeDate: string;
   startDate?: string;
-  endDate?: string;
+  endDate?: string | null;
+  days?: number;
+  totalCount?: number;
+  logicType?: string;
   purchaseType?: 'MEMBERSHIP' | 'LOCKER' | 'PRODUCT';
   cardIssuer?: string;
   cardNoMasked?: string;
@@ -33,6 +37,7 @@ interface PurchaseCompleteModalProps {
   endDate?: string;
   vatYn?: string;
   lang?: 'KO' | 'EN';
+  onAllocateNow?: () => void;
   onClose: () => void;
 }
 
@@ -45,6 +50,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
   endDate: propEndDate,
   vatYn: propVatYn,
   lang = 'KO',
+  onAllocateNow,
   onClose
 }) => {
   const [countdown, setCountdown] = useState(10);
@@ -157,12 +163,27 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
     };
   }, [onClose, isPrinting]);
 
-  // 오늘 날짜 및 유효기간 계산 (TimeMaster SSOT 적용)
+  // 오늘 날짜 및 유효기간 계산 (TimeMaster SSOT 적용 — 무기한 횟수권은 30일 강제 합성 금지)
   const ONE_DAY_MS = 86400000;
   const todayStr = TimeMaster.getKstYmd(new Date());
-  const defaultEndDateStr = TimeMaster.getKstYmd(new Date(Date.now() + 30 * ONE_DAY_MS));
   const startDate = propStartDate || purchaseInfo.startDate || todayStr;
-  const endDate = propEndDate || purchaseInfo.endDate || defaultEndDateStr;
+  const rawEndDate = propEndDate ?? purchaseInfo.endDate;
+  const isUnlimitedCountOrLesson =
+    (['COUNT', 'COUPON', 'LESSON'].includes(String(purchaseInfo.logicType || '').toUpperCase()) ||
+      (purchaseInfo.totalCount !== undefined && purchaseInfo.totalCount > 0)) &&
+    (!purchaseInfo.days || purchaseInfo.days <= 0);
+  const computedFallbackEnd =
+    purchaseInfo.days && purchaseInfo.days > 0
+      ? TimeMaster.getKstYmd(new Date(Date.now() + (purchaseInfo.days - 1) * ONE_DAY_MS))
+      : isUnlimitedCountOrLesson
+        ? null
+        : TimeMaster.getKstYmd(new Date(Date.now() + 30 * ONE_DAY_MS));
+  const endDate = rawEndDate || computedFallbackEnd;
+  const countBadgeSuffix =
+    purchaseInfo.totalCount && purchaseInfo.totalCount > 0 ? ` (총 ${purchaseInfo.totalCount}회)` : '';
+  const periodDisplayStr = endDate
+    ? `${startDate} ~ ${endDate}${countBadgeSuffix}`
+    : `${startDate} ~ 무기한${countBadgeSuffix || ' (횟수 소진 시까지)'}`;
   const isPrinterOffline = !isPrinting && (printStatus === '프린터 미연결' || printStatus === 'Printer Offline');
 
   return (
@@ -262,7 +283,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
             display: 'flex',
             flexDirection: 'column',
             gap: '16px',
-            marginBottom: '32px',
+            marginBottom: '24px',
             textAlign: 'left'
           }}
         >
@@ -303,7 +324,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
                 <span>유효 기간</span>
               </div>
               <span style={{ fontWeight: 800, color: '#047857' }}>
-                {startDate} ~ {endDate}
+                {periodDisplayStr}
               </span>
             </div>
 
@@ -341,6 +362,36 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* 이어서 바로 타석 배정받기 CTA 버튼 (회원권/횟수권 구매 시 제공) */}
+        {onAllocateNow && purchaseInfo.purchaseType === 'MEMBERSHIP' && (
+          <button
+            type="button"
+            onClick={onAllocateNow}
+            style={{
+              width: '100%',
+              height: '62px',
+              marginBottom: '12px',
+              borderRadius: '999px',
+              background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+              color: '#ffffff',
+              border: 'none',
+              fontSize: '19px',
+              fontWeight: 900,
+              letterSpacing: '-0.5px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              boxShadow: '0 10px 25px rgba(37, 99, 235, 0.3)',
+              transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
+            }}
+          >
+            <span>{lang === 'KO' ? '🎯 구매한 회원권으로 바로 타석 배정받기' : '🎯 Allocate Teebox Now with New Pass'}</span>
+            <ArrowRight size={20} style={{ color: '#ffffff' }} />
+          </button>
+        )}
 
         {/* 버튼 영역: 재출력 버튼 + 확인 버튼 */}
         <div style={{ display: 'flex', gap: '12px', width: '100%' }}>

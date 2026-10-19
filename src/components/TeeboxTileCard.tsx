@@ -28,9 +28,10 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   const isMaintenance =
     (bay as any).is_active === false ||
     ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
-  const isAvailable = canonicalStatus === 'AVAILABLE' && !isOccupied && !isPreOccupied && !isPrepare && !isMaintenance;
+  const isLessonOnly = Boolean(bay.is_lesson_only);
+  const isAvailable = canonicalStatus === 'AVAILABLE' && !isOccupied && !isPreOccupied && !isPrepare && !isMaintenance && !isLessonOnly;
   const isSelfLocked = isPreOccupied && (isSelected || (!!bay.lock_terminal_id && bay.lock_terminal_id === api.getTerminalId()));
-  const isClickable = !isMaintenance && (isAvailable || isOccupied || isPrepare || isSelected || isSelfLocked);
+  const isClickable = !isMaintenance && (isAvailable || isOccupied || isPrepare || isSelected || isSelfLocked || isLessonOnly);
 
   const totalRemainingMin = (bay as any).status_info?.minutes_left ?? TimeMaster.getRemainingMinutes(bay);
   const finalEndTimeStr = TimeMaster.formatEndTime(bay);
@@ -41,7 +42,6 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
 
   // 스펙 텍스트 라벨 (좌타/장비)
   const handed = bay.handedness || (bay.type === 'LEFT' ? 'LEFT' : 'RIGHT');
-  const simType = bay.simulator_type || 'GDR_PLUS';
 
   return (
     <div
@@ -301,7 +301,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isSelected ? '#ffffff' : '#d97706', fontSize: '13px', fontWeight: 800 }}>
             <Clock size={13} />
             <span>
-              대기 중 ({bay.prepare_remaining_sec !== undefined && bay.prepare_remaining_sec !== null
+              {bay.is_paused ? '⏸ 일시정지 ' : '대기 중 '}({bay.prepare_remaining_sec !== undefined && bay.prepare_remaining_sec !== null
                 ? `${Math.floor(bay.prepare_remaining_sec / 60)}:${String(bay.prepare_remaining_sec % 60).padStart(2, '0')}`
                 : '곧 시작'})
             </span>
@@ -312,23 +312,29 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
             {/* 1. 상단 대형 강세: 누적 실질 잔여시간 (크고 굵게) */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Clock size={15} color={isSelected ? '#ffffff' : '#059669'} />
-              <span style={{ fontSize: '16px', fontWeight: 900, color: isSelected ? '#ffffff' : '#059669', letterSpacing: '-0.4px' }}>
-                {totalRemainingMin > 0 ? `${totalRemainingMin}분 남음` : '1분 미만'}
+              <Clock size={15} color={isSelected ? '#ffffff' : (bay.is_paused ? '#d97706' : '#059669')} />
+              <span style={{ fontSize: '16px', fontWeight: 900, color: isSelected ? '#ffffff' : (bay.is_paused ? '#d97706' : '#059669'), letterSpacing: '-0.4px' }}>
+                {bay.is_paused
+                  ? `⏸ ${totalRemainingMin > 0 ? `${totalRemainingMin}분 (정지)` : '일시정지'}`
+                  : (totalRemainingMin > 0 ? `${totalRemainingMin}분 남음` : '1분 미만')}
               </span>
             </div>
 
             {/* 2. 하단 서브: 그 아래 정밀 계산된 최종 빈 타석 예정 시각 (작게) */}
             <div style={{ fontSize: '12px', fontWeight: 600, color: isSelected ? 'rgba(255,255,255,0.8)' : '#71717a', letterSpacing: '-0.2px', paddingLeft: '2px' }}>
-              {finalEndTimeStr} 빈타석 예정
+              {bay.is_paused ? '볼회수/일시정지 중' : `${finalEndTimeStr} 빈타석 예정`}
             </div>
 
             {/* 2-1. 다음 연쇄/대기 예약 안내 뱃지 */}
-            {bay.next_res_start_time && (
-              <div style={{ fontSize: '11px', fontWeight: 700, color: isSelected ? '#fed7aa' : '#ea580c', letterSpacing: '-0.2px', paddingLeft: '2px' }}>
-                대기예약 ({bay.next_res_start_time.slice(0, 2)}:{bay.next_res_start_time.slice(2, 4)})
-              </div>
-            )}
+            {bay.next_res_start_time && (() => {
+              const cleanNext = String(bay.next_res_start_time).replace(/:/g, '');
+              const formattedNext = cleanNext.length >= 4 ? `${cleanNext.slice(0, 2)}:${cleanNext.slice(2, 4)}` : String(bay.next_res_start_time);
+              return (
+                <div style={{ fontSize: '11px', fontWeight: 700, color: isSelected ? '#fed7aa' : '#ea580c', letterSpacing: '-0.2px', paddingLeft: '2px' }}>
+                  대기예약 ({formattedNext})
+                </div>
+              );
+            })()}
 
             {/* 잔여시간 누적 프로그레스 게이지 바 */}
             <div style={{ width: '100%', height: '5px', backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#e4e4e7', borderRadius: '3px', overflow: 'hidden', marginTop: '2px' }}>

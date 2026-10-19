@@ -14,10 +14,10 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   onBayClick,
   lang
 }) => {
-  // 🔄 [구역 카테고리 동적 격리] 파3(PAR3) 및 룸(ROOM) 구역 타석은 일반 연습타석 현황판에서 전면 동적 제외
+  // 🔄 [구역 카테고리 동적 격리] 상위 PracticeSelect에서 전달된 구역 필터링 타석 목록 기준 (PAR3만 안전 제외)
   const practiceBays = bays.filter(bay => {
-    const zCode = (bay as any).zone_code || (bay as any).zoneCode || '';
-    return zCode !== 'PAR3' && zCode !== 'ROOM';
+    const zCode = String((bay as any).zone_code || (bay as any).zoneCode || '').toUpperCase();
+    return zCode !== 'PAR3';
   });
 
   // 층별 동적 그룹핑 (floor 문자열 필드 기준, 없을 시 floor_no 백업)
@@ -51,17 +51,18 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
     );
   };
 
-  // 전체 이용 가능 타석 계산 (연습타석 구역 기준)
+  // 전체 이용 가능 타석 계산 (일반 셀프 배정 불가한 레슨 전용 타석 제외)
   const totalAvailable = practiceBays.filter(b => {
     const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-    return st === 'AVAILABLE' && !isBayBlocked(b);
+    return st === 'AVAILABLE' && !isBayBlocked(b) && !b.is_lesson_only;
   }).length;
   const totalPracticeBays = practiceBays.length;
 
   const renderBayCard = (bay: Bay) => {
     const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
     const isUnderMaintenance = isBayBlocked(bay);
-    const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance;
+    const isLessonOnly = Boolean(bay.is_lesson_only);
+    const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance && !isLessonOnly;
     const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
     const isPrepare = canonicalStatus === 'PREPARE';
     const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
@@ -98,17 +99,17 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
       textColor = '#ffffff';
       subTextColor = '#ffffff';
       glow = '0 1.5px 3px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.4)';
-      label = lang === 'KO' ? '대기' : 'Prep';
+      label = bay.is_paused ? '⏸' : (lang === 'KO' ? '대기' : 'Prep');
     } else if (isOccupied) {
       // ⚪ 새틴 슬레이트 그레이 음각
       bgCol = '#e5e5ea';
       borderCol = 'rgba(0, 0, 0, 0.04)';
       textColor = '#8e8e93';
-      subTextColor = '#1d1d1f';
+      subTextColor = bay.is_paused ? '#d97706' : '#1d1d1f';
       glow = 'inset 0 1.5px 3px rgba(0, 0, 0, 0.06)';
       
       const remMin = TimeMaster.getRemainingMinutes(bay);
-      label = `${remMin}m`;
+      label = bay.is_paused ? `⏸${remMin}m` : `${remMin}m`;
     } else if (isUnderMaintenance) {
       // 🔴 애플 브릭 레드
       bgCol = 'linear-gradient(145deg, #ef4444 0%, #dc2626 100%)';

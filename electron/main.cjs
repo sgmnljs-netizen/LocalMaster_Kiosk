@@ -213,8 +213,15 @@ function createKioskWindow() {
       return;
     }
 
-    // Ctrl+Shift+R / Cmd+Shift+R 은 엔지니어 비상 리로드 허용
-    if (ctrlOrCmd && input.shift && key === 'r') {
+    // F12 / Cmd+Alt+I 개발자 도구 토글 지원 (개발 모드)
+    if (isDevMode && input.type === 'keyDown' && (input.key === 'F12' || (ctrlOrCmd && input.alt && key === 'i'))) {
+      event.preventDefault();
+      mainWindow.webContents.toggleDevTools();
+      return;
+    }
+
+    // Ctrl+Shift+R 엔지니어 비상 리로드 허용 및 개발 모드 시 일반 새로고침(Ctrl+R / Cmd+R) 허용
+    if (ctrlOrCmd && key === 'r' && (isDevMode || input.shift)) {
       return;
     }
 
@@ -246,6 +253,9 @@ function createKioskWindow() {
     }
     mainWindow.show();
     mainWindow.focus();
+    if (isDevMode) {
+      mainWindow.webContents.openDevTools();
+    }
   });
 
   mainWindow.on('closed', () => {

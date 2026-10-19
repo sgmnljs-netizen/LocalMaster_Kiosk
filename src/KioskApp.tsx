@@ -124,6 +124,7 @@ export default function KioskApp() {
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
   const [initialAuthMode, setInitialAuthMode] = useState<'SMART_TAG' | 'FACE'>('SMART_TAG');
   const [faceTerminalEnabled, setFaceTerminalEnabled] = useState<boolean>(true);
+  const effectiveFaceTerminalEnabled = faceTerminalEnabled && settings.authMethods?.FACE !== false;
 
 
   // 🔍 키오스크 화면 확대/축소 (Zoom Scale) 상태 및 localStorage 연동
@@ -162,7 +163,8 @@ export default function KioskApp() {
   const [selectedBayNos, setSelectedBayNos] = useState<number[]>([]);
   const [companionTargets, setCompanionTargets] = useState<CompanionTargetItem[]>([]);
   const [showCompanionModal, setShowCompanionModal] = useState<boolean>(false);
-  const [selectedLockerNo, setSelectedLockerNo] = useState<number | null>(null);
+  const [selectedLockerNo, setSelectedLockerNo] = useState<number | string | null>(null);
+  const [selectedLockerDisplayNo, setSelectedLockerDisplayNo] = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<number | null>(null);
   const [currentHoldResId, setCurrentHoldResId] = useState<string | null>(null);
@@ -208,19 +210,26 @@ export default function KioskApp() {
   } | null>(null);
   const [completedAllocationInfo, setCompletedAllocationInfo] = useState<{
     bayNo: number | string;
+    oldBayNo?: number | string;
     durationMin: number;
     startTime?: string;
     endTime?: string;
     resId?: string;
     memberName?: string;
     payAmount?: number;
+    originalAmount?: number;
+    discountAmount?: number;
+    usedPoints?: number;
     cardIssuer?: string;
     cardNoMasked?: string;
     terminalId?: string;
     authNo?: string;
     vatYn?: string;
+    checkinMode?: string;
+    noticeMessage?: string;
   } | null>(null);
   const [completedPurchaseInfo, setCompletedPurchaseInfo] = useState<CompletedPurchaseInfo | null>(null);
+  const keepAuthAfterPurchaseRef = useRef(false);
 
   // 미들웨어 헬스체크 및 키오스크 설정 로드
   const [isMiddlewareOffline, setIsMiddlewareOffline] = useState(false);
@@ -347,7 +356,7 @@ export default function KioskApp() {
         if (data.type === 'middleware_offline') {
           console.warn('[WS-Kiosk] 미들웨어 오프라인 신호 수신');
         }
-        if (['bay_release', 'bay_update', 'bay_updated', 'bay_status_updated', 'bay_preoccupy', 'bay_created', 'bay_deleted', 'global_pause', 'checkin_complete', 'checkin_status', 'settings_updated'].includes(data.type as string)) {
+        if (['bay_release', 'bay_update', 'bay_updated', 'bay_status_updated', 'bay_preoccupy', 'bay_created', 'bay_deleted', 'global_pause', 'checkin_complete', 'checkin_status', 'reservation_update', 'settings_updated'].includes(data.type as string)) {
           loadBays();
           if (data.type === 'settings_updated' || data.type === 'global_pause') {
             fetchStoreInfo();
@@ -441,7 +450,7 @@ export default function KioskApp() {
   useEffect(() => {
     if (step === 'INTRO') return;
 
-    const timeoutMs = (step === 'PAYMENT' || step === 'PAR3_ALLOCATION') ? 90000 : 40000;
+    const timeoutMs = (step === 'PAYMENT' || step === 'PAR3_ALLOCATION' || step === 'MEMBER_REGISTER') ? 90000 : 40000;
     let sessionTimeout = setTimeout(() => {}, 0);
 
     const resetTimer = () => {
@@ -466,10 +475,12 @@ export default function KioskApp() {
     };
   }, [step, lang]);
 
-  // 2-1. 결제 대기 중 선점 타석(Soft-Lock) 만료 방지를 위한 25초 주기 Heartbeat 연장
+  // 2-1. 결제·회원가입·상품/이용권 선택 대기 중 선점 타석(Soft-Lock) 만료 방지를 위한 25초 주기 Heartbeat 연장
   useEffect(() => {
     if (step !== 'PAYMENT') {
       isVanBusyRef.current = false;
+    }
+    if (step !== 'PAYMENT' && step !== 'MEMBER_REGISTER' && step !== 'PRODUCT_SHOP' && step !== 'ASSET_SELECT') {
       return;
     }
     const heartbeatInterval = setInterval(() => {
@@ -571,6 +582,7 @@ export default function KioskApp() {
       selectedBayNosRef.current = [];
     }
     setSelectedLockerNo(null);
+    setSelectedLockerDisplayNo(null);
     setSelectedProduct(null);
     setSelectedAssetId(null);
     setCheckinResId(null);
@@ -613,6 +625,7 @@ export default function KioskApp() {
     setCompanionTargets([]);
     setShowCompanionModal(false);
     setSelectedLockerNo(null);
+    setSelectedLockerDisplayNo(null);
     setSelectedProduct(null);
     setPurpose(null);
     setErrorMasterCard(null);
@@ -632,7 +645,43 @@ export default function KioskApp() {
   // 직전 화면 단계로 복귀 핸들러
   const handleGoBack = () => {
     if (step === 'MEMBER_AUTH') {
+      // 🛡️ BUG-P05: 일일 타석권 상품 매대(PRODUCT_SHOP)에서 [👤 회원 인증하고 혜택 받기]를 눌러 진입한 경우,
+      // [이전 단계로] 터치 시 타석 선점 락을 해제하지 않고 상품 매대(PRODUCT_SHOP)로 안전하게 복귀
+      if (purpose === 'ALLOCATE_DAILY' && (selectedBayNo ?? selectedBayNoRef.current) !== null) {
+        setStep('PRODUCT_SHOP');
+        return;
+      }
       if (purpose === 'ALLOCATE_MEMBERSHIP' || purpose === 'ALLOCATE_DAILY') {
+        const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
+        if (bayToRelease !== null) {
+          api.releaseBay(bayToRelease).catch(console.error);
+          setSelectedBayNo(null);
+          selectedBayNoRef.current = null;
+        }
+        const baysToRelease = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
+        if (baysToRelease.length > 0) {
+          api.releaseBays(baysToRelease).catch(console.error);
+          setSelectedBayNos([]);
+          selectedBayNosRef.current = [];
+        }
+        setStep('PRACTICE_SELECT');
+        return;
+      }
+      handleGoHome();
+    } else if (step === 'MEMBER_REGISTER') {
+      if (
+        purpose === 'PURCHASE_PRODUCT' ||
+        purpose === 'EXTEND_LOCKER' ||
+        purpose === 'MOVE_BAY' ||
+        purpose === 'CHECKIN_RESERVATION' ||
+        ((purpose === 'ALLOCATE_MEMBERSHIP' || purpose === 'ALLOCATE_DAILY') && ((selectedBayNo ?? selectedBayNoRef.current) !== null || selectedBayNos.length > 0))
+      ) {
+        setStep('MEMBER_AUTH');
+        return;
+      }
+      handleGoHome();
+    } else if (step === 'PRODUCT_SHOP') {
+      if (purpose === 'ALLOCATE_DAILY') {
         const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
         if (bayToRelease !== null) {
           api.releaseBay(bayToRelease).catch(console.error);
@@ -643,13 +692,15 @@ export default function KioskApp() {
         return;
       }
       handleGoHome();
-    } else if (step === 'PRODUCT_SHOP') {
-      if (purpose === 'ALLOCATE_DAILY') {
-        setStep('PRACTICE_SELECT');
-        return;
-      }
-      handleGoHome();
     } else if (step === 'ASSET_SELECT') {
+      setSelectedAssetId(null);
+      setAuthMember(null);
+      const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
+      if (bayToRelease !== null) {
+        api.releaseBay(bayToRelease).catch(console.error);
+        setSelectedBayNo(null);
+        selectedBayNoRef.current = null;
+      }
       setStep('PRACTICE_SELECT');
     } else if (step === 'PAYMENT') {
       void handlePaymentCancel();
@@ -658,8 +709,7 @@ export default function KioskApp() {
       step === 'PAR3_ALLOCATION' ||
       step === 'LOCKER_EXTEND' ||
       step === 'TEEBOX_MAP' ||
-      step === 'CHECKIN_SELECT' ||
-      step === 'MEMBER_REGISTER'
+      step === 'CHECKIN_SELECT'
     ) {
       handleGoHome();
     } else {
@@ -703,20 +753,10 @@ export default function KioskApp() {
         })
       );
 
-      if (!hasValidDays && !hasValidAsset) {
-        // [ErrorMaster-First 예시] 회원권 만료 에러 — 선점된 타석 락 즉시 해제
-        const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
-        if (bayToRelease !== null) {
-          api.releaseBay(bayToRelease).catch(console.error);
-          setSelectedBayNo(null);
-          selectedBayNoRef.current = null;
-        }
-        const baysToRelease = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
-        if (baysToRelease.length > 0) {
-          api.releaseBays(baysToRelease).catch(console.error);
-          setSelectedBayNos([]);
-          selectedBayNosRef.current = [];
-        }
+      const hasPreselectedBay = (selectedBayNo ?? selectedBayNoRef.current) !== null || selectedBayNos.length > 0 || selectedBayNosRef.current.length > 0;
+
+      if (!hasValidDays && !hasValidAsset && !hasPreselectedBay) {
+        // [ErrorMaster-First 예시] 타석 미선택 상태에서 회원권 만료 에러
         const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
         await api.writeKioskLog('AUTH_ERROR', `회원권 만료 제약 차단 (Trace ID: ${trace})`, member.member_no);
         
@@ -730,6 +770,8 @@ export default function KioskApp() {
         setAuthMember(null); // [Security Patch] 에러 발생 시 강제 세션 파기
         setStep('MAIN_DASHBOARD');
       } else {
+        // 🛡️ BUG-M07: 타석을 선점한 상태에서 이용권이 만료/부재하더라도 락과 회원 세션(할인/포인트)을 유지한 채
+        // ASSET_SELECT ('💳 일일 타석권 결제로 전환' 버튼 탑재) 또는 CompanionSetupModal로 진입 허용
         if (selectedBayNos.length > 0) {
           setShowCompanionModal(true);
           setStep('PRACTICE_SELECT');
@@ -738,6 +780,8 @@ export default function KioskApp() {
           setStep('ASSET_SELECT');
         }
       }
+    } else if (purpose === 'ALLOCATE_DAILY') {
+      setStep('PRODUCT_SHOP');
     } else if (purpose === 'PURCHASE_PRODUCT') {
       setStep('PRODUCT_SHOP');
     } else if (purpose === 'EXTEND_LOCKER') {
@@ -753,35 +797,65 @@ export default function KioskApp() {
 
   // 6. 즉석 신규 회원가입 성공 시 핸들러
   const handleRegisterSuccess = async (member: Member) => {
-    // 선점된 타석이 남아있는 경우 즉시 락 해제
-    const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
-    if (bayToRelease !== null) {
-      api.releaseBay(bayToRelease).catch(console.error);
-      setSelectedBayNo(null);
-      selectedBayNoRef.current = null;
+    const activeBayNo = selectedBayNo ?? selectedBayNoRef.current;
+    const warnSuffix = (member as any)?.face_enroll_warning
+      ? ` (${(member as any).face_enroll_warning})`
+      : '';
+
+    // 감사 로그 적재
+    await api.writeKioskLog('REGISTER_SUCCESS', `즉석 회원가입 성공 (${member.member_name}, ${member.hp})`, member.member_no);
+
+    // 🛡️ BUG-M12: 타석을 이미 선점한 뒤 [30초 신규 회원가입]을 진행한 경우, 선점 락을 해제하지 않고
+    // 가입된 회원 세션(등급 할인/포인트 적립)을 유지한 채 일일 타석권 결제(PRODUCT_SHOP)로 즉시 연결
+    if (activeBayNo !== null && (purpose === 'ALLOCATE_MEMBERSHIP' || purpose === 'ALLOCATE_DAILY')) {
+      setAuthMember(member);
+      setPurpose('ALLOCATE_DAILY');
+      showToast(
+        lang === 'KO'
+          ? `${member.member_name} 님 가입이 완료되었습니다! 선택하신 ${activeBayNo}번 타석 일일권 결제로 이동합니다.${warnSuffix}`
+          : `Welcome ${member.member_name}! Proceeding to Bay ${activeBayNo} Daily Pass.${warnSuffix}`,
+        Boolean((member as any)?.face_enroll_warning)
+      );
+      setStep('PRODUCT_SHOP');
+      return;
     }
+
+    // 🛡️ BUG-S05: [회원권/상품 구매] (PURCHASE_PRODUCT) 퍼널에서 [30초 신규 회원가입]을 완료한 경우,
+    // 세션을 파기하지 않고 방금 가입한 회원 자격으로 상품 매대(PRODUCT_SHOP)로 즉시 직행
+    if (purpose === 'PURCHASE_PRODUCT') {
+      setAuthMember(member);
+      showToast(
+        lang === 'KO'
+          ? `${member.member_name} 님 가입이 완료되었습니다! 회원권 및 상품 구매 화면으로 이동합니다.${warnSuffix}`
+          : `Welcome ${member.member_name}! Proceeding to Membership Shop.${warnSuffix}`,
+        Boolean((member as any)?.face_enroll_warning)
+      );
+      setStep('PRODUCT_SHOP');
+      return;
+    }
+
     const baysToRelease = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
     if (baysToRelease.length > 0) {
       api.releaseBays(baysToRelease).catch(console.error);
       setSelectedBayNos([]);
       selectedBayNosRef.current = [];
     }
-    // 🚨 절대 규칙 적용: 공용 단말기이므로 회원가입 성공 시 세션(자동 로그인)을 유지하지 않고 즉시 파기합니다.
+    // 홈 화면에서 단독 회원가입한 경우 공용 단말기 보호를 위해 세션을 유지하지 않고 홈으로 복귀
     setAuthMember(null); 
     setPurpose(null);
-    showToast(lang === 'KO' ? `${member.member_name} 님, 환영합니다! 신규 회원가입이 완료되었습니다. 이용을 원하시면 홈 화면에서 원하시는 서비스를 선택 후 로그인해주세요.` : `Welcome ${member.member_name}! Registration successful. Please login again from home screen.`, false);
-
-    // 감사 로그 적재
-    await api.writeKioskLog('REGISTER_SUCCESS', `즉석 회원가입 성공 (${member.member_name}, ${member.hp})`, member.member_no);
-
-    // 즉시 홈 화면으로 강제 리다이렉트
+    showToast(
+      lang === 'KO'
+        ? `${member.member_name} 님, 환영합니다! 신규 회원가입이 완료되었습니다.${warnSuffix}`
+        : `Welcome ${member.member_name}! Registration successful.${warnSuffix}`,
+      Boolean((member as any)?.face_enroll_warning)
+    );
     setStep('MAIN_DASHBOARD');
   };
 
 
 
   // 2. 타석 맵에서 타석 선택 완료
-  const handleBaySelected = async (bayNo: number) => {
+  const handleBaySelected = async (bayNo: number, sourceBayNo?: number) => {
     setSelectedBayNo(bayNo);
 
     if (purpose === 'ALLOCATE_MEMBERSHIP' && authMember) {
@@ -792,18 +866,23 @@ export default function KioskApp() {
       // 일일권은 먼저 타석을 선택한 뒤, 60분/90분 결제 단계로 진입
       setStep('PRODUCT_SHOP');
     } else if (purpose === 'MOVE_BAY' && authMember) {
+      if (isAllocatingRef.current) return;
+      isAllocatingRef.current = true;
       // 타석 이동 완료 처리
       try {
         const effMemberNo = authMember.member_no;
         const effMemberName = (authMember.member_name || '').trim();
         const currentBay = bays.find(b => {
+          if (Number(b.bay_no) >= 1000) return false;
+          const zoneStr = String((b as any).zone || (b as any).zone_name || '').toUpperCase();
+          if (zoneStr.includes('PAR3') || zoneStr.includes('SCREEN') || zoneStr.includes('ROOM') || zoneStr.includes('파3') || zoneStr.includes('스크린')) return false;
           const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
           if (!['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(st)) return false;
           const bayMemberNo = String((b as any).current_member_no || b.member_no || '').trim();
           if (effMemberNo && bayMemberNo !== '') {
             return bayMemberNo === String(effMemberNo).trim();
           }
-          if (effMemberNo && String(b.current_user_name || '').trim() === String(effMemberNo).trim()) {
+          if (!bayMemberNo && effMemberNo && String(b.current_user_name || '').trim() === String(effMemberNo).trim()) {
             return true;
           }
           const bayUserName = String((b as any).member_name || b.current_user_name || '').trim();
@@ -812,25 +891,31 @@ export default function KioskApp() {
           }
           return false;
         });
-        const res = await api.moveBay(authMember.member_no, bayNo, currentBay?.bay_no);
+        const resolvedSourceBayNo = sourceBayNo ?? currentBay?.bay_no;
+        const res = await api.moveBay(authMember.member_no, bayNo, resolvedSourceBayNo);
         if (res.success) {
+          const resolvedOldBayNo = res.old_bay_no ?? resolvedSourceBayNo;
           // 감사 로그 적재
-          await api.writeKioskLog('BAY_MOVE', `타석 이동 성공 (${currentBay?.bay_no ?? res.old_bay_no ?? '?'}번 -> ${bayNo}번 타석으로 이동)`, authMember.member_no);
+          await api.writeKioskLog('BAY_MOVE', `타석 이동 성공 (${resolvedOldBayNo ?? '?'}번 -> ${bayNo}번 타석으로 이동)`, authMember.member_no);
           await loadBays();
           showToast(res.message);
           const movedMemberName = authMember.member_name;
-          const remainMin = (res as any).remain_min ?? (currentBay as any)?.remain_min ?? DEFAULT_SESSION_MIN;
+          const remainMin = (res.remain_min ?? (currentBay ? TimeMaster.getRemainingMinutes(currentBay) : 0)) || DEFAULT_SESSION_MIN;
           setAuthMember(null);
+          setPurpose(null);
           setSelectedBayNo(null);
           selectedBayNoRef.current = null;
           setCompletedAllocationInfo({
             bayNo: bayNo,
+            oldBayNo: resolvedOldBayNo,
             durationMin: remainMin,
-            startTime: (res as any).start_time || (currentBay as any)?.start_time,
-            endTime: (res as any).end_time || (currentBay as any)?.end_time,
+            startTime: res.start_time || (currentBay as any)?.start_time,
+            endTime: res.end_time || (currentBay as any)?.end_time,
             resId: (res as any).res_id || (currentBay as any)?.res_id,
-            memberName: `${movedMemberName} (타석 이동 완료)`,
-            payAmount: 0
+            memberName: movedMemberName,
+            payAmount: 0,
+            checkinMode: 'MOVE_BAY',
+            noticeMessage: res.message
           });
         } else {
           await api.releaseBay(bayNo).catch(() => {});
@@ -845,6 +930,8 @@ export default function KioskApp() {
         selectedBayNoRef.current = null;
         await loadBays();
         showErrorModal(err?.message || (lang === 'KO' ? '타석 이동 처리 중 오류가 발생했습니다.' : 'Failed to move teebox.'));
+      } finally {
+        isAllocatingRef.current = false;
       }
     }
   };
@@ -866,7 +953,8 @@ export default function KioskApp() {
         );
         if (res.success) {
           const confirmedMemberName = authMember.member_name;
-          await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId}, ${passDuration}분)`, authMember.member_no);
+          const effectiveDur = (res as any).duration_min ?? passDuration;
+          await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId}, ${effectiveDur}분)`, authMember.member_no);
           await loadBays();
           if (res.hardware_success === false) {
             showErrorModal(`${selectedBayNo}번 타석 배정은 완료되었으나, 센서/타석 기기 시작에 실패했습니다. 직원을 호출해 주세요.`, '타석 기기 가동 미완료', true);
@@ -874,14 +962,17 @@ export default function KioskApp() {
           const updated = await api.getMember(authMember.member_no);
           if (updated) setAuthMember(updated);
           
-          // 🔒 [1차 방어막] 배정 성공 직후 로그인 세션 즉시 완전 파기 (뒷사람 무단 사용 원천 차단)
+          const allocatedBayNo = selectedBayNo;
+          // 🔒 [1차 방어막] 배정 성공 직후 로그인 세션 및 선점 타석 상태 즉시 완전 파기 (뒷사람 무단 사용 및 유령 선택 원천 차단)
           setAuthMember(null);
           setSelectedAssetId(null);
+          setSelectedBayNo(null);
+          selectedBayNoRef.current = null;
           
           setStep('PRACTICE_SELECT');
           setCompletedAllocationInfo({
-            bayNo: selectedBayNo,
-            durationMin: passDuration,
+            bayNo: allocatedBayNo,
+            durationMin: effectiveDur,
             startTime: (res as any).start_time || (res as any).startTime,
             endTime: (res as any).end_time || (res as any).endTime,
             resId: res.res_id,
@@ -924,11 +1015,19 @@ export default function KioskApp() {
     setPurpose(purposeType);
 
     if (purposeType === 'ALLOCATE_MEMBERSHIP') {
+      // 🛡️ BUG-S07: 회원권 구매 완료 직후 [구매한 회원권으로 바로 타석 배정받기]로 진입한 경우 재인증 생략 후 바로 이용권 선택
+      if (keepAuthAfterPurchaseRef.current && authMember) {
+        keepAuthAfterPurchaseRef.current = false;
+        setSelectedAssetId(null);
+        setStep('ASSET_SELECT');
+        return;
+      }
       setInitialAuthMode('FACE');
       // 🔒 [2차 방어막] 단일 타석 선택 시 이전 비정상 잔존 세션이 있더라도 100% 강제 파기 후 신규 안면인식 유도
       setAuthMember(null);
       setStep('MEMBER_AUTH');
     } else if (purposeType === 'ALLOCATE_DAILY') {
+      keepAuthAfterPurchaseRef.current = false;
       setAuthMember(null);
       setStep('PRODUCT_SHOP');
     }
@@ -998,12 +1097,14 @@ export default function KioskApp() {
         showToast(lang === 'KO' ? '동반자 타석 배정이 모두 완료되었습니다!' : 'Group teebox allocation completed!');
         setAuthMember(null);
         setSelectedBayNo(null);
+        selectedBayNoRef.current = null;
         setSelectedBayNos([]);
+        selectedBayNosRef.current = [];
         setCompanionTargets([]);
         setStep('PRACTICE_SELECT');
         setCompletedAllocationInfo({
-          bayNo: targets[0].bayNo,
-          durationMin: targets[0].durationMin ?? DEFAULT_SESSION_MIN,
+          bayNo: targets.length > 1 ? targets.map(t => t.bayNo).join(', ') : targets[0].bayNo,
+          durationMin: firstRes.duration_min ?? targets[0].durationMin ?? DEFAULT_SESSION_MIN,
           startTime: firstRes.start_time || firstRes.startTime,
           endTime: firstRes.end_time || firstRes.endTime,
           resId: firstRes.res_id,
@@ -1014,14 +1115,58 @@ export default function KioskApp() {
         showErrorModal(err?.message || (lang === 'KO' ? '동반자 타석 배정 처리 중 오류가 발생했습니다.' : 'Group allocation failed.'));
       }
     } else {
+      // [BUG-09 FIX] 동반자 유료 결제 포함 시에도 결제 진입 전 영업 마감시간 사전 점검 수행
+      if (!acceptClosingTruncate) {
+        const now = TimeMaster.getSyncedDate();
+        const diffMin = TimeMaster.getMinutesUntilClose(storeCloseTime, now);
+        const PAYMENT_BUFFER_MIN = 2;
+        const prepareMin = 3;
+        const maxWaitMin = targets.reduce((maxW, t) => {
+          const bObj = bays.find(b => b.bay_no === t.bayNo);
+          if (bObj && (bObj.status === 'OCCUPIED' || bObj.status === 'PREPARE')) {
+            const w = TimeMaster.getRemainingMinutes(bObj, now, bObj.end_epoch_ms);
+            return Math.max(maxW, w);
+          }
+          return maxW;
+        }, 0);
+        const reqDuration = Math.max(...targets.map(t => t.durationMin ?? DEFAULT_SESSION_MIN));
+        const maxUserMin = Math.max(0, diffMin - (maxWaitMin + prepareMin + PAYMENT_BUFFER_MIN));
+
+        if (diffMin < reqDuration + maxWaitMin + prepareMin) {
+          if (maxUserMin < 10) {
+            showErrorModal(`영업 마감시간(${storeCloseTime}) 임박(최소 이용시간 10분 미만)으로 동반자 일일권 결제를 진행할 수 없습니다.`);
+            return;
+          }
+          setClosingPromptModal({
+            isVisible: true,
+            maxMin: maxUserMin,
+            closeTime: storeCloseTime,
+            message: `영업 마감시각(${storeCloseTime})까지 이용 가능한 최대 시간은 [${maxUserMin}분]입니다.\n\n${maxUserMin}분으로 단축하여 동반자 결제 및 배정을 진행하시겠습니까?`,
+            noticeText: '※ 결제 금액은 정상 요금으로 결제되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다.',
+            onConfirm: () => {
+              setClosingPromptModal(null);
+              const truncatedTargets = targets.map(t => ({
+                ...t,
+                durationMin: Math.min(t.durationMin ?? DEFAULT_SESSION_MIN, maxUserMin)
+              }));
+              handleCompanionConfirm(truncatedTargets, true);
+            },
+            onCancel: () => {
+              setClosingPromptModal(null);
+            }
+          });
+          return;
+        }
+      }
+
       // 일일권 결제가 포함된 경우 결제 단말기 퍼널로 전이
       setCompanionTargets(targets);
       setSelectedProduct({
         prod_cd: 'PROD_GROUP',
         prod_nm: `동반자 ${targets.length}개 타석 일괄 결제`,
         standard_price: totalPrice,
-        logic_type: 'MEMBERSHIP',
-        duration_min: DEFAULT_SESSION_MIN
+        logic_type: 'DAILY',
+        duration_min: targets[0]?.durationMin ?? DEFAULT_SESSION_MIN
       });
       setStep('PAYMENT');
     }
@@ -1029,18 +1174,25 @@ export default function KioskApp() {
 
   // 3. 상품 매대에서 구매 상품 선택 완료
   const handleProductSelected = async (prod: Product) => {
+    // 🛡️ BUG-S03: 성별 전용 상품 결제 진입 전 선제 검증
+    const rawTargetGender = String(
+      prod.target_gender || prod.access_rules?.restricted_gender || prod.rules_detail?.restricted_gender || 'ALL'
+    ).toUpperCase();
+    const targetGenderNorm = rawTargetGender === 'MALE' ? 'M' : rawTargetGender === 'FEMALE' ? 'F' : rawTargetGender;
+    if ((targetGenderNorm === 'M' || targetGenderNorm === 'F') && authMember?.gender) {
+      const normMemG = String(authMember.gender).toUpperCase();
+      const memG = normMemG === 'MALE' || normMemG === '남' ? 'M' : normMemG === 'FEMALE' || normMemG === '여' ? 'F' : normMemG;
+      if (memG && memG !== targetGenderNorm) {
+        const reqLabel = targetGenderNorm === 'F' ? '여성' : '남성';
+        showErrorModal(`선택하신 상품은 [${reqLabel} 회원 전용] 상품입니다. 다른 상품을 선택해 주세요.`, '성별 제한 상품 안내');
+        return;
+      }
+    }
+
     if (purpose === 'ALLOCATE_DAILY' && selectedBayNo) {
       // ⏰ [일일권 결제 전 마감시간 사전 점검 (SSOT)]
-      const now = new Date();
-      const cleanClose = (storeCloseTime || '24:00').replace(':', '').padStart(4, '0');
-      const closeH = parseInt(cleanClose.slice(0, 2), 10);
-      const closeM = parseInt(cleanClose.slice(2, 4), 10);
-      const closeDt = new Date();
-      closeDt.setHours(closeH === 24 ? 0 : closeH, closeM, 0, 0);
-      if (closeH === 24 || closeDt <= now) {
-        closeDt.setDate(closeDt.getDate() + 1);
-      }
-      const diffMin = Math.floor((closeDt.getTime() - now.getTime()) / 60000);
+      const now = TimeMaster.getSyncedDate();
+      const diffMin = TimeMaster.getMinutesUntilClose(storeCloseTime, now);
 
       // [P0-07 & P2-2] 대기 타석 잔여시간(waitMin) 및 종료 시각 계산: TimeMaster SSOT 파서 사용
       const selectedBay = bays.find(b => b.bay_no === selectedBayNo);
@@ -1098,27 +1250,26 @@ export default function KioskApp() {
     displayLockerNo?: number | string
   ) => {
     const targetLockerId = lockerNo || authMember?.locker_info?.locker_id || Number(authMember?.locker_info?.locker_no) || 0;
-    setSelectedLockerNo(targetLockerId);
+    const resolvedDisplayNo = String(displayLockerNo || targetLockerId || authMember?.locker_info?.locker_no || '').trim();
+    setSelectedLockerNo(targetLockerId || resolvedDisplayNo);
+    setSelectedLockerDisplayNo(resolvedDisplayNo || null);
     setSelectedProduct({ ...prod, days: extendDays || prod.days });
     setSelectedBayNo(null);
     setSelectedBayNos([]);
     setPurpose('EXTEND_LOCKER');
+    // [BUG-01 FIX] HOLD 예약(ReservationMaster.pay_amt)에는 등급할인 차감 전 상품 기준가(rawLockerPrice)를 저장하여
+    // PaymentTerminal에서 쿠폰/포인트 복합 사용 시 백엔드 웹훅에서 등급할인이 이중 차감(400 Mismatch)되는 현상을 원천 차단
     const rawLockerPrice =
       prod.sale_price !== undefined && prod.sale_price !== null && prod.sale_price > 0
         ? prod.sale_price
         : prod.standard_price;
-    const lockerGradeDisc =
-      authMember?.discount_rate && authMember.discount_rate > 0
-        ? Math.round(rawLockerPrice * (authMember.discount_rate / 100))
-        : 0;
-    const effectiveLockerPrice = Math.max(0, rawLockerPrice - lockerGradeDisc);
     try {
       const holdRes = await api.holdLockerExtension(
         targetLockerId,
-        effectiveLockerPrice,
+        rawLockerPrice,
         prod.prod_cd,
         authMember?.member_no,
-        displayLockerNo || authMember?.locker_info?.locker_no || targetLockerId
+        resolvedDisplayNo || targetLockerId
       );
       const heldResId = holdRes?.resId || holdRes?.res_id;
       if (!holdRes?.success || !heldResId) {
@@ -1146,6 +1297,7 @@ export default function KioskApp() {
       !cardApproval ||
       !apprStr ||
       apprStr.startsWith('FREE-') ||
+      apprStr.startsWith('POINT-') ||
       apprStr === 'MEMBERSHIP' ||
       (cardApproval.amount !== undefined && cardApproval.amount <= 0) ||
       payAmount <= 0
@@ -1153,7 +1305,9 @@ export default function KioskApp() {
       return { success: false, message: '0원 결제 또는 카드 승인 정보가 없어 자동 취소를 생략합니다.' };
     }
     try {
-      const orgDate = cardApproval.approved_at ? cardApproval.approved_at.replace(/[^0-9]/g, '').slice(0, 8) : '';
+      const orgDate =
+        (cardApproval.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) ||
+        TimeMaster.getKstYmd(new Date()).replace(/-/g, '');
       const isTaxFree = selectedProduct?.vat_yn === 'N';
       const cancelRes = await kioskVanClient.cancelCardPayment({
         amount: payAmount || cardApproval.amount,
@@ -1161,6 +1315,7 @@ export default function KioskApp() {
         orgApprovedDate: orgDate,
         terminalId: cardApproval.terminal_id,
         vanTrNo: cardApproval.van_tr_no,
+        installmentMonths: cardApproval.installment_months || 0,
         isTaxFree,
         reason: `무인 키오스크 장애: ${reason}`
       });
@@ -1277,19 +1432,26 @@ export default function KioskApp() {
                 showErrorModal(`${selectedBayNo}번 타석 결제는 완료되었으나 센서 기기 가동에 실패했습니다. 직원을 호출해주세요.`, '타석 기기 시작 확인 필요', true);
               }
               
-              // 🔒 [1차 방어막] 카드 결제 배정 성공 직후 세션 즉시 완전 파기
+              const allocatedBayNo = selectedBayNo;
+              const confirmedMemberName = authMember?.member_name || '비회원';
+              // 🔒 [1차 방어막] 카드 결제 배정 성공 직후 세션 및 선점 타석 상태 즉시 완전 파기
               setAuthMember(null);
               setSelectedAssetId(null);
+              setSelectedBayNo(null);
+              selectedBayNoRef.current = null;
               
               setStep('PRACTICE_SELECT');
               setCompletedAllocationInfo({
-                bayNo: selectedBayNo,
-                durationMin: finalDuration,
+                bayNo: allocatedBayNo,
+                durationMin: (allocResult as any).duration_min ?? finalDuration,
                 startTime: (allocResult as any).start_time || (allocResult as any).startTime,
                 endTime: (allocResult as any).end_time || (allocResult as any).endTime,
                 resId: allocResult.res_id,
-                memberName: authMember?.member_name || '비회원',
+                memberName: confirmedMemberName,
                 payAmount: actualPaidAmount,
+                originalAmount: effectiveDailyBasePrice,
+                discountAmount: payResult?.discountAmount ?? (gradeDiscount + couponDiscount),
+                usedPoints: payResult?.usedPoints || 0,
                 cardIssuer: payResult?.cardApproval?.issuer_name,
                 cardNoMasked: payResult?.cardApproval?.card_no_masked,
                 terminalId: payResult?.cardApproval?.terminal_id,
@@ -1349,16 +1511,19 @@ export default function KioskApp() {
           }
           const firstRes = groupRes.results?.[0] || {};
           const leaderName = authMember?.member_name || companionTargets[0]?.memberName || '회원';
-          const groupPaidAmt = payResult?.cardApproval?.amount ?? payResult?.amount ?? companionTargets.reduce((sum, c) => sum + (c.price || 0), 0);
+          const groupOrigAmt = companionTargets.reduce((sum, c) => sum + (c.price || 0), 0);
+          const groupPaidAmt = payResult?.cardApproval?.amount ?? payResult?.amount ?? groupOrigAmt;
           const allocatedSummary = `${leaderName} 외 ${companionTargets.length - 1}명 (${companionTargets.map(t => t.bayNo).join(', ')}번)`;
-          const firstBayNo = companionTargets[0].bayNo;
-          const firstDuration = companionTargets[0].durationMin ?? DEFAULT_SESSION_MIN;
+          const firstBayNo = companionTargets.length > 1 ? companionTargets.map(t => t.bayNo).join(', ') : companionTargets[0].bayNo;
+          const firstDuration = firstRes.duration_min ?? companionTargets[0].durationMin ?? DEFAULT_SESSION_MIN;
 
           setCompanionTargets([]);
           setAuthMember(null);
           setSelectedAssetId(null);
           setSelectedBayNo(null);
+          selectedBayNoRef.current = null;
           setSelectedBayNos([]);
+          selectedBayNosRef.current = [];
           setStep('PRACTICE_SELECT');
           showToast(lang === 'KO' ? '동반자 타석 결제 및 배정이 완료되었습니다!' : 'Group allocation & payment completed!');
           setCompletedAllocationInfo({
@@ -1369,6 +1534,9 @@ export default function KioskApp() {
             resId: firstRes.res_id,
             memberName: allocatedSummary,
             payAmount: groupPaidAmt,
+            originalAmount: groupOrigAmt,
+            discountAmount: payResult?.discountAmount ?? (groupGradeDiscount + groupCouponDiscount),
+            usedPoints: payResult?.usedPoints || 0,
             cardIssuer: payResult?.cardApproval?.issuer_name,
             cardNoMasked: payResult?.cardApproval?.card_no_masked,
             terminalId: payResult?.cardApproval?.terminal_id,
@@ -1425,16 +1593,31 @@ export default function KioskApp() {
           if (res && res.success === false) {
             throw new Error(res.message || '회원권 전산 등록에 실패했습니다.');
           }
+          // 🛡️ BUG-S08: 키오스크 감사 로그 적재
+          await api.writeKioskLog(
+            'PRODUCT_PURCHASE',
+            `회원권/상품 구매 완료 (${selectedProduct.prod_nm}, 결제금액: ${actualProductPaid.toLocaleString()}원)`,
+            authMember.member_no
+          );
+          const resolvedDays = selectedProduct.days ?? selectedProduct.access_rules?.days ?? selectedProduct.rules_detail?.days;
+          const resolvedTotalCount = selectedProduct.total_count ?? selectedProduct.access_rules?.total_count ?? selectedProduct.rules_detail?.total_count;
           setCompletedPurchaseInfo({
+            memberNo: authMember.member_no,
             memberName: authMember.member_name,
             memberHp: authMember.hp,
             productName: selectedProduct.meta_data?.display_nm || selectedProduct.prod_nm,
             amount: actualProductPaid,
+            originalAmount: effectiveProductBasePrice,
+            discountAmount: payResult?.discountAmount ?? (gradeOnlyDisc + (payResult?.couponDiscount || 0)),
+            usedPoints: payResult?.usedPoints || 0,
             apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
             tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
             purchaseType: 'MEMBERSHIP',
             startDate: res?.start_date,
-            endDate: res?.end_date,
+            endDate: res?.end_date ?? null,
+            days: resolvedDays,
+            totalCount: resolvedTotalCount,
+            logicType: selectedProduct.logic_type,
             cardIssuer: payResult?.cardApproval?.issuer_name,
             cardNoMasked: payResult?.cardApproval?.card_no_masked,
             terminalId: payResult?.cardApproval?.terminal_id,
@@ -1495,12 +1678,17 @@ export default function KioskApp() {
           if (res && res.success === false) {
             throw new Error(res.message || '라카 연장 전산 등록에 실패했습니다.');
           }
-          const finalLockerLabel = res?.locker_no || authMember?.locker_info?.locker_no || selectedLockerNo;
+          const finalLockerLabel = res?.locker_no || selectedLockerDisplayNo || selectedLockerNo || authMember?.locker_info?.locker_no;
           setCompletedPurchaseInfo({
             memberName: authMember.member_name,
+            memberNo: authMember.member_no,
             memberHp: authMember.hp,
             productName: `${finalLockerLabel}번 개인 사물함 (라카 ${selectedProduct.days || 30}일 대여)`,
+            days: selectedProduct.days || 30,
             amount: actualLockerPaid,
+            originalAmount: effectiveLockerBasePrice,
+            discountAmount: payResult?.discountAmount ?? (lockerGradeOnlyDisc + (payResult?.couponDiscount || 0)),
+            usedPoints: payResult?.usedPoints || 0,
             apprNo: payResult?.apprNo || Math.floor(10000000 + Math.random() * 90000000).toString(),
             tradeDate: payResult?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
             purchaseType: 'LOCKER',
@@ -1516,6 +1704,12 @@ export default function KioskApp() {
         } catch (err: any) {
           console.error('라카 연장 등록 실패:', err);
           hasCustomModal = false;
+          const holdToCancel = currentHoldResId || currentHoldResIdRef.current;
+          if (holdToCancel) {
+            await api.cancelHoldReservation(holdToCancel).catch(console.error);
+            setCurrentHoldResId(null);
+            currentHoldResIdRef.current = null;
+          }
           let cancelInfo = '';
           if (payResult?.cardApproval) {
             const cancelRes = await executeAutoReversal(payResult.cardApproval, actualLockerPaid, err?.message || '라카 연장 등록 실패');
@@ -1629,6 +1823,9 @@ export default function KioskApp() {
       <KioskSettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        kioskMenuConfigs={kioskMenuConfigs}
+        checkinPolicy={checkinPolicy}
+        faceTerminalEnabled={faceTerminalEnabled}
       />
 
       {/* A. 인트로 광고 화면 단계 */}
@@ -1913,10 +2110,19 @@ export default function KioskApp() {
                     setStep('MEMBER_AUTH');
                   }
                 }}
-                onSignUp={() => setStep('MEMBER_REGISTER')}
+                onSignUp={() => {
+                  setPurpose(null);
+                  setAuthMember(null);
+                  setStep('MEMBER_REGISTER');
+                }}
                 onCheckin={checkinPolicy !== 'DISABLED' ? () => {
                   setPurpose('CHECKIN_RESERVATION');
-                  setStep('MEMBER_AUTH');
+                  setInitialAuthMode('SMART_TAG');
+                  if (authMember) {
+                    setStep('CHECKIN_SELECT');
+                  } else {
+                    setStep('MEMBER_AUTH');
+                  }
                 } : undefined}
                 onMenuClick={(menuId, zoneIds) => {
                   const zIds = zoneIds || [];
@@ -1956,11 +2162,20 @@ export default function KioskApp() {
                   memberNo={authMember.member_no}
                   memberName={authMember.member_name}
                   lang={lang}
-                  onCheckinSuccess={(bayNo: number, resId: string, durationMin?: number, startTime?: string, endTime?: string) => {
-                    setSelectedBayNo(bayNo);
+                  onCheckinSuccess={(
+                    bayNo: number | string,
+                    resId: string,
+                    durationMin?: number,
+                    startTime?: string,
+                    endTime?: string,
+                    message?: string,
+                    checkinMode?: string
+                  ) => {
+                    const numericBay = typeof bayNo === 'number' ? bayNo : (parseInt(String(bayNo).replace(/[^0-9]/g, ''), 10) || 1);
+                    setSelectedBayNo(numericBay);
                     setCheckinResId(resId);
                     setPurpose('CHECKIN_RESERVATION');
-                    showToast(lang === 'KO' ? `${bayNo}번 타석 체크인이 완료되었습니다.` : `Bay ${bayNo} check-in completed.`);
+                    showToast(message || (lang === 'KO' ? `${bayNo}번 타석 체크인이 완료되었습니다.` : `Bay ${bayNo} check-in completed.`));
                     setCompletedAllocationInfo({
                       bayNo: bayNo,
                       durationMin: durationMin ?? DEFAULT_SESSION_MIN,
@@ -1968,7 +2183,9 @@ export default function KioskApp() {
                       endTime,
                       resId: resId,
                       memberName: authMember?.member_name || '회원',
-                      payAmount: 0
+                      payAmount: 0,
+                      checkinMode,
+                      noticeMessage: message
                     });
                     setAuthMember(null);
                     setStep('MAIN_DASHBOARD');
@@ -1985,9 +2202,9 @@ export default function KioskApp() {
                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9000 }}>
                  <MemberAuth
                    initialAuthMode={initialAuthMode}
-                   faceTerminalEnabled={faceTerminalEnabled}
+                   faceTerminalEnabled={effectiveFaceTerminalEnabled}
                    onAuthSuccess={handleAuthSuccess}
-                   onCancel={handleGoHome}
+                   onCancel={handleGoBack}
                    onSignUpClick={() => setStep('MEMBER_REGISTER')}
                    onAuthError={(code, detail) => {
                      const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
@@ -2009,6 +2226,7 @@ export default function KioskApp() {
                        traceId: trace
                      });
                      api.writeKioskLog('AUTH_ERROR', `${detail} (Trace ID: ${trace})`);
+                     setPurpose(null);
                      setStep('MAIN_DASHBOARD');
                    }}
                  />
@@ -2018,10 +2236,10 @@ export default function KioskApp() {
             {step === 'MEMBER_AUTH' && !((purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY') && (
               <MemberAuth
                 initialAuthMode={initialAuthMode}
-                faceTerminalEnabled={faceTerminalEnabled}
+                faceTerminalEnabled={effectiveFaceTerminalEnabled}
                 onAuthSuccess={handleAuthSuccess}
                 onCancel={handleGoHome}
-                onSignUpClick={() => setStep('MEMBER_REGISTER')}
+                onSignUpClick={purpose === 'CHECKIN_RESERVATION' || purpose === 'MOVE_BAY' || purpose === 'EXTEND_LOCKER' ? undefined : () => setStep('MEMBER_REGISTER')}
                 onAuthError={(code, detail) => {
                   const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
                   if (bayToRelease !== null) {
@@ -2042,6 +2260,7 @@ export default function KioskApp() {
                     traceId: trace
                   });
                   api.writeKioskLog('AUTH_ERROR', `${detail} (Trace ID: ${trace})`);
+                  setPurpose(null);
                   setStep('MAIN_DASHBOARD');
                 }}
               />
@@ -2068,8 +2287,8 @@ export default function KioskApp() {
               }}>
                 <MemberRegister
                   onRegisterSuccess={handleRegisterSuccess}
-                  onCancel={handleGoHome}
-                  faceTerminalEnabled={faceTerminalEnabled}
+                  onCancel={handleGoBack}
+                  faceTerminalEnabled={effectiveFaceTerminalEnabled}
                   lang={lang}
                 />
               </div>
@@ -2083,7 +2302,7 @@ export default function KioskApp() {
               (completedAllocationInfo !== null && step !== 'TEEBOX_MAP') || 
               (feedbackCountdown !== null && step !== 'TEEBOX_MAP') ||
               (((purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY') && 
-               (step === 'MEMBER_AUTH' || step === 'ASSET_SELECT' || step === 'PRODUCT_SHOP' || step === 'PAYMENT'))) && (
+               (step === 'MEMBER_AUTH' || step === 'MEMBER_REGISTER' || step === 'ASSET_SELECT' || step === 'PRODUCT_SHOP' || step === 'PAYMENT'))) && (
               <PracticeSelect
                 bays={bays}
                 lang={lang}
@@ -2109,12 +2328,13 @@ export default function KioskApp() {
                 bays={bays}
                 leaderMember={authMember}
                 lang={lang}
-                selectedDurationMin={selectedProduct?.duration_min || (selectedProduct ? ((selectedProduct as any).access_rules?.duration_min || (selectedProduct as any).rules_detail?.duration_min) : 0)}
+                selectedDurationMin={selectedProduct?.duration_min || (selectedProduct ? ((selectedProduct as any).access_rules?.duration_min || (selectedProduct as any).rules_detail?.duration_min) : 0) || DEFAULT_SESSION_MIN}
                 onConfirm={handleCompanionConfirm}
                 onCancel={() => {
                   setShowCompanionModal(false);
                   api.releaseBays(selectedBayNos).catch(console.error);
                   setSelectedBayNos([]);
+                  selectedBayNosRef.current = [];
                 }}
               />
             )}
@@ -2155,10 +2375,35 @@ export default function KioskApp() {
                   justifyContent: 'center',
                   padding: '24px'
                 }}>
-                  <div style={{ maxWidth: '1000px', width: '100%' }}>
+                  <div style={{ maxWidth: '1000px', width: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {!authMember && (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInitialAuthMode('SMART_TAG');
+                            setStep('MEMBER_AUTH');
+                          }}
+                          style={{
+                            padding: '10px 18px',
+                            borderRadius: '12px',
+                            background: 'rgba(16, 185, 129, 0.95)',
+                            color: '#ffffff',
+                            border: '1px solid rgba(255,255,255,0.4)',
+                            fontSize: '15px',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                          }}
+                        >
+                          👤 회원 인증하고 등급할인·포인트 혜택 받기
+                        </button>
+                      </div>
+                    )}
                     <ProductShop
                       memberNo={authMember?.member_no}
                       memberName={authMember?.member_name}
+                      memberGender={authMember?.gender}
                       discountRate={authMember?.discount_rate}
                       gradeName={authMember?.member_grade || authMember?.grade_cd}
                       purposeType={purpose as 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT'}
@@ -2179,6 +2424,7 @@ export default function KioskApp() {
                 <ProductShop
                   memberNo={authMember?.member_no}
                   memberName={authMember?.member_name}
+                  memberGender={authMember?.gender}
                   discountRate={authMember?.discount_rate}
                   gradeName={authMember?.member_grade || authMember?.grade_cd}
                   purposeType={purpose as 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT'}
@@ -2196,7 +2442,8 @@ export default function KioskApp() {
                 memberNo={authMember.member_no}
                 memberName={authMember.member_name}
                 member={authMember}
-                {...({ discountRate: authMember.discount_rate || 0 } as any)}
+                discountRate={authMember.discount_rate || 0}
+                lang={lang}
                 onLockerPaymentTriggered={handleLockerPaymentTriggered}
                 onCancel={handleGoHome}
               />
@@ -2209,8 +2456,12 @@ export default function KioskApp() {
               <Par3Allocation
                 memberNo={authMember?.member_no}
                 memberName={authMember?.member_name}
-                faceTerminalEnabled={faceTerminalEnabled}
+                faceTerminalEnabled={effectiveFaceTerminalEnabled}
                 selectedZoneIds={selectedZoneIds}
+                lang={lang}
+                onVanBusyChange={(busy) => {
+                  isVanBusyRef.current = busy;
+                }}
                 onBookingSelected={(prod) => {
                   setSelectedProduct(prod);
                   setStep('PAYMENT');
@@ -2255,12 +2506,20 @@ export default function KioskApp() {
                       }
                       assignedBayNo={selectedBayNo}
                       assignedBayNos={selectedBayNos}
-                      assignedLockerNo={selectedLockerNo}
+                      assignedLockerNo={selectedLockerDisplayNo || selectedLockerNo}
                       resId={purpose === 'EXTEND_LOCKER' ? null : (currentHoldResId || checkinResId)}
                       memberName={authMember?.member_name}
                       memberNo={authMember?.member_no}
                       memberPoint={authMember?.total_point || 0}
                       discountRate={authMember?.discount_rate || 0}
+                      discountableAmount={
+                        companionTargets.length > 0
+                          ? companionTargets
+                              .filter(t => Boolean(t.memberNo && authMember?.member_no && t.memberNo === authMember.member_no))
+                              .reduce((sum, t) => sum + (t.price || 0), 0)
+                          : undefined
+                      }
+                      productCategory={selectedProduct?.logic_type || (selectedProduct as any)?.category}
                       gradeName={authMember?.member_grade || authMember?.grade_cd}
                       proId={(selectedProduct as any)?.pro_id || null}
                       onVanBusyChange={(busy) => { isVanBusyRef.current = busy; }}
@@ -2294,12 +2553,20 @@ export default function KioskApp() {
                   }
                   assignedBayNo={selectedBayNo}
                   assignedBayNos={selectedBayNos}
-                  assignedLockerNo={selectedLockerNo}
+                  assignedLockerNo={selectedLockerDisplayNo || selectedLockerNo}
                   resId={purpose === 'EXTEND_LOCKER' ? null : (currentHoldResId || checkinResId)}
                   memberName={authMember?.member_name}
                   memberNo={authMember?.member_no}
                   memberPoint={authMember?.total_point || 0}
                   discountRate={authMember?.discount_rate || 0}
+                  discountableAmount={
+                    companionTargets.length > 0
+                      ? companionTargets
+                          .filter(t => Boolean(t.memberNo && authMember?.member_no && t.memberNo === authMember.member_no))
+                          .reduce((sum, t) => sum + (t.price || 0), 0)
+                      : undefined
+                  }
+                  productCategory={selectedProduct?.logic_type || (selectedProduct as any)?.category}
                   gradeName={authMember?.member_grade || authMember?.grade_cd}
                   proId={(selectedProduct as any)?.pro_id || null}
                   onVanBusyChange={(busy) => { isVanBusyRef.current = busy; }}
@@ -2418,6 +2685,9 @@ export default function KioskApp() {
                       });
 
                       if (validAssets.length === 0) {
+                        const unassignableReasons = (authMember.assets || [])
+                          .filter(a => a.is_assignable === false && a.unassignable_reason)
+                          .map(a => `• ${(a as any).prod_nm || a.item_name}: ${a.unassignable_reason}`);
                         return (
                           <div 
                             style={{
@@ -2437,6 +2707,13 @@ export default function KioskApp() {
                             <div>
                               {lang === 'KO' ? '해당 타석에서 사용할 수 있는 이용권이 없습니다.' : 'No active pass items found for this zone.'}
                             </div>
+                            {unassignableReasons.length > 0 && (
+                              <div style={{ fontSize: '14px', color: '#dc2626', background: '#fef2f2', padding: '10px 16px', borderRadius: '10px', textAlign: 'left', width: '100%', boxSizing: 'border-box' }}>
+                                {unassignableReasons.map((r, idx) => (
+                                  <div key={idx}>{r}</div>
+                                ))}
+                              </div>
+                            )}
                             <button
                               onClick={() => {
                                 setPurpose('ALLOCATE_DAILY');
@@ -2703,6 +2980,27 @@ export default function KioskApp() {
         <PurchaseCompleteModal
           purchaseInfo={completedPurchaseInfo}
           lang={lang}
+          onAllocateNow={
+            completedPurchaseInfo.purchaseType === 'MEMBERSHIP' &&
+            completedPurchaseInfo.memberNo &&
+            !['GOODS', 'RETAIL', 'FNB', 'LESSON'].includes(String(completedPurchaseInfo.logicType || '').toUpperCase())
+              ? async () => {
+                  const targetMemberNo = completedPurchaseInfo.memberNo!;
+                  setCompletedPurchaseInfo(null);
+                  try {
+                    const refreshedMember = await api.getMember(targetMemberNo);
+                    if (refreshedMember) {
+                      setAuthMember(refreshedMember);
+                      keepAuthAfterPurchaseRef.current = true;
+                    }
+                  } catch (err) {
+                    console.warn('Failed to refresh member after purchase:', err);
+                  }
+                  setPurpose('ALLOCATE_MEMBERSHIP');
+                  setStep('PRACTICE_SELECT');
+                }
+              : undefined
+          }
           onClose={() => {
             setCompletedPurchaseInfo(null);
             handleLogoutToHome();

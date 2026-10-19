@@ -1,5 +1,16 @@
 import { useState, useEffect } from 'react';
 
+export type KioskAuthModeKey = 'SMART_TAG' | 'PHONE_KEYPAD' | 'QR_SCAN' | 'FACE';
+
+export interface KioskAuthMethodsConfig {
+  SMART_TAG: boolean;
+  PHONE_KEYPAD: boolean;
+  QR_SCAN: boolean;
+  FACE: boolean;
+}
+
+export type KioskMenuVisibilityMap = Record<string, boolean>;
+
 export interface KioskSettings {
   deviceId: string;
   deviceName: string;
@@ -12,6 +23,87 @@ export interface KioskSettings {
   adminPin: string;
   isMaintenanceMode: boolean;
   autoPrintReceipt?: boolean;
+  /** 기기별 메뉴 On/Off 로컬 오버라이드 (미지정 키는 파트너센터 설정 준수) */
+  menuOverrides?: KioskMenuVisibilityMap;
+  /** 기기별 회원인증 수단(4종) 활성화 여부 */
+  authMethods?: KioskAuthMethodsConfig;
+  /** 기기별 회원인증 진입 시 기본 시작 탭 */
+  defaultAuthMode?: KioskAuthModeKey;
+}
+
+export const DEFAULT_AUTH_METHODS: KioskAuthMethodsConfig = {
+  SMART_TAG: true,
+  PHONE_KEYPAD: true,
+  QR_SCAN: true,
+  FACE: true,
+};
+
+export function canonicalizeKioskMenuId(menuId: string): string {
+  const upper = String(menuId || '').trim().toUpperCase();
+  if (upper === 'ALLOCATION' || upper === 'ALLOCATE_MEMBERSHIP') return 'ALLOCATE_DAILY';
+  if (upper === 'BOOK_PAR3' || upper === 'PAR3_ALLOCATION') return 'PAR3';
+  if (upper === 'MEMBERSHIP' || upper === 'PRODUCTS') return 'PURCHASE_PRODUCT';
+  if (upper === 'EXTEND_LOCKER' || upper === 'LOCKER_EXTEND') return 'LOCKER';
+  if (upper === 'CHANGE_BAY') return 'MOVE_BAY';
+  if (upper === 'REGISTER' || upper === 'REGISTER_MEMBER') return 'SIGNUP';
+  if (upper === 'CHECKIN_RESERVATION') return 'CHECKIN';
+  return upper;
+}
+
+export function isKioskMenuEnabled(
+  menuId: string,
+  overrides?: KioskMenuVisibilityMap,
+  partnerActive: boolean = true
+): boolean {
+  if (overrides) {
+    const rawKey = String(menuId || '').trim();
+    const canonicalKey = canonicalizeKioskMenuId(rawKey);
+    if (typeof overrides[rawKey] === 'boolean') {
+      return overrides[rawKey];
+    }
+    if (typeof overrides[canonicalKey] === 'boolean') {
+      return overrides[canonicalKey];
+    }
+    for (const [k, v] of Object.entries(overrides)) {
+      if (typeof v === 'boolean' && canonicalizeKioskMenuId(k) === canonicalKey) {
+        return v;
+      }
+    }
+  }
+  return partnerActive;
+}
+
+export function resolveEnabledAuthModes(
+  authMethods?: Partial<KioskAuthMethodsConfig>,
+  faceTerminalEnabled: boolean = true
+): KioskAuthModeKey[] {
+  const merged: KioskAuthMethodsConfig = {
+    ...DEFAULT_AUTH_METHODS,
+    ...(authMethods || {}),
+  };
+  const ordered: KioskAuthModeKey[] = ['SMART_TAG', 'PHONE_KEYPAD', 'QR_SCAN', 'FACE'];
+  const enabled = ordered.filter((mode) => {
+    if (mode === 'FACE') {
+      return merged.FACE !== false && faceTerminalEnabled !== false;
+    }
+    return merged[mode] !== false;
+  });
+  return enabled.length > 0 ? enabled : ['PHONE_KEYPAD'];
+}
+
+export function resolveEffectiveAuthMode(
+  requestedMode: KioskAuthModeKey | undefined,
+  defaultAuthMode: KioskAuthModeKey | undefined,
+  enabledModes: KioskAuthModeKey[]
+): KioskAuthModeKey {
+  const safeEnabled: KioskAuthModeKey[] = enabledModes.length > 0 ? enabledModes : ['PHONE_KEYPAD'];
+  if (defaultAuthMode && safeEnabled.includes(defaultAuthMode)) {
+    return defaultAuthMode;
+  }
+  if (requestedMode && safeEnabled.includes(requestedMode)) {
+    return requestedMode;
+  }
+  return safeEnabled[0];
 }
 
 export const KIOSK_DEVICE_OPTIONS = [
@@ -32,6 +124,9 @@ export const DEFAULT_KIOSK_SETTINGS: KioskSettings = {
   deviceKey: '',
   adminPin: '0000',
   isMaintenanceMode: false,
+  menuOverrides: {},
+  authMethods: { ...DEFAULT_AUTH_METHODS },
+  defaultAuthMode: 'SMART_TAG',
 };
 
 const STORAGE_KEY = 'lm-kiosk-settings';
@@ -51,7 +146,12 @@ export function getKioskSettings(): KioskSettings {
     const raw = localStorage.getItem(STORAGE_KEY);
     const fallbackStoreCd = localStorage.getItem('LM_STORE_CD') || DEFAULT_KIOSK_SETTINGS.storeCode;
     if (!raw) {
-      return { ...DEFAULT_KIOSK_SETTINGS, storeCode: fallbackStoreCd };
+      return {
+        ...DEFAULT_KIOSK_SETTINGS,
+        storeCode: fallbackStoreCd,
+        menuOverrides: {},
+        authMethods: { ...DEFAULT_AUTH_METHODS },
+      };
     }
     const parsed = JSON.parse(raw);
     return {
@@ -59,6 +159,12 @@ export function getKioskSettings(): KioskSettings {
       ...parsed,
       storeCode: parsed.storeCode || fallbackStoreCd,
       apiUrl: (parsed.apiUrl || DEFAULT_KIOSK_SETTINGS.apiUrl).trim().replace(/\/+$/, ''),
+      menuOverrides: parsed.menuOverrides && typeof parsed.menuOverrides === 'object' ? parsed.menuOverrides : {},
+      authMethods: {
+        ...DEFAULT_AUTH_METHODS,
+        ...(parsed.authMethods && typeof parsed.authMethods === 'object' ? parsed.authMethods : {}),
+      },
+      defaultAuthMode: parsed.defaultAuthMode || DEFAULT_KIOSK_SETTINGS.defaultAuthMode,
     };
   } catch {
     return DEFAULT_KIOSK_SETTINGS;

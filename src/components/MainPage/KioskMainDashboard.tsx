@@ -3,6 +3,11 @@ import {
   ArrowLeftRight, Calendar, Compass, KeyRound, 
   Play, UserPlus, Flag, Target, ShoppingBag, Grid
 } from 'lucide-react';
+import {
+  useKioskSettings,
+  isKioskMenuEnabled,
+  KioskMenuVisibilityMap,
+} from '../../stores/kioskSettings';
 
 const TRANSLATIONS = {
   KO: {
@@ -63,6 +68,7 @@ interface KioskMainDashboardProps {
   onLockerExtend: () => void;
   onSignUp: () => void;
   kioskMenuConfigs?: any[];
+  menuOverrides?: KioskMenuVisibilityMap;
   onMenuClick?: (menuId: string, zoneIds: (string | number)[]) => void;
 }
 
@@ -76,9 +82,12 @@ export default function KioskMainDashboard({
   onLockerExtend,
   onSignUp,
   kioskMenuConfigs,
+  menuOverrides,
   onMenuClick
 }: KioskMainDashboardProps) {
   const t = TRANSLATIONS[lang];
+  const { settings } = useKioskSettings();
+  const effectiveOverrides = menuOverrides ?? settings.menuOverrides;
 
   // 기본 6대 표준 메뉴 폴백 리스트
   const defaultMenus = [
@@ -90,11 +99,16 @@ export default function KioskMainDashboard({
     { menu_id: 'SIGNUP', menu_name: t.signUp, description: t.signUpSub, zone_ids: [], is_active: true, sort_order: 6, icon_type: 'USER_PLUS' }
   ];
 
-  // 활성화된 메뉴 목록 동적 필터링 및 정렬
+  // 활성화된 메뉴 목록 동적 필터링 및 정렬 (파트너센터 설정 + 기기별 로컬 오버라이드 결합)
   const rawMenus = (kioskMenuConfigs && kioskMenuConfigs.length > 0) ? kioskMenuConfigs : defaultMenus;
   const activeMenus = rawMenus
-    .filter((m: any) => m.is_active !== false)
+    .filter((m: any) => isKioskMenuEnabled(m.menu_id, effectiveOverrides, m.is_active !== false))
     .sort((a: any, b: any) => (a.sort_order || 99) - (b.sort_order || 99));
+
+  const effectiveOnCheckin =
+    onCheckin && isKioskMenuEnabled('CHECKIN', effectiveOverrides, true)
+      ? onCheckin
+      : undefined;
 
   // 메뉴 클릭 핸들러 (통합 onMenuClick 및 레거시 핸들러 하이브리드 지원)
   const handleCardClick = (menuId: string, zoneIds: (string | number)[] = []) => {
@@ -102,7 +116,7 @@ export default function KioskMainDashboard({
       onMenuClick(menuId, zoneIds);
     }
     if (menuId === 'ALLOCATE_DAILY' || menuId === 'ALLOCATION' || menuId === 'SCREEN_ROOM') onPracticeTeebox();
-    else if (menuId === 'CHECKIN') onCheckin?.();
+    else if (menuId === 'CHECKIN') effectiveOnCheckin?.();
     else if (menuId === 'PAR3') onPar3Allocation();
     else if (menuId === 'PURCHASE_PRODUCT' || menuId === 'MEMBERSHIP' || menuId === 'PRODUCTS') onPurchaseMembership();
     else if (menuId === 'MOVE_BAY' || menuId === 'CHANGE_BAY') onMoveBay();
@@ -119,7 +133,7 @@ export default function KioskMainDashboard({
       m.menu_id !== 'ALLOCATION' &&
       m.menu_id !== 'SIGNUP' &&
       m.menu_id !== 'REGISTER' &&
-      !(onCheckin && m.menu_id === 'CHECKIN')
+      !(effectiveOnCheckin && m.menu_id === 'CHECKIN')
   );
 
   // 서브 메뉴별 전용 3D 스쿼클 테마 컬러 매핑
@@ -186,20 +200,20 @@ export default function KioskMainDashboard({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', maxWidth: '1040px' }}>
         
         {/* Row 1: 2대 메인 히어로 (좌측: 예약 타석 체크인 / 우측: 1순위 연습타석 배정) */}
-        {(onCheckin || heroMenu) && (
+        {(effectiveOnCheckin || heroMenu) && (
           <div 
             className="animate-fade-up" 
             style={{ 
               animationDelay: '0.2s', 
               display: 'grid', 
-              gridTemplateColumns: (onCheckin && heroMenu) ? '1fr 1fr' : '1fr', 
+              gridTemplateColumns: (effectiveOnCheckin && heroMenu) ? '1fr 1fr' : '1fr', 
               gap: '20px' 
             }}
           >
             {/* 📌 좌측: 예약 타석 체크인 (더 깊고 묵직한 딥 볼드 포레스트 그린 패널) */}
-            {onCheckin && (
+            {effectiveOnCheckin && (
               <div
-                onClick={onCheckin}
+                onClick={effectiveOnCheckin}
                 style={{
                   height: '255px',
                   display: 'flex',
@@ -351,7 +365,7 @@ export default function KioskMainDashboard({
             className="animate-fade-up" 
             style={{ 
               display: 'grid', 
-              gridTemplateColumns: '1fr 1fr', 
+              gridTemplateColumns: gridSubMenus.length === 1 ? '1fr' : '1fr 1fr', 
               gap: '20px', 
               animationDelay: '0.3s' 
             }}

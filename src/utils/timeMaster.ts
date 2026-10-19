@@ -60,11 +60,14 @@ export class TimeMaster {
     return new Date(TimeMaster.getSyncedNowMs());
   }
 
-  /** 대기시간 잔여 (초) 산출 (prepare_expired_epoch_ms SSOT 최우선) */
+  /** 대기시간 잔여 (초) 산출 (prepare_expired_epoch_ms SSOT 최우선, 볼회수/일시정지 시 카운트다운 동결) */
   static getPrepareRemainingSec(
-    bay?: { prepare_remaining_sec?: number; prepare_expired_epoch_ms?: number | null } | null
+    bay?: { prepare_remaining_sec?: number | null; prepare_expired_epoch_ms?: number | null; is_paused?: boolean } | null
   ): number {
     if (!bay) return 0;
+    if (bay.is_paused && typeof bay.prepare_remaining_sec === 'number') {
+      return Math.max(0, bay.prepare_remaining_sec);
+    }
     if (bay.prepare_expired_epoch_ms && typeof bay.prepare_expired_epoch_ms === 'number') {
       const diffMs = bay.prepare_expired_epoch_ms - TimeMaster.getSyncedNowMs();
       return Math.max(0, Math.ceil(diffMs / 1000));
@@ -72,13 +75,22 @@ export class TimeMaster {
     return bay.prepare_remaining_sec ?? 0;
   }
 
-  /** 잔여 시간 산출 (실시간 end_epoch_ms 연산 최우선, Bay 객체 또는 endTime 문자열 모두 지원) */
+  /** 잔여 시간 산출 (실시간 end_epoch_ms 연산 최우선, 볼회수/일시정지 시 카운트다운 동결, Bay 객체 또는 endTime 문자열 모두 지원) */
   static getRemainingMinutes(
-    bayOrEndTime?: { minutes_left?: number; end_time?: string | null; end_epoch_ms?: number | null } | string | null,
+    bayOrEndTime?: { minutes_left?: number; end_time?: string | null; end_epoch_ms?: number | null; is_paused?: boolean; duration_min?: number | null } | string | null,
     now?: Date | number,
     endEpochMs?: number | null
   ): number {
     if (!bayOrEndTime && !endEpochMs) return 0;
+    const capByDuration = (rem: number): number => {
+      if (typeof bayOrEndTime === 'object' && bayOrEndTime !== null && typeof bayOrEndTime.duration_min === 'number' && bayOrEndTime.duration_min > 0) {
+        return Math.min(bayOrEndTime.duration_min, rem);
+      }
+      return rem;
+    };
+    if (typeof bayOrEndTime === 'object' && bayOrEndTime !== null && bayOrEndTime.is_paused && typeof bayOrEndTime.minutes_left === 'number') {
+      return capByDuration(Math.max(0, bayOrEndTime.minutes_left));
+    }
     const refNowMs =
       now !== undefined
         ? typeof now === 'number'
@@ -105,16 +117,16 @@ export class TimeMaster {
     const epoch = endEpochMs ?? bayOrEndTime.end_epoch_ms;
     if (epoch && typeof epoch === 'number') {
       const diffMs = epoch - refNowMs;
-      return Math.max(0, Math.ceil(diffMs / 1000 / 60));
+      return capByDuration(Math.max(0, Math.ceil(diffMs / 1000 / 60)));
     }
     if (bayOrEndTime.end_time) {
       const endDt = TimeMaster.parseSessionEnd(bayOrEndTime.end_time, refDate);
       if (endDt) {
         const diffMs = endDt.getTime() - refNowMs;
-        return Math.max(0, Math.ceil(diffMs / 1000 / 60));
+        return capByDuration(Math.max(0, Math.ceil(diffMs / 1000 / 60)));
       }
     }
-    return bayOrEndTime.minutes_left ?? 0;
+    return capByDuration(bayOrEndTime.minutes_left ?? 0);
   }
 
   /** 타석 종료 시각 (HH:mm) 안전 포맷팅 (Bay 객체 또는 endTime 문자열 모두 지원) */
@@ -170,6 +182,20 @@ export class TimeMaster {
     }
     const ss = String(d.getSeconds()).padStart(2, '0');
     return `${ymd} ${hh}:${mm}:${ss}`;
+  }
+
+  /** 매장 마감시각까지 남은 분(minute) 산출 (심야 익일 마감 06:00~05:00 및 주간 마감 정밀 구분) */
+  static getMinutesUntilClose(storeCloseTime?: string | null, now: Date = TimeMaster.getSyncedDate()): number {
+    const cleanClose = (storeCloseTime || '24:00').replace(':', '').padStart(4, '0');
+    const closeH = parseInt(cleanClose.slice(0, 2), 10);
+    const closeM = parseInt(cleanClose.slice(2, 4), 10);
+    const isOvernightClose = closeH === 24 || closeH < 6 || (closeH === 6 && closeM === 0);
+    const closeDt = new Date(now);
+    closeDt.setHours(closeH === 24 ? 0 : closeH, closeM, 0, 0);
+    if (closeH === 24 || (isOvernightClose && now.getHours() >= 6 && closeDt <= now)) {
+      closeDt.setDate(closeDt.getDate() + 1);
+    }
+    return Math.floor((closeDt.getTime() - now.getTime()) / 60000);
   }
 }
 

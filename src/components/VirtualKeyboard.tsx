@@ -277,7 +277,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
       className="glass-panel" 
       style={{
         position: 'absolute', // 키오스크 프레임 내에 절대 위치 지정
-        bottom: '10px', // 하단 여백 추가로 조작성 개선
+        bottom: '100px', // 하단 플로팅 바(KioskBottomBar, bottom: 24px, height: 60px)와 중첩되지 않도록 여백 확보
         left: '50%',
         transform: 'translateX(-50%)', // 가로 중앙 정렬!
         width: '900px', // 회원가입 카드(900px)와 가로폭 일치시켜 잘림 방지!

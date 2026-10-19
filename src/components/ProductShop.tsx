@@ -5,6 +5,7 @@ import { api, Product } from '../services/api';
 interface ProductShopProps {
   memberNo?: string;
   memberName?: string;
+  memberGender?: string;
   discountRate?: number;
   gradeName?: string;
   purposeType?: 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT' | 'SELECT_DAILY_PASS';
@@ -22,6 +23,7 @@ interface DisplayCategoryItem {
 export const ProductShop: React.FC<ProductShopProps> = ({
   memberNo,
   memberName,
+  memberGender,
   discountRate = 0,
   gradeName,
   purposeType,
@@ -39,37 +41,6 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   const [loading, setLoading] = useState(false);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadKioskShopData = async () => {
-      setLoading(true);
-      try {
-        // 1. KIOSK 용 전시 카테고리 로드
-        const categories = await api.getKioskDisplayCategories();
-        setDisplayCategories(categories);
-
-        // 2. 전체 상품 로드
-        const products = await api.getProducts();
-        setAllProducts(products);
-
-        // 기본 활성 탭 설정
-        if (purposeType === 'ALLOCATE_DAILY' || purposeType === 'SELECT_DAILY_PASS') {
-          setActiveTab('DAILY_PASS');
-        } else if (categories.length > 0) {
-          // 회원권 구매 모드: 무조건 첫 번째 전시 카테고리(예: 회원권) 기본 선택
-          setActiveTab(categories[0].category_id);
-        } else {
-          // 전시 카테고리가 미설정된 오프라인/폴백 상태에서도 PURCHASE_PRODUCT일 때는 DAILY_PASS로 빠지지 않도록 0 유지
-          setActiveTab(0);
-        }
-      } catch (err) {
-        console.error('Failed to load kiosk shop data:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadKioskShopData();
-  }, [memberNo, purposeType]);
-
   // 일일 타석 배정권 여부 판별 헬퍼 (상품 DB 속성 직접 참조)
   const checkIfDaily = (prod: Product) => {
     const logicUpper = (prod.logic_type || '').toUpperCase();
@@ -80,11 +51,61 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       return true;
     }
     const isDailyLogic = logicUpper === 'FACILITY';
-    const isDailyCd = prod.prod_cd.startsWith('D') || prod.prod_cd.startsWith('P01') || prod.prod_cd.startsWith('P02');
-    const isDailyName = prod.prod_nm.includes('일일') || prod.prod_nm.includes('당일');
+    const isDailyCd = (prod.prod_cd || '').startsWith('D') || (prod.prod_cd || '').startsWith('P01') || (prod.prod_cd || '').startsWith('P02');
+    const isDailyName = (prod.prod_nm || '').includes('일일') || (prod.prod_nm || '').includes('당일');
     const hasDuration = prod.duration_min != null && prod.duration_min > 0;
     return (isDailyLogic || isDailyCd || isDailyName) && hasDuration;
   };
+
+  const nonDailyFilter = (p: Product) => {
+    const lt = (p.logic_type || '').toUpperCase();
+    return lt !== 'DAILY' && lt !== 'RENTAL' && !checkIfDaily(p);
+  };
+
+  useEffect(() => {
+    const loadKioskShopData = async () => {
+      setLoading(true);
+      try {
+        // 1. KIOSK 용 전시 카테고리 로드
+        const categories = await api.getKioskDisplayCategories();
+
+        // 2. 전체 상품 로드
+        const products = await api.getProducts();
+        setAllProducts(products);
+
+        // 🛡️ BUG-S06: PURCHASE_PRODUCT 모드에서는 일일권/라카만 들어있어 필터링 후 0개가 되는 빈 탭을 제외하고,
+        // 유효한 회원권/횟수권/레슨 상품이 1개 이상 존재하는 카테고리만 탭으로 구성 (모두 비어있으면 전체 폴백)
+        const isDailyMode = purposeType === 'ALLOCATE_DAILY' || purposeType === 'SELECT_DAILY_PASS';
+        const filteredCategories = isDailyMode
+          ? categories
+          : categories.filter((cat: DisplayCategoryItem) => {
+              const items = Array.isArray(cat.items) ? cat.items : [];
+              return items.some((item: any) => {
+                const resolved = products.find(p => p.prod_cd === item.prod_cd) || (item?.prod_nm ? item as Product : undefined);
+                return Boolean(resolved && nonDailyFilter(resolved));
+              });
+            });
+
+        setDisplayCategories(filteredCategories);
+
+        // 기본 활성 탭 설정
+        if (isDailyMode) {
+          setActiveTab('DAILY_PASS');
+        } else if (filteredCategories.length > 0) {
+          // 회원권 구매 모드: 유효 상품이 존재하는 첫 번째 전시 카테고리 기본 선택
+          setActiveTab(filteredCategories[0].category_id);
+        } else {
+          // 전시 카테고리가 미설정되었거나 유효 카테고리가 없는 경우 0 유지 (전체 비일일권 상품 폴백)
+          setActiveTab(0);
+        }
+      } catch (err) {
+        console.error('Failed to load kiosk shop data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadKioskShopData();
+  }, [memberNo, purposeType]);
 
   // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB 물리 컬럼 ➔ JSON access_rules/rules_detail 직접 참조)
   const getDurationMin = (prod: Product) => {
@@ -100,12 +121,6 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       // 일일 타석 배정권 전용 필터링 (DAILY 상품만 노출)
       return allProducts.filter(checkIfDaily);
     } else {
-      // PURCHASE_PRODUCT(회원권/정기권/횟수권 구매) 모드: DAILY(일일 현장권) 및 RENTAL(라카 연장) 상품 혼입 원천 차단
-      const nonDailyFilter = (p: Product) => {
-        const lt = (p.logic_type || '').toUpperCase();
-        return lt !== 'DAILY' && lt !== 'RENTAL' && !checkIfDaily(p);
-      };
-
       // 동적 전시 카테고리 상품 매핑
       const matchedCat = displayCategories.find(c => c.category_id === activeTab);
       if (!matchedCat) {
@@ -117,7 +132,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       
       // 해당 카테고리에 매핑된 prod_cd 리스트에 대응되는 실제 Product 객체 빌드 (어드민 지정 정렬 순서 100% 보장 + DAILY 제외)
       return matchedCat.items
-        .map(item => allProducts.find(p => p.prod_cd === item.prod_cd))
+        .map(item => allProducts.find(p => p.prod_cd === item.prod_cd) || (item?.prod_nm ? item as Product : undefined))
         .filter((p): p is Product => !!p && nonDailyFilter(p));
     }
   };
@@ -301,6 +316,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
 
             // 2. 배지(badge) 및 노출 상품명(display_nm) 동적 반영 (하드코딩 제거)
             const customBadge = prod.meta_data?.pos_button?.badge || prod.meta_data?.badges?.[0] || null;
+            const rawTargetGender = String(
+              prod.target_gender || prod.access_rules?.restricted_gender || prod.rules_detail?.restricted_gender || 'ALL'
+            ).toUpperCase();
+            const targetGenderNorm = rawTargetGender === 'MALE' ? 'M' : rawTargetGender === 'FEMALE' ? 'F' : rawTargetGender;
+            const genderBadge = targetGenderNorm === 'F' ? '여성 전용' : targetGenderNorm === 'M' ? '남성 전용' : null;
             const badgeText = customBadge ? customBadge : `${durationMin}분 이용`;
             const displayName = prod.meta_data?.display_nm || prod.prod_nm;
 
@@ -313,6 +333,15 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                   if (!memberNo && (prod.logic_type || '').toUpperCase() !== 'DAILY' && !checkIfDaily(prod)) {
                     setWarningMessage('회원 전용 상품입니다. 먼저 회원 인증을 진행해 주세요.');
                     return;
+                  }
+                  if (targetGenderNorm === 'M' || targetGenderNorm === 'F') {
+                    const normMemGender = String(memberGender || '').toUpperCase();
+                    const memG = normMemGender === 'MALE' || normMemGender === '남' ? 'M' : normMemGender === 'FEMALE' || normMemGender === '여' ? 'F' : normMemGender;
+                    if (memG && memG !== targetGenderNorm) {
+                      const reqLabel = targetGenderNorm === 'F' ? '여성' : '남성';
+                      setWarningMessage(`선택하신 상품은 [${reqLabel} 회원 전용] 상품입니다.\n다른 상품을 선택해 주세요.`);
+                      return;
+                    }
                   }
                   onProductSelected(prod);
                 }}
@@ -351,17 +380,31 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                         ? 'COUNT PASS'
                         : 'MEMBERSHIP'}
                   </span>
-                  <span style={{
-                    fontSize: '12px',
-                    fontWeight: 800,
-                    padding: '6px 14px',
-                    borderRadius: '999px',
-                    background: customBadge ? '#34c759' : '#0071e3',
-                    color: '#ffffff',
-                    boxShadow: customBadge ? '0 4px 12px rgba(52, 199, 89, 0.25)' : '0 4px 12px rgba(0, 113, 227, 0.25)'
-                  }}>
-                    {badgeText}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {genderBadge && (
+                      <span style={{
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        padding: '6px 12px',
+                        borderRadius: '999px',
+                        background: targetGenderNorm === 'F' ? '#ec4899' : '#2563eb',
+                        color: '#ffffff',
+                      }}>
+                        {genderBadge}
+                      </span>
+                    )}
+                    <span style={{
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      padding: '6px 14px',
+                      borderRadius: '999px',
+                      background: customBadge ? '#34c759' : '#0071e3',
+                      color: '#ffffff',
+                      boxShadow: customBadge ? '0 4px 12px rgba(52, 199, 89, 0.25)' : '0 4px 12px rgba(0, 113, 227, 0.25)'
+                    }}>
+                      {badgeText}
+                    </span>
+                  </div>
                 </div>
 
                 {/* 48px SF Pro Display 대형 스펙 표출 (COUNT / PERIOD / DAILY 분기) */}
@@ -529,7 +572,9 @@ export const ProductShop: React.FC<ProductShopProps> = ({
             border: '1px solid #e2e8f0'
           }}>
             <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
-            <h3 style={{ fontSize: '22px', fontWeight: 800, color: '#1e293b', marginBottom: '12px' }}>회원 인증 필요</h3>
+            <h3 style={{ fontSize: '22px', fontWeight: 800, color: '#1e293b', marginBottom: '12px' }}>
+              {warningMessage.includes('전용]') ? '상품 구매 제한 안내' : '회원 인증 필요'}
+            </h3>
             <p style={{ fontSize: '16px', color: '#64748b', lineHeight: '1.6', whiteSpace: 'pre-line', marginBottom: '28px' }}>
               {warningMessage}
             </p>

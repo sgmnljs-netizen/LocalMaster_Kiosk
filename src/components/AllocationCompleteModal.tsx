@@ -7,6 +7,7 @@ import { api } from '../services/api';
 
 interface AllocationCompleteModalProps {
   bayNo: number | string;
+  oldBayNo?: number | string;
   durationMin: number;
   startTime?: string;
   endTime?: string;
@@ -21,12 +22,15 @@ interface AllocationCompleteModalProps {
   cardNoMasked?: string;
   terminalId?: string;
   authNo?: string;
+  checkinMode?: string;
+  noticeMessage?: string;
   lang?: 'KO' | 'EN';
   onClose: () => void;
 }
 
 export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = ({
   bayNo,
+  oldBayNo,
   durationMin,
   startTime,
   endTime,
@@ -41,6 +45,8 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   cardNoMasked,
   terminalId,
   authNo,
+  checkinMode,
+  noticeMessage,
   lang = 'KO',
   onClose
 }) => {
@@ -75,6 +81,24 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
       const info = storeInfo || (await api.getStoreInfo().catch(() => null));
       if (info && !storeInfo) setStoreInfo(info);
 
+      const isPreCheckin = checkinMode === 'PRE_CHECKIN';
+      const isPendingWait = checkinMode === 'PENDING_WAIT';
+      const isMoveBay = checkinMode === 'MOVE_BAY';
+      const headerTitle = isMoveBay
+        ? `★★★ [${oldBayNo ? `${oldBayNo}번 ➔ ` : ''}${bayNo}번 타석 이동 확인표] ★★★`
+        : isPreCheckin
+        ? `★★★ [${bayNo}번 사전체크인 확인표] ★★★`
+        : isPendingWait
+        ? `★★★ [${bayNo}번 체크인 대기 확인표] ★★★`
+        : `★★★ [${bayNo}번 타석 배정표] ★★★`;
+      const footerGuide = isMoveBay
+        ? `보전 시간: ${startStr} ~ ${endTime || '종료시'} (잔여 ${durationMin}분)\n변경된 ${bayNo}번 타석으로 이동하여 연습을 계속해 주십시오.`
+        : isPreCheckin
+        ? `예약시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n예약시간 정각에 타석 전원이 자동 가동됩니다.`
+        : isPendingWait
+        ? `예약시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n앞 타임 종료 즉시 타석이 가동됩니다.`
+        : `이용시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n타석으로 이동하여 연습을 시작해 주십시오.`;
+
       const res = await kioskHardwareBridge.printReceipt({
         sale_id: resId || `ALLOC-${Date.now()}`,
         receipt_no: resId ? `TICK-${resId.slice(-6)}` : `TICK-${Date.now().toString().slice(-6)}`,
@@ -98,7 +122,11 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
         },
         items: [
           {
-            name: `타석 [${bayNo}번] ${durationMin}분 배정표`,
+            name: isMoveBay
+              ? `타석 이동 [${oldBayNo ? `${oldBayNo}번 ➔ ` : ''}${bayNo}번] (잔여 ${durationMin}분)`
+              : isPreCheckin
+              ? `타석 [${bayNo}번] ${durationMin}분 사전체크인`
+              : `타석 [${bayNo}번] ${durationMin}분 배정표`,
             qty: 1,
             unit_price: resolvedUnitPrice,
             amount: payAmount,
@@ -122,15 +150,15 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
           terminal_id: terminalId || settings.terminalId || api.getTerminalId(),
         } : undefined,
         barcode_text: `BAY-${bayNo}-${startStr.replace(':', '')}`,
-        header_message: `★★★ [${bayNo}번 타석 배정표] ★★★`,
-        footer_message: `이용시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n타석으로 이동하여 연습을 시작해 주십시오.`,
+        header_message: headerTitle,
+        footer_message: footerGuide,
       });
 
       setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
     } finally {
       setIsPrinting(false);
     }
-  }, [bayNo, durationMin, startTime, endTime, resId, memberName, payAmount, originalAmount, discountAmount, usedPoints, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, lang, storeName, storeInfo, settings.terminalId]);
+  }, [bayNo, oldBayNo, durationMin, startTime, endTime, resId, memberName, payAmount, originalAmount, discountAmount, usedPoints, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, checkinMode, lang, storeName, storeInfo, settings.terminalId]);
 
   // 마운트 시 자동 인쇄 (단 1회 보장)
   useEffect(() => {
@@ -247,17 +275,42 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
 
         {/* 100% 한글 애플 타이포그래피 */}
         <h2 style={{ fontSize: '32px', fontWeight: 800, color: '#1d1d1f', marginBottom: '8px', letterSpacing: '-1px' }}>
-          {lang === 'KO' ? '골프 타석 배정표' : 'Golf Bay Assignment Ticket'}
+          {checkinMode === 'MOVE_BAY'
+            ? (lang === 'KO' ? '타석 이동 확인표' : 'Bay Relocation Confirmation Slip')
+            : checkinMode === 'PRE_CHECKIN'
+            ? (lang === 'KO' ? '사전 체크인 접수 확인표' : 'Pre-Checkin Confirmation Slip')
+            : checkinMode === 'PENDING_WAIT'
+            ? (lang === 'KO' ? '타석 체크인 대기 확인표' : 'Check-in Waiting Slip')
+            : checkinMode === 'REPRINT'
+            ? (lang === 'KO' ? '골프 타석 배정표 (재출력)' : 'Bay Assignment Ticket (Reprint)')
+            : (lang === 'KO' ? '골프 타석 배정표' : 'Golf Bay Assignment Ticket')}
         </h2>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#86868b', fontSize: '16px', fontWeight: 500, marginBottom: '32px', letterSpacing: '-0.3px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#86868b', fontSize: '16px', fontWeight: 500, marginBottom: noticeMessage ? '16px' : '32px', letterSpacing: '-0.3px' }}>
           <Printer size={18} style={{ color: '#0071e3' }} />
           <span>
             {printStatus 
               ? `${lang === 'KO' ? '영수증 인쇄 상태' : 'Print Status'}: ${printStatus}` 
-              : (lang === 'KO' ? '영수증 및 타석 배정표가 현장에서 출력 중입니다.' : 'Printing receipt and bay assignment ticket...')}
+              : (lang === 'KO' ? '영수증 및 확인표가 현장에서 출력 중입니다.' : 'Printing receipt and confirmation ticket...')}
           </span>
         </div>
+
+        {noticeMessage && (
+          <div style={{
+            width: '100%',
+            background: checkinMode === 'PRE_CHECKIN' || checkinMode === 'PENDING_WAIT' ? '#eff6ff' : '#ecfdf5',
+            border: checkinMode === 'PRE_CHECKIN' || checkinMode === 'PENDING_WAIT' ? '1px solid #bfdbfe' : '1px solid #a7f3d0',
+            borderRadius: '14px',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            fontSize: '15px',
+            fontWeight: 700,
+            color: checkinMode === 'PRE_CHECKIN' || checkinMode === 'PENDING_WAIT' ? '#1d4ed8' : '#047857',
+            lineHeight: 1.4
+          }}>
+            {noticeMessage}
+          </div>
+        )}
 
         {/* 한글 데이터 그리드 티켓 카딩 */}
         <div 
@@ -276,15 +329,25 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
           {/* 배정 타석 번호 */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e5ea', paddingBottom: '16px' }}>
             <span style={{ fontSize: '17px', color: '#86868b', fontWeight: 600, letterSpacing: '-0.3px' }}>
-              {lang === 'KO' ? '배정 타석' : 'Assigned Bay'}
+              {checkinMode === 'MOVE_BAY' ? (lang === 'KO' ? '이동 내역' : 'Relocated Bay') : (lang === 'KO' ? '배정 위치' : 'Assigned Bay')}
             </span>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-              <span style={{ fontSize: '52px', fontWeight: 950, color: '#000000', letterSpacing: '-1.5px' }}>
-                {String(bayNo).padStart(2, '0')}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+              {checkinMode === 'MOVE_BAY' && oldBayNo !== undefined && oldBayNo !== null && (
+                <>
+                  <span style={{ fontSize: '28px', fontWeight: 800, color: '#86868b', textDecoration: 'line-through' }}>
+                    {!isNaN(Number(oldBayNo)) ? `${String(oldBayNo).padStart(2, '0')}번` : String(oldBayNo)}
+                  </span>
+                  <span style={{ fontSize: '24px', fontWeight: 900, color: '#10b981' }}>➔</span>
+                </>
+              )}
+              <span style={{ fontSize: !isNaN(Number(bayNo)) ? '52px' : '34px', fontWeight: 950, color: '#000000', letterSpacing: '-1.5px' }}>
+                {!isNaN(Number(bayNo)) ? String(bayNo).padStart(2, '0') : String(bayNo)}
               </span>
-              <span style={{ fontSize: '22px', fontWeight: 800, color: '#1d1d1f' }}>
-                {lang === 'KO' ? '번 타석' : ''}
-              </span>
+              {!isNaN(Number(bayNo)) && (
+                <span style={{ fontSize: '22px', fontWeight: 800, color: '#1d1d1f' }}>
+                  {lang === 'KO' ? '번 타석' : ''}
+                </span>
+              )}
             </div>
           </div>
 
@@ -292,7 +355,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div style={{ background: '#ffffff', padding: '16px', borderRadius: '18px', display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'center', border: '1px solid #e5e5ea' }}>
               <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>
-                {lang === 'KO' ? '이용 시간' : 'Duration'}
+                {checkinMode === 'MOVE_BAY' ? (lang === 'KO' ? '보전 잔여 시간' : 'Remaining Time') : (lang === 'KO' ? '이용 시간' : 'Duration')}
               </span>
               <span style={{ fontSize: '26px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
                 {durationMin}{lang === 'KO' ? '분' : ' min'}

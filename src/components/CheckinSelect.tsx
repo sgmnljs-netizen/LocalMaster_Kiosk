@@ -1,15 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { QrCode, CheckCircle2, AlertCircle, Calendar, Clock, ArrowRight, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { QrCode, CheckCircle2, AlertCircle, Calendar, Clock, ArrowRight, RefreshCw, Printer } from 'lucide-react';
 import { api } from '../services/api';
+import { TimeMaster } from '../utils/timeMaster';
 
 interface CheckinReservationItem {
   res_id: string;
   resource_no: string;
+  resource_type?: string;
   res_date: string;
   start_time: string;
   end_time: string;
   duration_min: number;
   status_cd: string;
+  payment_status?: string;
   member_no?: string;
   guest_nm?: string;
 }
@@ -18,7 +21,15 @@ interface CheckinSelectProps {
   memberNo: string;
   memberName?: string;
   lang?: 'KO' | 'EN';
-  onCheckinSuccess: (bayNo: number, resId: string, durationMin?: number, startTime?: string, endTime?: string) => void;
+  onCheckinSuccess: (
+    bayNo: number | string,
+    resId: string,
+    durationMin?: number,
+    startTime?: string,
+    endTime?: string,
+    message?: string,
+    checkinMode?: string
+  ) => void;
   onCancel: () => void;
 }
 
@@ -33,6 +44,8 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [processingResId, setProcessingResId] = useState<string | null>(null);
+  // [BUG-C09] 동기식 터치 잠금 (React 비동기 setState 이전 연타 방어)
+  const verifyingRef = useRef<string | null>(null);
 
   const loadReservations = async () => {
     setLoading(true);
@@ -61,51 +74,60 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
     return clean;
   };
 
+  const formatResourceTitle = (res: CheckinReservationItem) => {
+    const rType = (res.resource_type || 'BAY').toUpperCase();
+    const rawNo = String(res.resource_no || '1').trim();
+    const parsedNo = parseInt(rawNo.replace(/[^0-9]/g, ''), 10);
+    if (rType === 'PAR3') {
+      return lang === 'KO' ? `파3 ${rawNo}` : `Par-3 ${rawNo}`;
+    }
+    if (rType === 'SCREEN' || rType === 'ROOM') {
+      return lang === 'KO' ? `스크린룸 ${rawNo}` : `Room ${rawNo}`;
+    }
+    if (rType === 'LESSON') {
+      return lang === 'KO' ? `레슨 ${ !isNaN(parsedNo) ? `${parsedNo}번 타석` : rawNo }` : `Lesson ${rawNo}`;
+    }
+    return lang === 'KO'
+      ? `${!isNaN(parsedNo) ? parsedNo : rawNo}번 타석`
+      : `Bay ${!isNaN(parsedNo) ? parsedNo : rawNo}`;
+  };
+
   const handleVerifyCheckin = async (resId: string) => {
+    // [BUG-C09] 동기 잠금으로 더블 클릭/연타 완벽 차단
+    if (verifyingRef.current) return;
+    verifyingRef.current = resId;
     setProcessingResId(resId);
     setErrorMsg('');
     try {
       const targetRes = reservations.find((r) => r.res_id === resId);
-      if (targetRes && (targetRes.status_cd === 'PREPARE' || targetRes.status_cd === 'USE')) {
-        const reprintBayNo = parseInt(targetRes.resource_no || '1', 10) || 1;
-        onCheckinSuccess(
-          reprintBayNo,
-          resId,
-          targetRes.duration_min,
-          formatResTime(targetRes.start_time) || targetRes.start_time,
-          formatResTime(targetRes.end_time) || targetRes.end_time
-        );
-        return;
-      }
       const res = await api.verifyKioskCheckin(memberNo, resId);
-      if (res.success && (res.bay_no || targetRes?.resource_no)) {
-        const resolvedBayNo = res.bay_no || parseInt(targetRes?.resource_no || '1', 10) || 1;
+      if (res.success) {
+        const rawNo = String(targetRes?.resource_no || '1').trim();
+        const numericNo = parseInt(rawNo.replace(/[^0-9]/g, ''), 10);
+        const resolvedBayNo = res.bay_no || (!isNaN(numericNo) ? numericNo : rawNo) || 1;
         onCheckinSuccess(
           resolvedBayNo,
           resId,
-          (res as any).duration_min ?? targetRes?.duration_min,
-          formatResTime((res as any).start_time ?? targetRes?.start_time) || ((res as any).start_time ?? targetRes?.start_time),
-          formatResTime((res as any).end_time ?? targetRes?.end_time) || ((res as any).end_time ?? targetRes?.end_time)
-        );
-      } else if (targetRes && targetRes.status_cd === 'CHK') {
-        const reprintBayNo = parseInt(targetRes.resource_no || '1', 10) || 1;
-        onCheckinSuccess(
-          reprintBayNo,
-          resId,
-          targetRes.duration_min,
-          formatResTime(targetRes.start_time) || targetRes.start_time,
-          formatResTime(targetRes.end_time) || targetRes.end_time
+          res.duration_min ?? targetRes?.duration_min,
+          formatResTime(res.start_time ?? targetRes?.start_time) || (res.start_time ?? targetRes?.start_time),
+          formatResTime(res.end_time ?? targetRes?.end_time) || (res.end_time ?? targetRes?.end_time),
+          res.message,
+          res.checkin_mode
         );
       } else {
+        // [BUG-C03] 백엔드 거부(점검 중 409, 미결제 400 등) 시 CHK 상태라도 에러를 삼키지 않고 즉시 표시
         setErrorMsg(res.message || (lang === 'KO' ? '체크인 승인 처리 중 오류가 발생했습니다.' : 'Checkin failed.'));
       }
     } catch (err) {
       console.error('Checkin verify error:', err);
       setErrorMsg(lang === 'KO' ? '체크인 처리 중 서버 통신 에러가 발생했습니다.' : 'Server connection error.');
     } finally {
+      verifyingRef.current = null;
       setProcessingResId(null);
     }
   };
+
+  const nowHhMm = TimeMaster.formatKstDateTime(new Date()).slice(11, 16);
 
   return (
     <div style={{
@@ -115,7 +137,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
       flexDirection: 'column',
       background: 'linear-gradient(135deg, #064e3b 0%, #022c22 100%)',
       color: '#ffffff',
-      padding: '40px',
+      padding: '40px 40px 130px 40px',
       boxSizing: 'border-box',
       position: 'relative'
     }}>
@@ -124,10 +146,10 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
         <div>
           <h2 style={{ fontSize: '32px', fontWeight: 'bold', margin: 0, display: 'flex', alignItems: 'center', gap: '12px', color: '#10b981' }}>
             <QrCode size={36} />
-            {lang === 'KO' ? '📌 사전 예약 타석 체크인' : '📌 Reservation Check-in'}
+            {lang === 'KO' ? '📌 사전 예약 체크인' : '📌 Reservation Check-in'}
           </h2>
           <p style={{ fontSize: '16px', color: '#a7f3d0', marginTop: '6px', margin: 0 }}>
-            {memberName ? `${memberName} 님의 당일 예약 타석 목록입니다.` : '당일 예약 타석 내역을 확인하고 체크인을 진행하세요.'}
+            {memberName ? `${memberName} 님의 당일 예약 목록입니다.` : '당일 예약 내역을 확인하고 체크인을 진행하세요.'}
           </p>
         </div>
         <button
@@ -162,7 +184,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', gap: '16px' }}>
             <RefreshCw size={48} style={{ animation: 'spin 1s linear infinite' }} />
             <span style={{ fontSize: '18px', color: '#a7f3d0' }}>
-              {lang === 'KO' ? '예약 타석 내역을 조회 중입니다...' : 'Loading reservations...'}
+              {lang === 'KO' ? '예약 내역을 조회 중입니다...' : 'Loading reservations...'}
             </span>
           </div>
         ) : reservations.length === 0 ? (
@@ -204,9 +226,37 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
             {reservations.map(res => {
-              const bayNo = parseInt(res.resource_no || '1') || 1;
               const isProcessing = processingResId === res.res_id;
-              const isCompleted = res.status_cd === 'CHK';
+              const startFormatted = formatResTime(res.start_time) || '00:00';
+              const isFutureTime = startFormatted > nowHhMm;
+
+              // [BUG-C06] 4단계 상태 명확 구분:
+              // 1) 이미 가동/준비 중인 세션 (PREPARE / USE / RUN / IN_USE) -> 배정표 재출력
+              // 2) 사전 체크인 완료 & 아직 시작 시각 전 (CHK & start_time > now) -> 사전 체크인 완료 (대기표 재출력)
+              // 3) 사전 체크인 완료 & 시작 시각 도래 (CHK & start_time <= now) -> 입실 가능 (타석 입실 시작)
+              // 4) 일반 체크인 대기 (RSV / CONFIRMED / WAIT / REQ) -> 체크인 완료
+              const isActiveSession = ['PREPARE', 'USE', 'RUN', 'IN_USE'].includes(res.status_cd);
+              const isPreCheckedInWait = res.status_cd === 'CHK' && isFutureTime;
+              const isReadyToEnter = res.status_cd === 'CHK' && !isFutureTime;
+              const isTicketPrintState = isActiveSession || isPreCheckedInWait;
+
+              const badgeLabel = isActiveSession
+                ? (lang === 'KO' ? '✓ 입실/이용 중' : '✓ In Use')
+                : isPreCheckedInWait
+                ? (lang === 'KO' ? '✓ 사전 체크인 완료' : '✓ Pre-Checked In')
+                : isReadyToEnter
+                ? (lang === 'KO' ? '● 입실 시작 가능' : '● Ready to Start')
+                : (lang === 'KO' ? '● 체크인 대기' : '● Waiting Check-in');
+
+              const buttonLabel = isActiveSession
+                ? (lang === 'KO' ? '배정표 재출력' : 'Re-print Ticket')
+                : isPreCheckedInWait
+                ? (lang === 'KO' ? '사전체크인 확인표 출력' : 'Print Pre-Checkin Slip')
+                : isReadyToEnter
+                ? (lang === 'KO' ? '⛳ 타석 입실 시작' : 'Start Session Now')
+                : isFutureTime
+                ? (lang === 'KO' ? '📌 사전 체크인 접수' : 'Pre Check-in')
+                : (lang === 'KO' ? '📌 체크인 및 입실 시작' : 'Complete Check-in');
 
               return (
                 <div
@@ -214,7 +264,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                   style={{
                     background: 'rgba(255, 255, 255, 0.08)',
                     borderRadius: '16px',
-                    border: isCompleted ? '2px solid #10b981' : '1px solid rgba(255, 255, 255, 0.2)',
+                    border: isTicketPrintState ? '2px solid #10b981' : isReadyToEnter ? '2px solid #34d399' : '1px solid rgba(255, 255, 255, 0.2)',
                     padding: '24px',
                     display: 'flex',
                     flexDirection: 'column',
@@ -225,7 +275,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                       <span style={{
-                        fontSize: '28px',
+                        fontSize: '26px',
                         fontWeight: 'bold',
                         color: '#6ee7b7',
                         background: 'rgba(16, 185, 129, 0.2)',
@@ -233,17 +283,17 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                         borderRadius: '8px',
                         border: '1px solid #10b981'
                       }}>
-                        {bayNo}번 타석
+                        {formatResourceTitle(res)}
                       </span>
                       <span style={{
                         fontSize: '14px',
                         fontWeight: 'bold',
-                        color: isCompleted ? '#34d399' : '#f59e0b',
-                        background: isCompleted ? 'rgba(52, 211, 153, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                        color: isTicketPrintState ? '#34d399' : '#f59e0b',
+                        background: isTicketPrintState ? 'rgba(52, 211, 153, 0.15)' : 'rgba(245, 158, 11, 0.15)',
                         padding: '4px 12px',
                         borderRadius: '20px'
                       }}>
-                        {isCompleted ? (lang === 'KO' ? '✓ 체크인 완료' : '✓ Completed') : (lang === 'KO' ? '● 체크인 대기' : '● Ready')}
+                        {badgeLabel}
                       </span>
                     </div>
 
@@ -266,7 +316,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                       width: '100%',
                       padding: '16px',
                       borderRadius: '12px',
-                      background: isCompleted
+                      background: isTicketPrintState
                         ? 'rgba(52, 211, 153, 0.2)'
                         : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                       color: '#ffffff',
@@ -278,7 +328,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                       justifyContent: 'center',
                       alignItems: 'center',
                       gap: '10px',
-                      boxShadow: isCompleted ? 'none' : '0 4px 16px rgba(16, 185, 129, 0.4)'
+                      boxShadow: isTicketPrintState ? 'none' : '0 4px 16px rgba(16, 185, 129, 0.4)'
                     }}
                   >
                     {isProcessing ? (
@@ -286,21 +336,27 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                         <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite' }} />
                         {lang === 'KO' ? '체크인 승인 중...' : 'Processing...'}
                       </>
-                    ) : isCompleted ? (
+                    ) : isTicketPrintState ? (
                       <>
-                        <CheckCircle2 size={20} color="#34d399" />
-                        {lang === 'KO' ? '체크인 완료 (티켓 출력)' : 'Re-print Ticket'}
+                        <Printer size={20} color="#34d399" />
+                        {buttonLabel}
                       </>
                     ) : (
                       <>
-                        {lang === 'KO' ? '📌 체크인 완료' : 'Complete Check-in'}
+                        <CheckCircle2 size={20} />
+                        {buttonLabel}
                         <ArrowRight size={20} />
                       </>
                     )}
                   </button>
-                  {isCompleted && (
-                    <span style={{ fontSize: '11px', color: '#6ee7b7', textAlign: 'center', marginTop: '6px' }}>
-                      * {lang === 'KO' ? '출입 QR 티켓 분실 시 재인출하실 수 있습니다.' : 'Re-print QR ticket if lost.'}
+                  {isPreCheckedInWait && (
+                    <span style={{ fontSize: '12px', color: '#6ee7b7', textAlign: 'center', marginTop: '8px' }}>
+                      * {lang === 'KO' ? `예약시간(${startFormatted}) 정각에 타석이 자동 가동됩니다.` : `Bay starts automatically at ${startFormatted}.`}
+                    </span>
+                  )}
+                  {isActiveSession && (
+                    <span style={{ fontSize: '12px', color: '#6ee7b7', textAlign: 'center', marginTop: '8px' }}>
+                      * {lang === 'KO' ? '현재 이용 중인 타석의 배정표를 재출력합니다.' : 'Re-print ticket for active bay.'}
                     </span>
                   )}
                 </div>
@@ -331,3 +387,4 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
     </div>
   );
 };
+

@@ -8,12 +8,17 @@ import type { CardApprovalResult } from '../services/van/van_types';
 import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
 
 
+import { TimeMaster } from '../utils/timeMaster';
+
+
 interface PaymentTerminalProps {
   productName: string;
   amount: number;
+  discountableAmount?: number;
+  productCategory?: string;
   assignedBayNo?: number | null;
   assignedBayNos?: number[];
-  assignedLockerNo?: number | null;
+  assignedLockerNo?: number | string | null;
   resId?: string | null;
   memberName?: string;
   memberNo?: string;
@@ -41,6 +46,8 @@ interface PaymentTerminalProps {
 export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   productName,
   amount,
+  discountableAmount,
+  productCategory,
   assignedBayNo,
   assignedBayNos,
   assignedLockerNo,
@@ -62,6 +69,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const { state: vanState, isProcessing, remainingSeconds, error: vanError, startPayment, cancelPayment } = useKioskVanPayment();
 
   const [usedPoints, setUsedPoints] = useState<number>(0);
+  const [activeTerminalId, setActiveTerminalId] = useState<string>(settings.terminalId || '88010003');
   const [payStep, setPayStep] = useState<'INSERT_CARD' | 'PROCESSING' | 'PRINT_RECEIPT'>('INSERT_CARD');
   const [appNo, setAppNo] = useState('');
   const [receiptDate, setReceiptDate] = useState('');
@@ -72,6 +80,22 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const isSilentCancelRef = useRef(false);
   const hasCompletedRef = useRef(false);
   const lastPayResultRef = useRef<any>(null);
+
+  // [BUG-07 FIX] 언마운트 시 서브 가맹점/프로 TID 오버라이드를 메인 매장 기본 설정으로 즉시 원복
+  useEffect(() => {
+    setActiveTerminalId(settings.terminalId || '88010003');
+    return () => {
+      let rawProvider = (settings.providerType || 'KCP').toUpperCase();
+      if (rawProvider.endsWith('_VAN')) {
+        rawProvider = rawProvider.replace('_VAN', '');
+      }
+      kioskVanClient.setConfig({
+        provider: rawProvider as any,
+        terminalId: settings.terminalId || '88010003',
+        vcatPort: parseInt(settings.vcatPort, 10) || 9099,
+      });
+    };
+  }, [settings.terminalId, settings.vcatPort, settings.providerType]);
 
   useEffect(() => {
     const busy = vanState === 'WAITING_CARD' || vanState === 'REQUESTING' || payStep === 'PROCESSING';
@@ -105,8 +129,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const [couponError, setCouponError] = useState('');
   const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
 
-  // 등급 할인 및 쿠폰 할인 실시간 산출
-  const gradeDiscountAmt = discountRate > 0 ? Math.round(amount * (discountRate / 100)) : 0;
+  // 등급 할인 및 쿠폰 할인 실시간 산출 (BUG-02: 동반자 그룹배정 시 회원 본인 슬롯 금액 기준 할인)
+  const baseForGradeDiscount = discountableAmount !== undefined ? discountableAmount : amount;
+  const gradeDiscountAmt = discountRate > 0 ? Math.round(baseForGradeDiscount * (discountRate / 100)) : 0;
   
   const isPercentCoupon = appliedCoupon && (appliedCoupon.benefit_type === 'RATE' || appliedCoupon.coupon_type === 'PERCENT');
   const couponBenefitVal = appliedCoupon ? (appliedCoupon.benefit_val ?? (isPercentCoupon ? appliedCoupon.discount_rate : appliedCoupon.discount_amount) ?? 0) : 0;
@@ -121,7 +146,15 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   ) : 0;
 
   const targetPayAmt = Math.max(0, amount - gradeDiscountAmt - couponDiscountAmt);
-  const finalCardAmt = Math.max(0, targetPayAmt - usedPoints);
+  const clampedUsedPoints = Math.min(usedPoints, targetPayAmt);
+  const finalCardAmt = Math.max(0, targetPayAmt - clampedUsedPoints);
+
+  // [BUG-04 FIX] 쿠폰 적용 등으로 결제 대상 금액(targetPayAmt)이 줄어든 경우 기선택 포인트가 초과되지 않도록 즉시 보정
+  useEffect(() => {
+    if (usedPoints > targetPayAmt) {
+      setUsedPoints(targetPayAmt);
+    }
+  }, [targetPayAmt, usedPoints]);
 
   // 🎟️ 쿠폰 검증 핸들러
   const handleVerifyCoupon = async (codeToVerify?: string) => {
@@ -163,13 +196,23 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         throw new Error(`최소 주문 금액(${coupon.min_order_amt.toLocaleString()}원) 이상일 때만 사용 가능합니다.`);
       }
       if (coupon.target_categories && Array.isArray(coupon.target_categories) && coupon.target_categories.length > 0) {
+        const isBayAllocation = Boolean(assignedBayNo) || Boolean(assignedBayNos && assignedBayNos.length > 0);
+        const normProdCat = String(productCategory || '').toUpperCase();
         const allowedCategories = assignedLockerNo 
           ? ['LOCKER', 'RENTAL', 'ALL'] 
-          : (assignedBayNo 
-              ? ['DAILY', 'BAY', 'ALL'] 
-              : ['PERIOD', 'COUNT', 'PASS', 'BAY', 'ALL']);
+          : (isBayAllocation || normProdCat === 'DAILY' || normProdCat === 'DAY'
+              ? ['DAILY', 'BAY', 'PASS', 'ALL'] 
+              : (normProdCat === 'PERIOD' || normProdCat === 'MEMBERSHIP')
+                ? ['PERIOD', 'MEMBERSHIP', 'PASS', 'BAY', 'ALL']
+                : (normProdCat === 'COUNT' || normProdCat === 'COUPON')
+                  ? ['COUNT', 'COUPON', 'TICKET', 'PASS', 'BAY', 'ALL']
+                  : normProdCat === 'LESSON'
+                    ? ['LESSON', 'ALL']
+                    : (normProdCat === 'GOODS' || normProdCat === 'FNB' || normProdCat === 'RETAIL')
+                      ? ['GOODS', 'FNB', 'RETAIL', 'ALL']
+                      : ['PERIOD', 'COUNT', 'PASS', 'BAY', 'LESSON', 'GOODS', 'ALL']);
         
-        const isMatched = coupon.target_categories.some((cat: string) => allowedCategories.includes(cat));
+        const isMatched = coupon.target_categories.some((cat: string) => allowedCategories.includes(String(cat).toUpperCase()));
         if (!isMatched) {
           const catLabels: Record<string, string> = {
             PERIOD: '정액(회원)권',
@@ -225,18 +268,35 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     enabled: payStep === 'INSERT_CARD',
   });
 
-  // 포인트 전액 사용 퀵 핸들러 (가맹점 최대 한도 적용)
+  // 포인트 전액 사용 퀵 핸들러 (가맹점 최대 한도 적용 & 1~99원 카드 자투리 방지)
   const handleUseAllPoints = () => {
+    if (memberPoint >= targetPayAmt) {
+      // 보유 포인트가 결제 대상 금액 이상인 경우 1원 단위 자투리까지 전액 포인트 결제로 처리하여 1~9원 카드 결제 데드락 방지
+      setUsedPoints(targetPayAmt);
+      return;
+    }
     const maxUsable = Math.min(memberPoint, targetPayAmt);
-    // 10P 단위 절삭
-    const rounded = Math.floor(maxUsable / 10) * 10;
+    let rounded = Math.floor(maxUsable / 10) * 10;
+    const remainderCard = targetPayAmt - rounded;
+    if (remainderCard > 0 && remainderCard < 100) {
+      // 카드 잔여 결제액이 100원 미만이 되지 않도록 포인트 사용량 조정
+      rounded = Math.max(0, Math.floor((targetPayAmt - 100) / 10) * 10);
+    }
     setUsedPoints(rounded);
   };
 
   // 포인트 퀵 칩 가산 핸들러
   const handleAddPoints = (addAmt: number) => {
-    const nextVal = Math.min(usedPoints + addAmt, memberPoint, targetPayAmt);
-    const rounded = Math.floor(nextVal / 10) * 10;
+    const rawNext = Math.min(usedPoints + addAmt, memberPoint, targetPayAmt);
+    if (rawNext >= targetPayAmt && memberPoint >= targetPayAmt) {
+      setUsedPoints(targetPayAmt);
+      return;
+    }
+    let rounded = Math.floor(rawNext / 10) * 10;
+    const remainderCard = targetPayAmt - rounded;
+    if (remainderCard > 0 && remainderCard < 100) {
+      rounded = Math.max(0, Math.floor((targetPayAmt - 100) / 10) * 10);
+    }
     setUsedPoints(rounded);
   };
 
@@ -252,7 +312,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       const now = new Date();
       const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
         `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-      const generatedAppNo = `FREE-${String(Math.floor(10000000 + Math.random() * 90000000))}`;
+      const generatedAppNo = ptsUsed > 0 && !appliedCoupon
+        ? `POINT-${String(Math.floor(10000000 + Math.random() * 90000000))}`
+        : `FREE-${String(Math.floor(10000000 + Math.random() * 90000000))}`;
       setReceiptDate(generatedTradeDate);
       setAppNo(generatedAppNo);
       setCardIssuer(appliedCoupon ? '할인쿠폰 감면 결제' : '포인트 전액 결제');
@@ -293,6 +355,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           return;
         }
         if (route.terminal_id) {
+          setActiveTerminalId(route.terminal_id);
           kioskVanClient.setConfig({
             provider: String(route.van_provider || settings.providerType || 'KCP').replace('_VAN', '') as any,
             ...({ providerType: route.van_provider || settings.providerType } as any),
@@ -314,14 +377,14 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     }
 
     const isTaxFree = String(vatYn || 'Y').toUpperCase() === 'N';
-    const vatAmt = isTaxFree ? 0 : Math.round(actualPayAmt - actualPayAmt / 1.1);
+    const vatAmt = isTaxFree ? 0 : Math.round(actualPayAmt / 11);
     const res = await startPayment({
       amount: actualPayAmt,
       productName,
       customerName: memberName,
       timeoutSeconds: 30,
+      vatAmount: vatAmt,
       ...({
-        vatAmount: vatAmt,
         taxFreeAmount: isTaxFree ? actualPayAmt : 0,
         vat_yn: isTaxFree ? 'N' : 'Y',
       } as any),
@@ -362,7 +425,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         });
       } catch (err: any) {
         // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소 + 실패 시 유령결제 긴급 리포트)
-        const orgDate = res.approved_at ? res.approved_at.replace(/[^0-9]/g, '').slice(0, 8) : new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const orgDate = (res.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) || TimeMaster.getKstYmd(new Date()).replace(/-/g, '');
         try {
           const cancelRes = await kioskVanClient.cancelCardPayment({
             amount: actualPayAmt,
@@ -370,10 +433,11 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             orgApprovedDate: orgDate,
             terminalId: res.terminal_id,
             vanTrNo: res.van_tr_no,
+            installmentMonths: res.installment_months || 0,
+            isTaxFree,
+            vat: vatAmt,
             reason: '타석 배정 전산 오류로 인한 자동 망취소',
             ...({
-              isTaxFree,
-              vat: vatAmt,
               vatAmount: vatAmt,
               taxFreeAmount: isTaxFree ? actualPayAmt : 0,
               orgAuthNo: res.auth_code,
@@ -394,7 +458,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               issuer_name: res.issuer_name || '',
               van_tr_no: res.van_tr_no || '',
               approvedAt: res.approved_at,
-              terminal_id: res.terminal_id || settings.terminalId || '',
+              terminal_id: res.terminal_id || activeTerminalId || settings.terminalId || '',
               backendErrorReason: backendReason,
               reversalErrorReason: revReason,
               error_reason: `${backendReason} / Cancel failed: ${revReason}`
@@ -414,7 +478,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             issuer_name: res.issuer_name || '',
             van_tr_no: res.van_tr_no || '',
             approvedAt: res.approved_at,
-            terminal_id: res.terminal_id || settings.terminalId || '',
+            terminal_id: res.terminal_id || activeTerminalId || settings.terminalId || '',
             backendErrorReason: backendReason,
             reversalErrorReason: revReason,
             error_reason: `${backendReason} / Cancel exception: ${revReason}`
@@ -435,7 +499,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       }
       isPayRequested.current = false;
     }
-  }, [productName, memberName, memberNo, resId, gradeDiscountAmt, couponDiscountAmt, appliedCoupon, vatYn, businessUnitType, businessMerchantId, proId, settings, startPayment, completePaymentOnce]);
+  }, [productName, memberName, memberNo, resId, gradeDiscountAmt, couponDiscountAmt, appliedCoupon, vatYn, businessUnitType, businessMerchantId, proId, settings, activeTerminalId, startPayment, completePaymentOnce]);
 
   // 포인트 보유 회원의 경우 사용자가 포인트를 선택하고 결제를 시작할 수 있도록 제어
   const [isReadyToPay, setIsReadyToPay] = useState<boolean>(!memberNo || memberPoint === 0);
@@ -449,7 +513,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
 
   const handleStartPayment = () => {
     setIsReadyToPay(true);
-    handleExecutePayment(finalCardAmt, usedPoints);
+    handleExecutePayment(finalCardAmt, clampedUsedPoints);
   };
 
   const handleUserCancel = () => {
@@ -780,7 +844,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                     : `단말기에 IC 카드를 꽂아주세요 (${remainingSeconds}초)`}
                 </span>
                 <span style={{ fontSize: '12px', color: '#86868b', fontFamily: 'monospace' }}>
-                  단말기: {settings.deviceName} (TID: {settings.terminalId})
+                  단말기: {settings.deviceName} (TID: {activeTerminalId || settings.terminalId})
                 </span>
               </div>
             </div>
@@ -806,7 +870,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             </button>
             {errorMsg && (
               <button 
-                onClick={() => handleExecutePayment(finalCardAmt, usedPoints)}
+                onClick={() => handleExecutePayment(finalCardAmt, clampedUsedPoints)}
                 style={{
                   flex: 1,
                   height: '60px',

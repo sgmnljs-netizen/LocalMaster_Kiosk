@@ -131,7 +131,7 @@ export class KcpVcatAdapter extends BaseVanAdapter {
     params: CardCancelRequestParams
   ): Promise<CardCancelResult> {
     try {
-      const vat = params.isTaxFree ? 0 : (params.vat ?? Math.round(params.amount - params.amount / 1.1));
+      const vat = params.isTaxFree ? 0 : (params.vat ?? Math.round(params.amount / 11));
       const installment = params.installmentMonths ?? 0;
       const payload = {
         cmd: 'CANCEL',

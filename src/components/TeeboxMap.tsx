@@ -13,7 +13,7 @@ interface TeeboxMapProps {
   justAllocatedBayNo?: number | null;
   feedbackCountdown?: number | null;
   onCancelCountdown?: () => void;
-  onBaySelected: (bayNo: number) => void;
+  onBaySelected: (bayNo: number, sourceBayNo?: number) => void;
   onCancel: () => void;
   bays: Bay[];
   onRefreshBays: () => void;
@@ -40,6 +40,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const [preoccupyLoading, setPreoccupyLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [countdown, setCountdown] = useState<number>(60); // 선점 락 카운트다운 (1분)
+  const hasAutoFocusedFloorRef = useRef(false);
+  const isLockingRef = useRef(false);
 
   const effMemberNo = member?.member_no || memberNo;
   const effMemberName = (member?.member_name || memberName || '').trim();
@@ -54,22 +56,65 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     let mounted = true;
     api.getMemberCheckinReservations(effMemberNo).then((resList) => {
       if (!mounted || !Array.isArray(resList)) return;
-      const activeRes = resList.find((r: any) =>
-        ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE', 'CHK', 'RSV', 'RESERVED'].includes(String(r.status_cd || '').toUpperCase())
-      );
+      const statusPriority: Record<string, number> = {
+        USE: 1,
+        OCCUPIED: 1,
+        IN_USE: 1,
+        PREPARE: 2,
+        CHK: 3,
+        RSV: 4,
+        RESERVED: 4,
+      };
+      const practiceReservations = resList
+        .filter((r: any) => {
+          const st = String(r.status_cd || '').toUpperCase();
+          if (!(st in statusPriority)) return false;
+          const facType = String(r.facility_type || r.resource_type || 'BAY').toUpperCase();
+          if (facType !== 'BAY') return false;
+          const catId = String(r.category_id || '').toUpperCase();
+          if (['PAR3', 'SCREEN', 'ROOM'].includes(catId)) return false;
+          const bNo = Number(r.bay_no ?? r.resource_no ?? 0);
+          return bNo > 0 && bNo < 1000;
+        })
+        .sort((a: any, b: any) => {
+          const pa = statusPriority[String(a.status_cd || '').toUpperCase()] ?? 99;
+          const pb = statusPriority[String(b.status_cd || '').toUpperCase()] ?? 99;
+          return pa - pb;
+        });
+
+      const activeRes = practiceReservations[0];
       if (activeRes && activeRes.bay_no) {
         const matchedBay = bays.find(b => Number(b.bay_no) === Number(activeRes.bay_no));
-        setFallbackMoveBay(
-          matchedBay || ({
+        const physStatus = String((matchedBay as any)?.status_info?.code || matchedBay?.status || '').toUpperCase();
+        const physMemNo = String((matchedBay as any)?.current_member_no || matchedBay?.member_no || '').trim();
+        const isPhysicallyOwnedByMe =
+          Boolean(matchedBay) &&
+          ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(physStatus) &&
+          Boolean(effMemberNo) &&
+          (physMemNo === String(effMemberNo).trim() || String(matchedBay?.current_user_name || '').trim() === String(effMemberNo).trim());
+
+        if (isPhysicallyOwnedByMe && matchedBay) {
+          setFallbackMoveBay(matchedBay);
+        } else {
+          // [BUG-V03] CHK/RSV 예약 회원의 타석이 현재 AVAILABLE이거나 앞사람(타인)이 이용 중일 때
+          // 물리 타석의 상태/잔여시간으로 오염되지 않도록 예약 원장 기준 가상 타석 정보 합성
+          const resStatus = String(activeRes.status_cd || 'CHK').toUpperCase();
+          const fallbackMin = Number(matchedBay?.minutes_left ?? 0);
+          const durMin = Number((activeRes as any).duration_min ?? fallbackMin) || fallbackMin;
+          setFallbackMoveBay({
             bay_no: Number(activeRes.bay_no),
-            floor_no: 1,
-            status: String(activeRes.status_cd || 'CHK').toUpperCase(),
+            floor_no: matchedBay?.floor_no || 1,
+            status: resStatus as any,
             current_member_no: effMemberNo,
             current_user_name: effMemberName,
-            minutes_left: Number((activeRes as any).duration_min ?? 0),
-            end_time: activeRes.end_time || ''
-          } as any)
-        );
+            member_name: effMemberName,
+            minutes_left: durMin,
+            duration_min: durMin,
+            start_time: activeRes.start_time || '',
+            end_time: activeRes.end_time || '',
+            res_id: activeRes.res_id,
+          } as any);
+        }
       } else {
         setFallbackMoveBay(null);
       }
@@ -79,39 +124,83 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     };
   }, [isMoveMode, effMemberNo, effMemberName, bays]);
 
-  // 이동 모드 시 현재 회원이 점유/예약 중인 타석 검색 (동명이인 부분일치 차단 & CHK/RSV 예약 상태 지원)
-  const matchedBayInList = isMoveMode
+  // [BUG-V01] 이동 모드 시 현재 회원이 점유/예약 중인 타석 정밀 검색
+  // 1순위: 본인 member_no(또는 member_no 미존재 시 성명)로 실제 가동 중인 타석 (동명이인 타인 member_no 절대 배제)
+  const activeOwnedBay = isMoveMode
     ? bays.find(b => {
         const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-        const nextCheckinSt = String((b as any).next_res_checkin_status || '').toUpperCase();
-        const isTargetStatus =
-          ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE', 'CHK', 'RSV', 'RESERVED'].includes(st) ||
-          ['CHK', 'RSV'].includes(nextCheckinSt);
-        if (!isTargetStatus) return false;
+        if (!['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(st)) return false;
 
         const bayMemberNo = String((b as any).current_member_no || (b as any).member_no || '').trim();
-        if (effMemberNo) {
-          return bayMemberNo === String(effMemberNo) || b.current_user_name === String(effMemberNo);
+        if (bayMemberNo !== '') {
+          return Boolean(effMemberNo && bayMemberNo === String(effMemberNo).trim());
+        }
+        if (effMemberNo && String(b.current_user_name || '').trim() === String(effMemberNo).trim()) {
+          return true;
         }
         const bayUserName = String((b as any).member_name || b.current_user_name || '').trim();
-        return effMemberName !== '' && bayUserName !== '' && bayUserName === effMemberName;
+        return effMemberName !== '' && bayUserName === effMemberName;
       })
     : null;
 
-  const currentBay = isMoveMode ? (matchedBayInList || fallbackMoveBay) : null;
+  // 2순위: 차기 예약(next_res)으로 대기 중인 타석 (앞사람 타석 잔여시간 오염 방지를 위해 CHK 가상 상태로 래핑)
+  const nextReservedOwnedBay = isMoveMode && !activeOwnedBay && !fallbackMoveBay
+    ? (() => {
+        const found = bays.find(b => {
+          const nextCheckinSt = String((b as any).next_res_checkin_status || '').toUpperCase();
+          if (!['CHK', 'RSV', 'COMPLETED', 'PENDING', 'REQUESTED'].includes(nextCheckinSt)) return false;
+          const nextMemNo = String((b as any).next_res_member_no || '').trim();
+          if (nextMemNo !== '') {
+            return Boolean(effMemberNo && nextMemNo === String(effMemberNo).trim());
+          }
+          const nextResName = String((b as any).next_res_name || '').trim();
+          return effMemberName !== '' && nextResName === effMemberName;
+        });
+        if (!found) return null;
+        const fallbackMin = Number(found.minutes_left ?? 0);
+        const durMin = Number((found as any).next_res_duration_min ?? fallbackMin) || fallbackMin;
+        return {
+          ...found,
+          status: 'CHK' as any,
+          status_info: { code: 'CHK', is_transferable: true },
+          current_member_no: effMemberNo,
+          current_user_name: effMemberName,
+          member_name: effMemberName,
+          minutes_left: durMin,
+          duration_min: durMin,
+          end_time: (found as any).next_res_end_time || '',
+          end_epoch_ms: undefined,
+        } as Bay;
+      })()
+    : null;
+
+  const currentBay = isMoveMode ? (activeOwnedBay || fallbackMoveBay || nextReservedOwnedBay) : null;
+
+  const isLessonOnlyBay = useCallback((bay: Bay): boolean => {
+    return Boolean(
+      bay.is_lesson_only ||
+      (bay.config_json ? (() => { try { return Boolean(JSON.parse(bay.config_json).is_lesson_only); } catch { return false; } })() : false)
+    );
+  }, []);
 
   // minutes_left 정밀 파싱 및 end_time/epoch SSOT fallback 계산
   const calculateRemMin = useCallback((bay: Bay | null | undefined): number => {
     if (!bay) return 0;
+    const st = String((bay as any)?.status_info?.code || bay.status || '').toUpperCase();
+    if (['CHK', 'RSV', 'RESERVED'].includes(st)) {
+      const explicitMin = Number((bay as any).duration_min || bay.minutes_left || 0);
+      if (explicitMin > 0) return explicitMin;
+    }
     return TimeMaster.getRemainingMinutes(bay);
   }, []);
 
   const currentBayStatus = String((currentBay as any)?.status_info?.code || currentBay?.status || '').toUpperCase();
-  const isReservedNotStarted =
-    ['CHK', 'RSV', 'RESERVED'].includes(currentBayStatus) ||
-    (!['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(currentBayStatus) &&
-      ['CHK', 'RSV'].includes(String((currentBay as any)?.next_res_checkin_status || '').toUpperCase()));
+  const isReservedNotStarted = ['CHK', 'RSV', 'RESERVED'].includes(currentBayStatus);
   const currentRemMin = calculateRemMin(currentBay);
+  const isGlobalPaused = Boolean(
+    isMoveMode &&
+    bays.some(b => Boolean((b as any).is_global_paused) || String((b as any).pause_type || '').toUpperCase() === 'GLOBAL')
+  );
   const isTimeRestricted = Boolean(
     isMoveMode &&
     currentBay &&
@@ -176,7 +265,21 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
 
   // 타석 터치 - 원자적 선점(Pre-emption) 락 시도 (useCallback 가딩)
   const handleBayTouch = useCallback(async (bay: Bay) => {
-    if (isTimeRestricted || hasNoActiveBay) return;
+    if (isLockingRef.current || preoccupyLoading) return;
+    if (isTimeRestricted || hasNoActiveBay || isGlobalPaused) return;
+
+    // [BUG-V04] 본인 현재/예정 타석 선택 차단
+    if (isMoveMode && currentBay && Number(bay.bay_no) === Number(currentBay.bay_no)) {
+      setErrorMsg(lang === 'KO' ? '현재 배정되어 있는 본인 타석으로는 이동할 수 없습니다.' : 'Cannot move to your current teebox.');
+      return;
+    }
+
+    // [BUG-V04] 레슨 전용 타석 일반 선택 차단
+    if (isLessonOnlyBay(bay)) {
+      setErrorMsg(lang === 'KO' ? '레슨 전용 타석으로는 일반 셀프 이동 및 배정을 할 수 없습니다.' : 'Lesson-only teebox cannot be selected.');
+      return;
+    }
+
     const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
     const isBlocked =
       (bay as any).is_active === false ||
@@ -188,48 +291,53 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       return;
     }
 
-    // 동일 타석 재터치 시 선택 해제
-    if (selectedBayNo === bay.bay_no) {
-      await handleRelease();
-      return;
-    }
-
-    // 기존에 선택했던 타석이 있었다면 해제
-    if (selectedBayNo !== null) {
-      await api.releaseBay(selectedBayNo);
-    }
-
-    isConfirmedRef.current = false;
-    setErrorMsg('');
-    setPreoccupyLoading(true);
-
+    isLockingRef.current = true;
     try {
-      const success = await api.preoccupyBay(bay.bay_no);
-      if (success) {
-        setSelectedBayNo(bay.bay_no);
-      } else {
-        setErrorMsg(lang === 'KO' ? '타석 선점에 실패했습니다. 다시 시도해 주세요.' : 'Failed to preoccupy teebox.');
+      // 동일 타석 재터치 시 선택 해제
+      if (selectedBayNo === bay.bay_no) {
+        await handleRelease();
+        return;
       }
-    } catch {
-      setErrorMsg(lang === 'KO' ? '타석 선점 중 오류가 발생했습니다.' : 'Error preoccupying teebox.');
+
+      // 기존에 선택했던 타석이 있었다면 해제
+      if (selectedBayNo !== null) {
+        await api.releaseBay(selectedBayNo);
+      }
+
+      isConfirmedRef.current = false;
+      setErrorMsg('');
+      setPreoccupyLoading(true);
+
+      try {
+        const success = await api.preoccupyBay(bay.bay_no);
+        if (success) {
+          setSelectedBayNo(bay.bay_no);
+        } else {
+          setErrorMsg(lang === 'KO' ? '타석 선점에 실패했습니다. 다시 시도해 주세요.' : 'Failed to preoccupy teebox.');
+        }
+      } catch {
+        setErrorMsg(lang === 'KO' ? '타석 선점 중 오류가 발생했습니다.' : 'Error preoccupying teebox.');
+      } finally {
+        setPreoccupyLoading(false);
+        onRefreshBays(); // 즉시 상태 갱신
+      }
     } finally {
-      setPreoccupyLoading(false);
-      onRefreshBays(); // 즉시 상태 갱신
+      isLockingRef.current = false;
     }
-  }, [isTimeRestricted, hasNoActiveBay, selectedBayNo, onRefreshBays, lang, handleRelease]);
+  }, [isTimeRestricted, hasNoActiveBay, isGlobalPaused, isMoveMode, currentBay, preoccupyLoading, selectedBayNo, onRefreshBays, lang, handleRelease]);
 
   // 배정 최종 확인 버튼 클릭 (useCallback 가딩)
   const handleConfirm = useCallback(async () => {
-    if (selectedBayNo !== null) {
+    if (selectedBayNo !== null && !isConfirmedRef.current && !isLockingRef.current) {
       isConfirmedRef.current = true;
       try {
-        await onBaySelected(selectedBayNo);
+        await onBaySelected(selectedBayNo, currentBay?.bay_no);
       } catch (err) {
         isConfirmedRef.current = false;
         throw err;
       }
     }
-  }, [selectedBayNo, onBaySelected]);
+  }, [selectedBayNo, onBaySelected, currentBay?.bay_no]);
 
   // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출
   const floorBays = bays.filter(b => {
@@ -256,7 +364,21 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         .map(b => b.floor_no || 1)
     )
   ).sort((a, b) => a - b);
-  const floorTabs = availableFloors.length > 0 ? availableFloors : [1, 2];
+  const floorTabs = availableFloors.length > 0 ? availableFloors : [1];
+
+  // [BUG-V07] 현재 이용 중인 타석 층으로 초기 탭 자동 포커싱 및 유효 층 동기화
+  useEffect(() => {
+    if (isMoveMode && currentBay?.floor_no && !hasAutoFocusedFloorRef.current) {
+      if (floorTabs.includes(currentBay.floor_no)) {
+        setActiveFloor(currentBay.floor_no);
+        hasAutoFocusedFloorRef.current = true;
+        return;
+      }
+    }
+    if (floorTabs.length > 0 && !floorTabs.includes(activeFloor)) {
+      setActiveFloor(floorTabs[0]);
+    }
+  }, [isMoveMode, currentBay?.floor_no, floorTabs, activeFloor]);
 
   return (
     <div 
@@ -268,7 +390,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       }}
       style={{
         width: '1000px',
-        margin: '15px auto',
+        margin: '15px auto 120px auto',
         padding: '30px 40px',
         display: 'flex',
         flexDirection: 'column',
@@ -368,6 +490,46 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                 메인으로 복귀
               </button>
             </div>
+          ) : isGlobalPaused ? (
+            <div
+              className="neon-border-red"
+              style={{
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '2px solid var(--neon-red)',
+                borderRadius: '20px',
+                padding: '20px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <ShieldAlert size={36} style={{ color: 'var(--neon-red)' }} />
+                <div>
+                  <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#ffffff', margin: 0 }}>
+                    ⏸️ 일시정지 회원 타석 이동 제한
+                  </h3>
+                  <p style={{ fontSize: '15px', color: '#fca5a5', margin: '4px 0 0 0' }}>
+                    현재 회원권 일시정지 상태입니다. 프론트 데스크에서 일시정지 해제 후 이용해 주세요.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={onCancel}
+                style={{
+                  padding: '12px 20px',
+                  borderRadius: '12px',
+                  background: '#ffffff',
+                  color: '#1d1d1f',
+                  border: 'none',
+                  fontWeight: 800,
+                  fontSize: '15px',
+                  cursor: 'pointer'
+                }}
+              >
+                메인으로 복귀
+              </button>
+            </div>
           ) : isTimeRestricted ? (
             <div
               className="neon-border-red"
@@ -424,8 +586,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                 </div>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 900, background: '#10b981', color: '#ffffff', padding: '3px 10px', borderRadius: '8px' }}>
-                      현재 이용 중
+                    <span style={{ fontSize: '13px', fontWeight: 900, background: isReservedNotStarted ? '#f59e0b' : '#10b981', color: '#ffffff', padding: '3px 10px', borderRadius: '8px' }}>
+                      {isReservedNotStarted ? '사전체크인/예약 대기 중' : '현재 이용 중'}
                     </span>
                     <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#ffffff', margin: 0 }}>
                       {currentBay?.bay_no}번 타석
@@ -443,14 +605,16 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                     )}
                   </div>
                   <p style={{ fontSize: '15px', color: '#a7f3d0', margin: '4px 0 0 0' }}>
-                    회원명: <strong style={{ color: '#fff' }}>{memberName}</strong> | 이용 잔여 시간: <strong style={{ color: '#6ee7b7' }}>{currentRemMin}분 남음</strong> {currentBay?.end_time ? `(종료: ${currentBay.end_time})` : ''}
+                    회원명: <strong style={{ color: '#fff' }}>{memberName}</strong> | {isReservedNotStarted ? '예정 이용 시간: ' : '이용 잔여 시간: '}<strong style={{ color: '#6ee7b7' }}>{currentRemMin}분</strong> {currentBay?.end_time ? `(종료: ${currentBay.end_time})` : ''}
                   </p>
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '13px', color: '#6ee7b7', fontWeight: 800 }}>잔여시간 100% 보전 (상품 호환)</div>
                 <div style={{ fontSize: '14px', color: '#a7f3d0', marginTop: '2px' }}>
-                  {selectedBayNo !== null ? '하단 [선택 완료] 버튼을 누르면 즉시 이동됩니다.' : '이동을 원하시는 빈 타석 카드를 선택해 주세요.'}
+                  {selectedBayNo !== null
+                    ? `하단 [${isMoveMode ? '타석 이동 확정' : '선택 완료'}] 버튼을 누르면 즉시 이동됩니다.`
+                    : '이동을 원하시는 빈 타석 카드를 선택해 주세요.'}
                 </div>
               </div>
             </div>
@@ -545,7 +709,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         </div>
       </div>
 
-      {/* 층별 테크 스펙 안내 바 (Data Density 강화) */}
+      {/* 층별 테크 스펙 안내 바 (Data Density 강화 - Zero-Hardcoding 동적 산출) */}
       <div 
         style={{ 
           background: 'rgba(255,255,255,0.02)', 
@@ -558,8 +722,34 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           color: 'var(--text-secondary)'
         }}
       >
-        <span>⛳ 층별 장비 스펙: <strong style={{ color: 'var(--neon-indigo)' }}>{activeFloor === 1 ? '1층 GDR+ 초고속 센서 (1~10번)' : '2층 Kakao VX 스크린 (11~20번)'}</strong></span>
-        <span>• 좌타/우타 방향을 반드시 확인 후 선택해 주세요.</span>
+        <span>
+          ⛳ 층별 장비 스펙:{' '}
+          <strong style={{ color: 'var(--neon-indigo)' }}>
+            {(() => {
+              if (!floorBays || floorBays.length === 0) return `${activeFloor}층 타석 정보 없음`;
+              const minBay = Math.min(...floorBays.map((b) => b.bay_no));
+              const maxBay = Math.max(...floorBays.map((b) => b.bay_no));
+              const availCnt = floorBays.filter((b) => {
+                const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+                return st === 'AVAILABLE' && (b as any).is_active !== false && !isLessonOnlyBay(b);
+              }).length;
+              const sims = Array.from(
+                new Set(
+                  floorBays
+                    .map((b) => {
+                      const st = b.simulator_type || (b.config_json ? (() => { try { return JSON.parse(b.config_json).simulator_type; } catch { return null; } })() : null);
+                      if (!st || st === 'NONE') return null;
+                      return st === 'GDR_PLUS' ? 'GDR+' : st === 'KAKAO_VX' ? 'Kakao VX' : st;
+                    })
+                    .filter(Boolean)
+                )
+              );
+              const simLabel = sims.length > 0 ? sims.join(' / ') : '타석 센서';
+              return `${activeFloor}층 ${simLabel} (${minBay}~${maxBay}번 · 빈 타석 ${availCnt}석)`;
+            })()}
+          </strong>
+        </span>
+        <span>• 좌타/우타 방향 및 레슨 전용 여부를 확인 후 선택해 주세요.</span>
       </div>
 
       {/* 0. 애플 모션 스타일 전용 CSS 스타일 태그 주입 */}
@@ -602,23 +792,32 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         {floorBays.map((bay) => {
           const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
           const isSelected = selectedBayNo === bay.bay_no;
+          const isCurrentMyBay = Boolean(isMoveMode && currentBay && Number(currentBay.bay_no) === Number(bay.bay_no));
+          const isLessonOnly = isLessonOnlyBay(bay);
           const isPreOccupiedByOther = canonicalStatus === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId();
-          const isOccupied = ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus);
+          const isOccupied = ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus) && !isCurrentMyBay;
           const isUnderMaintenance =
-            (bay as any).is_active === false ||
-            ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
-          const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance;
+            !isCurrentMyBay &&
+            ((bay as any).is_active === false ||
+            ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus));
+          const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance && !isCurrentMyBay && !isLessonOnly;
 
           // 1. 헤더 영역 스타일 (30% 높이)
           let headerBg = '#e5e5ea';
           let headerTextColor = '#86868b';
 
-          if (isAvailable) {
+          if (isCurrentMyBay) {
+            headerBg = '#059669';
+            headerTextColor = '#ffffff';
+          } else if (isAvailable) {
             headerBg = '#354238';
             headerTextColor = '#ffffff';
           } else if (isSelected) {
             headerBg = '#34c759'; // 고대비 맑은 애플 그린 헤더 복원
             headerTextColor = '#121419'; // 진하고 선명한 검정 폰트
+          } else if (isLessonOnly) {
+            headerBg = '#7e22ce';
+            headerTextColor = '#ffffff';
           } else if (isOccupied) {
             headerBg = '#d2d2d7';
             headerTextColor = '#515154';
@@ -642,7 +841,14 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           let zIndex = 1;
           let boxShadow = 'none';
 
-          if (isAvailable) {
+          if (isCurrentMyBay) {
+            containerBorder = '2.5px solid #059669';
+            containerBg = '#ecfdf5';
+            statusText = isReservedNotStarted ? '예정 내 타석' : '현재 내 타석';
+            statusColor = '#047857';
+            cursorStyle = 'not-allowed';
+            boxShadow = '0 6px 18px rgba(5, 150, 105, 0.18)';
+          } else if (isAvailable) {
             containerBorder = '1.5px solid #dadce0';
             containerBg = '#ffffff';
             statusText = '이용가능';
@@ -657,6 +863,13 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             transform = 'scale(1.05) translateY(-6px)';
             zIndex = 10;
             boxShadow = '0 12px 30px rgba(53, 66, 56, 0.22)';
+          } else if (isLessonOnly) {
+            containerBorder = '1.5px solid #d8b4fe';
+            containerBg = '#faf5ff';
+            statusText = '레슨전용';
+            statusColor = '#7e22ce';
+            cursorStyle = 'not-allowed';
+            opacity = '0.65';
           } else if (isOccupied) {
             containerBorder = '1px solid #dadce0';
             containerBg = '#eaeaea';
@@ -713,7 +926,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
 
               {/* --- CARD MAIN BODY --- */}
               <div
-                onClick={() => (isAvailable || isSelected) && handleBayTouch(bay)}
+                onClick={() => (isAvailable || isSelected || isCurrentMyBay || isLessonOnly) && handleBayTouch(bay)}
                 style={{
                   height: '130px',
                   borderRadius: '12px',
@@ -782,7 +995,16 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                     gap: '6px'
                   }}
                 >
-                  {isOccupied ? (
+                  {isCurrentMyBay ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', width: '100%' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 900, color: statusColor }}>
+                        {statusText}
+                      </span>
+                      <span style={{ fontSize: '12px', fontWeight: 800, color: '#065f46' }}>
+                        {currentRemMin}분 보전
+                      </span>
+                    </div>
+                  ) : isOccupied ? (
                     (() => {
                       const remMin = TimeMaster.getRemainingMinutes(bay);
                       return (
@@ -937,9 +1159,11 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               </span>
             </div>
           ) : (
-            <span style={{ fontSize: '16px', color: isTimeRestricted ? 'var(--neon-red)' : 'var(--text-secondary)', fontWeight: 700 }}>
+            <span style={{ fontSize: '16px', color: (isTimeRestricted || isGlobalPaused) ? 'var(--neon-red)' : 'var(--text-secondary)', fontWeight: 700 }}>
               {isMoveMode 
-                ? isTimeRestricted 
+                ? isGlobalPaused
+                  ? '⏸️ 일시정지 상태 회원은 타석 이동이 제한됩니다.'
+                  : isTimeRestricted 
                   ? '⏱️ 이용 종료 임박(5분 미만)으로 자리 이동이 불가능합니다.' 
                   : hasNoActiveBay 
                   ? '현재 이용 중인 타석이 없습니다.' 
@@ -963,7 +1187,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           
           <button
             onClick={handleConfirm}
-            disabled={selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay}
+            disabled={selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused}
             className="kiosk-btn kiosk-btn-primary"
             style={{ 
               width: '220px', 
@@ -971,8 +1195,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               borderRadius: '12px', 
               fontSize: '20px', 
               fontWeight: 800,
-              opacity: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay) ? 0.5 : 1,
-              cursor: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay) ? 'not-allowed' : 'pointer'
+              opacity: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 0.5 : 1,
+              cursor: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 'not-allowed' : 'pointer'
             }}
           >
             {preoccupyLoading ? '선점 처리 중...' : isMoveMode ? '타석 이동 확정' : '선택 완료'}
