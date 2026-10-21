@@ -3086,7 +3086,7 @@ export default function KioskApp() {
           style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(10, 12, 16, 0.95)',
+            backgroundColor: 'rgba(0, 0, 0, 0.58)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             zIndex: 100000,
@@ -3098,37 +3098,39 @@ export default function KioskApp() {
         >
           <div
             style={{
-              backgroundColor: '#1e293b',
-              borderRadius: '32px',
-              border: '2px solid #ef4444',
-              padding: '48px',
+              backgroundColor: '#ffffff',
+              borderRadius: '36px',
+              border: '1px solid #e5e5ea',
+              padding: '48px 44px',
               maxWidth: '640px',
+              width: '100%',
               textAlign: 'center',
-              boxShadow: '0 24px 60px rgba(239, 68, 68, 0.3)',
-              color: '#ffffff',
+              boxShadow: '0 32px 80px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.04)',
+              color: '#1d1d1f',
             }}
           >
-            <div style={{ fontSize: '64px', marginBottom: '16px' }}>📡</div>
-            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#f87171', marginBottom: '12px' }}>
+            <div style={{ fontSize: '60px', marginBottom: '16px' }}>📡</div>
+            <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', marginBottom: '14px', letterSpacing: '-0.6px' }}>
               {lang === 'KO' ? '⚠️ 네트워크 연결 장애 - 카운터 문의' : '⚠️ Network Connection Error - Please Contact Counter'}
             </h2>
-            <p style={{ fontSize: '18px', color: '#cbd5e1', lineHeight: '1.6', marginBottom: '32px' }}>
+            <p style={{ fontSize: '18px', color: '#48484a', fontWeight: 600, lineHeight: '1.6', marginBottom: '32px' }}>
               {lang === 'KO' ? (
                 <>
                   서버 및 인터넷 통신 연결이 일시적으로 원활하지 않습니다.<br />
                   이중 결제 및 예약 오류를 방지하기 위해 키오스크 운영을 일시 중단합니다.<br />
-                  <strong>카운터(안내 데스크) 직원에게 문의해 주세요.</strong>
+                  <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>카운터(안내 데스크) 직원에게 문의해 주세요.</strong>
                 </>
               ) : (
                 <>
                   Temporary network disconnection to the server.<br />
                   Kiosk operations are paused to prevent double-billing.<br />
-                  <strong>Please contact the front desk staff.</strong>
+                  <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>Please contact the front desk staff.</strong>
                 </>
               )}
             </p>
             <div style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
               <button
+                type="button"
                 data-testid="network-retry-button"
                 onClick={async () => {
                   const conn = await api.checkConnection();
@@ -3143,15 +3145,16 @@ export default function KioskApp() {
                   }
                 }}
                 style={{
-                  padding: '16px 36px',
-                  borderRadius: '20px',
-                  backgroundColor: '#3b82f6',
+                  height: '64px',
+                  padding: '0 44px',
+                  borderRadius: '999px',
+                  backgroundColor: '#1d1d1f',
                   color: '#ffffff',
                   fontWeight: 900,
-                  fontSize: '18px',
+                  fontSize: '19px',
                   border: 'none',
                   cursor: 'pointer',
-                  boxShadow: '0 8px 24px rgba(59, 130, 246, 0.4)',
+                  boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)',
                 }}
               >
                 {lang === 'KO' ? '연결 재시도' : 'Retry'}
@@ -3167,8 +3170,9 @@ export default function KioskApp() {
           style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(10, 12, 16, 0.92)',
+            backgroundColor: 'rgba(0, 0, 0, 0.58)',
             backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
             zIndex: 99999,
             display: 'flex',
             alignItems: 'center',
@@ -3178,41 +3182,44 @@ export default function KioskApp() {
         >
           <div
             style={{
-              backgroundColor: '#1e293b',
-              borderRadius: '32px',
-              border: '2px solid #ef4444',
-              padding: '48px',
+              backgroundColor: '#ffffff',
+              borderRadius: '36px',
+              border: '1px solid #e5e5ea',
+              padding: '48px 44px',
               maxWidth: '640px',
+              width: '100%',
               textAlign: 'center',
-              boxShadow: '0 24px 60px rgba(239, 68, 68, 0.3)',
-              color: '#ffffff',
+              boxShadow: '0 32px 80px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.04)',
+              color: '#1d1d1f',
             }}
           >
-            <div style={{ fontSize: '64px', marginBottom: '16px' }}>⚠️</div>
-            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#f87171', marginBottom: '12px' }}>
+            <div style={{ fontSize: '60px', marginBottom: '16px' }}>⚠️</div>
+            <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', marginBottom: '14px', letterSpacing: '-0.6px' }}>
               타석 장비 미들웨어 점검 중
             </h2>
-            <p style={{ fontSize: '18px', color: '#cbd5e1', lineHeight: '1.6', marginBottom: '32px' }}>
+            <p style={{ fontSize: '18px', color: '#48484a', fontWeight: 600, lineHeight: '1.6', marginBottom: '32px' }}>
               현재 센서 기기 제어 서버(미들웨어) 점검 및 통신 확인 중입니다.<br />
               안전한 영업을 위해 키오스크 배정이 일시 차단되었습니다.<br />
-              <strong>안내 데스크 직원에게 문의해 주세요.</strong>
+              <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>안내 데스크 직원에게 문의해 주세요.</strong>
             </p>
             <div style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
               <button
+                type="button"
                 onClick={() => {
                   api.writeKioskLog('STAFF_CALL', '미들웨어 점검 장애 화면에서 직원을 호출함');
                   showToast('안내 데스크로 직원 호출 알림이 전송되었습니다.');
                 }}
                 style={{
-                  padding: '16px 36px',
-                  borderRadius: '20px',
-                  backgroundColor: '#ef4444',
+                  height: '64px',
+                  padding: '0 44px',
+                  borderRadius: '999px',
+                  backgroundColor: '#1d1d1f',
                   color: '#ffffff',
                   fontWeight: 900,
-                  fontSize: '20px',
+                  fontSize: '19px',
                   border: 'none',
                   cursor: 'pointer',
-                  boxShadow: '0 8px 24px rgba(239, 68, 68, 0.4)',
+                  boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)',
                 }}
               >
                 🔔 직원 호출
@@ -3284,25 +3291,28 @@ export default function KioskApp() {
       {customMenuNotice && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(12px)',
+          background: 'rgba(0, 0, 0, 0.58)', backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
         }}>
           <div style={{
-            background: '#ffffff', borderRadius: '24px', padding: '40px', maxWidth: '540px', width: '100%',
-            textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+            background: '#ffffff', borderRadius: '36px', padding: '44px 40px', maxWidth: '540px', width: '100%',
+            textAlign: 'center', boxShadow: '0 32px 80px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.04)',
+            border: '1px solid #e5e5ea'
           }}>
             <div style={{ fontSize: '56px', marginBottom: '16px' }}>📢</div>
-            <h3 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', marginBottom: '16px', letterSpacing: '-0.5px' }}>
+            <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', marginBottom: '16px', letterSpacing: '-0.6px' }}>
               {customMenuNotice.title}
             </h3>
-            <p style={{ fontSize: '18px', color: '#4b5563', lineHeight: 1.6, marginBottom: '32px', fontWeight: 500 }}>
+            <p style={{ fontSize: '18px', color: '#48484a', lineHeight: 1.6, marginBottom: '32px', fontWeight: 600 }}>
               {customMenuNotice.desc}
             </p>
             <button
+              type="button"
               onClick={() => setCustomMenuNotice(null)}
               style={{
-                width: '100%', padding: '18px', borderRadius: '16px', background: '#059669', color: '#ffffff',
-                fontSize: '18px', fontWeight: 800, border: 'none', cursor: 'pointer', boxShadow: '0 10px 20px rgba(5, 150, 105, 0.3)'
+                width: '100%', height: '64px', borderRadius: '999px', background: '#1d1d1f', color: '#ffffff',
+                fontSize: '19px', fontWeight: 800, border: 'none', cursor: 'pointer', boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)'
               }}
             >
               확인 및 닫기
@@ -3315,51 +3325,55 @@ export default function KioskApp() {
       {closingPromptModal && closingPromptModal.isVisible && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(12px)',
+          background: 'rgba(0, 0, 0, 0.58)', backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
         }}>
           <div style={{
-            background: '#ffffff', borderRadius: '28px', padding: '40px', maxWidth: '560px', width: '100%',
-            textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)', border: '2px solid #f59e0b'
+            background: '#ffffff', borderRadius: '36px', padding: '44px 40px', maxWidth: '560px', width: '100%',
+            textAlign: 'center', boxShadow: '0 32px 80px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.04)',
+            border: '1px solid #e5e5ea'
           }}>
             <div style={{
-              width: '72px', height: '72px', borderRadius: '50%', background: 'rgba(245, 158, 11, 0.15)',
-              color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              margin: '0 auto 20px', border: '1px solid rgba(245, 158, 11, 0.3)'
+              width: '76px', height: '76px', borderRadius: '50%', background: '#f5f5f7',
+              color: '#1d1d1f', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 20px', border: '1px solid #e5e5ea'
             }}>
-              <Clock style={{ width: '40px', height: '40px' }} />
+              <Clock style={{ width: '36px', height: '36px' }} />
             </div>
-            <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#111827', marginBottom: '16px', letterSpacing: '-0.5px' }}>
+            <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', marginBottom: '14px', letterSpacing: '-0.6px' }}>
               {closingPromptModal.title || (closingPromptModal.reason === 'NEXT_RESERVATION_LIMIT' ? '⚠️ 다음 예약 이용시간 안내' : '⏰ 영업 마감 이용시간 안내')}
             </h3>
-            <p style={{ fontSize: '19px', color: '#374151', lineHeight: 1.6, marginBottom: '20px', fontWeight: 600, whiteSpace: 'pre-line' }}>
+            <p style={{ fontSize: '18px', color: '#48484a', lineHeight: 1.6, marginBottom: '20px', fontWeight: 600, whiteSpace: 'pre-line' }}>
               {closingPromptModal.message || `영업 마감시각(${closingPromptModal.closeTime})까지 이용 가능한 시간은 [${closingPromptModal.maxMin}분]입니다.\n\n${closingPromptModal.maxMin}분으로 단축하여 배정을 진행하시겠습니까?`}
             </p>
             {closingPromptModal.noticeText && (
               <div style={{
-                padding: '14px 18px', background: '#fef3c7', borderRadius: '14px',
-                marginBottom: '28px', fontSize: '14px', color: '#92400e', fontWeight: 600,
-                border: '1px solid #fde68a', textAlign: 'center'
+                padding: '14px 18px', background: '#f5f5f7', borderRadius: '16px',
+                marginBottom: '28px', fontSize: '14px', color: '#48484a', fontWeight: 700,
+                border: '1px solid #e5e5ea', textAlign: 'center'
               }}>
                 {closingPromptModal.noticeText}
               </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
               <button
+                type="button"
                 onClick={closingPromptModal.onCancel}
                 style={{
-                  padding: '18px', borderRadius: '16px', background: '#e5e7eb', color: '#374151',
-                  fontSize: '18px', fontWeight: 800, border: 'none', cursor: 'pointer'
+                  height: '62px', borderRadius: '999px', background: '#f5f5f7', color: '#1d1d1f',
+                  fontSize: '18px', fontWeight: 800, border: '1px solid #d2d2d7', cursor: 'pointer'
                 }}
               >
                 {closingPromptModal.reason === 'NEXT_RESERVATION_LIMIT' ? '취소 (다른 타석 선택)' : '취소'}
               </button>
               <button
+                type="button"
                 onClick={closingPromptModal.onConfirm}
                 style={{
-                  padding: '18px', borderRadius: '16px', background: '#d97706', color: '#ffffff',
+                  height: '62px', borderRadius: '999px', background: '#1d1d1f', color: '#ffffff',
                   fontSize: '18px', fontWeight: 900, border: 'none', cursor: 'pointer',
-                  boxShadow: '0 10px 20px rgba(217, 119, 6, 0.3)'
+                  boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)'
                 }}
               >
                 {closingPromptModal.maxMin}분으로 배정 진행

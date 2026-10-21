@@ -358,50 +358,65 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
         {/* Header */}
         <div 
           style={{
-            background: 'linear-gradient(135deg, #031510 0%, #022c22 100%)',
+            background: '#ffffff',
+            borderBottom: '1px solid #e5e5ea',
             padding: '28px 36px',
-            color: '#ffffff',
+            color: '#1d1d1f',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{ background: 'rgba(52, 199, 89, 0.2)', padding: '12px', borderRadius: '16px' }}>
-              <UserPlus size={28} color="#34c759" />
+            <div style={{ background: '#f5f5f7', border: '1px solid #e5e5ea', padding: '12px', borderRadius: '16px' }}>
+              <UserPlus size={28} color="#1d1d1f" />
             </div>
             <div>
-              <h2 style={{ fontSize: '26px', fontWeight: 900, margin: 0 }}>
+              <h2 style={{ fontSize: '26px', fontWeight: 900, margin: 0, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
                 {lang === 'KO' ? '👥 동반자 타석 동시 배정 설정' : '👥 Companion Bay Allocation Setup'}
               </h2>
-              <p style={{ fontSize: '15px', color: '#a1a1aa', margin: '4px 0 0 0' }}>
+              <p style={{ fontSize: '15px', color: '#6e6e73', fontWeight: 600, margin: '4px 0 0 0' }}>
                 {lang === 'KO' ? `선택하신 ${selectedBayNos.length}개 타석의 사용 정보를 설정해주세요.` : `Configure details for ${selectedBayNos.length} selected teeboxes.`}
               </p>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             {/* Countdown Badge */}
             <div 
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                background: 'rgba(255, 255, 255, 0.1)',
+                background: '#f5f5f7',
+                border: '1px solid #e5e5ea',
+                color: '#1d1d1f',
                 padding: '8px 16px',
-                borderRadius: '20px',
+                borderRadius: '999px',
                 fontSize: '16px',
-                fontWeight: 700
+                fontWeight: 800
               }}
             >
-              <Timer size={18} color="#34c759" />
+              <Timer size={18} color="#1d1d1f" />
               <span>{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}</span>
             </div>
             <button 
+              type="button"
               onClick={onCancel}
-              style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', opacity: 0.8 }}
+              style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '50%',
+                background: '#f5f5f7',
+                border: '1px solid #e5e5ea',
+                color: '#48484a',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
             >
-              <X size={28} />
+              <X size={22} />
             </button>
           </div>
         </div>
@@ -409,11 +424,12 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
         {/* Content Body */}
         <div style={{ padding: '32px 36px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {/* 타석 선택 탭 */}
-          <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
+          <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', padding: '6px', background: '#f5f5f7', borderRadius: '20px', border: '1px solid #e5e5ea' }}>
             {targets.map((t, idx) => {
               const isActive = idx === activeBayIdx;
               return (
                 <button
+                  type="button"
                   key={t.bayNo}
                   onClick={() => {
                     setActiveBayIdx(idx);
@@ -423,11 +439,11 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                   style={{
                     flex: 1,
                     minWidth: '140px',
-                    padding: '16px 20px',
-                    borderRadius: '20px',
-                    border: isActive ? '2px solid #047857' : '1px solid #e5e7eb',
-                    background: isActive ? '#ecfdf5' : '#f9fafb',
-                    color: isActive ? '#047857' : '#4b5563',
+                    padding: '14px 20px',
+                    borderRadius: '16px',
+                    border: 'none',
+                    background: isActive ? '#1d1d1f' : 'transparent',
+                    color: isActive ? '#ffffff' : '#6e6e73',
                     fontWeight: 800,
                     fontSize: '18px',
                     cursor: 'pointer',
@@ -435,10 +451,11 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                     flexDirection: 'column',
                     alignItems: 'center',
                     gap: '4px',
+                    boxShadow: isActive ? '0 4px 12px rgba(0, 0, 0, 0.14)' : 'none',
                     transition: 'all 0.2s ease'
                   }}
                 >
-                  <span style={{ fontSize: '13px', color: isActive ? '#059669' : '#9ca3af', fontWeight: 700 }}>
+                  <span style={{ fontSize: '12px', color: isActive ? 'rgba(255, 255, 255, 0.78)' : '#86868b', fontWeight: 700 }}>
                     {t.isLeader ? '[대표자]' : `[동반자 ${idx}]`}
                   </span>
                   <span>{t.bayNo}번 타석</span>
@@ -449,49 +466,51 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
 
           {/* Active Bay Detail Form */}
           {currentTarget && (
-            <div style={{ background: '#f8fafc', borderRadius: '24px', padding: '28px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ background: '#f5f5f7', borderRadius: '24px', padding: '28px', border: '1px solid #e5e5ea', display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '20px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                <h3 style={{ fontSize: '20px', fontWeight: 900, margin: 0, color: '#1d1d1f', letterSpacing: '-0.4px' }}>
                   📌 {currentTarget.bayNo}번 타석 설정 ({currentTarget.isLeader ? '대표자' : `동반자 ${activeBayIdx}`})
                 </h3>
                 {currentTarget.isLeader ? (
-                  <span style={{ background: '#dcfce7', color: '#15803d', padding: '6px 14px', borderRadius: '12px', fontSize: '14px', fontWeight: 800 }}>
+                  <span style={{ background: '#1d1d1f', color: '#ffffff', padding: '6px 14px', borderRadius: '999px', fontSize: '13px', fontWeight: 800 }}>
                     인증 회원 ({currentTarget.memberName})
                   </span>
                 ) : (
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '6px', background: '#ffffff', padding: '4px', borderRadius: '999px', border: '1px solid #d2d2d7' }}>
                     <button
+                      type="button"
                       onClick={() => {
                         setSearchError('');
                         updateTarget(activeBayIdx, { isGuest: false, memberName: currentTarget.memberNo ? currentTarget.memberName : '동반자 회원' });
                       }}
                       style={{
-                        padding: '8px 16px',
-                        borderRadius: '12px',
+                        padding: '8px 18px',
+                        borderRadius: '999px',
                         fontSize: '14px',
-                        fontWeight: 700,
-                        border: !currentTarget.isGuest ? '2px solid #047857' : '1px solid #cbd5e1',
-                        background: !currentTarget.isGuest ? '#ecfdf5' : '#ffffff',
-                        color: !currentTarget.isGuest ? '#047857' : '#64748b',
+                        fontWeight: 800,
+                        border: 'none',
+                        background: !currentTarget.isGuest ? '#1d1d1f' : 'transparent',
+                        color: !currentTarget.isGuest ? '#ffffff' : '#6e6e73',
                         cursor: 'pointer'
                       }}
                     >
-                      <UserCheck size={16} style={{ display: 'inline', marginRight: '4px' }} /> 회원
+                      <UserCheck size={15} style={{ display: 'inline', marginRight: '4px' }} /> 회원
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
                         setSearchError('');
                         setSearchHp('');
                         updateTarget(activeBayIdx, { isGuest: true, memberNo: undefined, memberItemId: undefined, memberName: `비회원 ${activeBayIdx}`, ticketType: 'DAILY', price: dailyPrice });
                       }}
                       style={{
-                        padding: '8px 16px',
-                        borderRadius: '12px',
+                        padding: '8px 18px',
+                        borderRadius: '999px',
                         fontSize: '14px',
-                        fontWeight: 700,
-                        border: currentTarget.isGuest ? '2px solid #047857' : '1px solid #cbd5e1',
-                        background: currentTarget.isGuest ? '#ecfdf5' : '#ffffff',
-                        color: currentTarget.isGuest ? '#047857' : '#64748b',
+                        fontWeight: 800,
+                        border: 'none',
+                        background: currentTarget.isGuest ? '#1d1d1f' : 'transparent',
+                        color: currentTarget.isGuest ? '#ffffff' : '#6e6e73',
                         cursor: 'pointer'
                       }}
                     >
@@ -503,19 +522,20 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
 
               {/* 회원 검색 폼 + 터치 숫자 키패드 (동반자 회원 선택 시) */}
               {!currentTarget.isLeader && !currentTarget.isGuest && (
-                <div style={{ background: '#ffffff', padding: '18px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ background: '#ffffff', padding: '18px', borderRadius: '18px', border: '1px solid #e5e5ea', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                     <input 
                       type="text"
                       readOnly
                       placeholder={lang === 'KO' ? '휴대폰 번호 뒷 4자리 또는 11자리 터치 입력' : 'Tap 4 or 11 digits'}
                       value={searchHp}
-                      style={{ flex: 1, padding: '12px 16px', borderRadius: '12px', border: '2px solid #047857', fontSize: '20px', fontWeight: 900, letterSpacing: '2px', color: '#0f172a', background: '#f8fafc' }}
+                      style={{ flex: 1, padding: '12px 16px', borderRadius: '12px', border: '1.5px solid #1d1d1f', fontSize: '20px', fontWeight: 900, letterSpacing: '2px', color: '#1d1d1f', background: '#f5f5f7' }}
                     />
                     <button
+                      type="button"
                       onClick={handleSearchCompanion}
                       disabled={searchLoading}
-                      style={{ padding: '14px 28px', background: '#047857', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '16px', fontWeight: 900, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      style={{ padding: '14px 28px', background: '#1d1d1f', color: '#fff', border: 'none', borderRadius: '999px', fontSize: '16px', fontWeight: 900, cursor: 'pointer', whiteSpace: 'nowrap' }}
                     >
                       {searchLoading ? '검색 중...' : '회원 조회'}
                     </button>
@@ -535,10 +555,10 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                         }}
                         style={{
                           height: '46px',
-                          borderRadius: '10px',
-                          border: '1px solid #cbd5e1',
-                          background: key === '초기화' || key === '←' ? '#f1f5f9' : '#ffffff',
-                          color: '#0f172a',
+                          borderRadius: '12px',
+                          border: '1px solid #e5e5ea',
+                          background: key === '초기화' || key === '←' ? '#e8e8ed' : '#f5f5f7',
+                          color: '#1d1d1f',
                           fontSize: key === '초기화' ? '14px' : '18px',
                           fontWeight: 800,
                           cursor: 'pointer'
@@ -550,7 +570,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                   </div>
 
                   {currentTarget.memberNo && (
-                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#047857', background: '#ecfdf5', padding: '8px 12px', borderRadius: '10px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#1d1d1f', background: '#f5f5f7', border: '1px solid #d2d2d7', padding: '10px 14px', borderRadius: '12px' }}>
                       ✅ 조회된 동반 회원: {currentTarget.memberName} ({currentTarget.hp || currentTarget.memberNo})
                     </div>
                   )}
@@ -564,7 +584,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
 
               {/* 이용권 / 상품 지정 */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <label style={{ fontSize: '15px', fontWeight: 800, color: '#334155' }}>배정 및 이용 방식 선택</label>
+                <label style={{ fontSize: '15px', fontWeight: 800, color: '#48484a' }}>배정 및 이용 방식 선택</label>
                 {!currentTarget.isGuest && currentAssignableAssets.length > 1 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {currentAssignableAssets.map((asset) => {
@@ -587,13 +607,13 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                             });
                           }}
                           style={{
-                            padding: '8px 14px',
-                            borderRadius: '12px',
+                            padding: '8px 16px',
+                            borderRadius: '999px',
                             fontSize: '13px',
                             fontWeight: 800,
-                            border: isSelectedAsset ? '2px solid #047857' : '1px solid #cbd5e1',
-                            background: isSelectedAsset ? '#ecfdf5' : '#ffffff',
-                            color: isSelectedAsset ? '#047857' : '#475569',
+                            border: isSelectedAsset ? '1.5px solid #1d1d1f' : '1px solid #d2d2d7',
+                            background: isSelectedAsset ? '#1d1d1f' : '#ffffff',
+                            color: isSelectedAsset ? '#ffffff' : '#48484a',
                             cursor: 'pointer'
                           }}
                         >
@@ -606,6 +626,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   {/* 이용권 차감 옵션 */}
                   <button
+                    type="button"
                     onClick={() => {
                       const resolvedAssetId = currentTarget.memberItemId || (selectedAsset ? Number(selectedAsset.member_item_id || (selectedAsset as any).id) : undefined);
                       if (currentTarget.isGuest || !resolvedAssetId) {
@@ -623,36 +644,37 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                     disabled={currentTarget.isGuest || (!currentTarget.memberItemId && !selectedAsset)}
                     style={{
                       padding: '20px',
-                      borderRadius: '16px',
+                      borderRadius: '18px',
                       textAlign: 'left',
-                      border: currentTarget.ticketType === 'MEMBERSHIP' ? '2px solid #047857' : '1px solid #cbd5e1',
-                      background: currentTarget.ticketType === 'MEMBERSHIP' ? '#ffffff' : '#f8fafc',
+                      border: currentTarget.ticketType === 'MEMBERSHIP' ? '2px solid #1d1d1f' : '1px solid #d2d2d7',
+                      background: '#ffffff',
                       cursor: (currentTarget.isGuest || (!currentTarget.memberItemId && !selectedAsset)) ? 'not-allowed' : 'pointer',
                       opacity: (currentTarget.isGuest || (!currentTarget.memberItemId && !selectedAsset)) ? 0.5 : 1,
-                      boxShadow: currentTarget.ticketType === 'MEMBERSHIP' ? '0 4px 12px rgba(4, 120, 87, 0.1)' : 'none'
+                      boxShadow: currentTarget.ticketType === 'MEMBERSHIP' ? '0 6px 16px rgba(0, 0, 0, 0.08)' : 'none'
                     }}
                   >
-                    <div style={{ fontWeight: 800, fontSize: '17px', color: '#0f172a' }}>🎟️ 회원권 차감</div>
-                    <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
+                    <div style={{ fontWeight: 900, fontSize: '17px', color: '#1d1d1f' }}>🎟️ 회원권 차감</div>
+                    <div style={{ fontSize: '13px', color: '#6e6e73', fontWeight: 600, marginTop: '4px' }}>
                       {selectedAsset ? `${resolveAssetTicketName(selectedAsset)} (0원)` : '보유 중인 회원 이용권으로 배정 (0원)'}
                     </div>
                   </button>
 
                   {/* 일일 이용권 결제 옵션 */}
                   <button
+                    type="button"
                     onClick={() => updateTarget(activeBayIdx, { ticketType: 'DAILY', price: dailyPrice, ticketName: `일일 타석권 ${currentTarget.durationMin}분` })}
                     style={{
                       padding: '20px',
-                      borderRadius: '16px',
+                      borderRadius: '18px',
                       textAlign: 'left',
-                      border: currentTarget.ticketType === 'DAILY' ? '2px solid #047857' : '1px solid #cbd5e1',
-                      background: currentTarget.ticketType === 'DAILY' ? '#ffffff' : '#f8fafc',
+                      border: currentTarget.ticketType === 'DAILY' ? '2px solid #1d1d1f' : '1px solid #d2d2d7',
+                      background: '#ffffff',
                       cursor: 'pointer',
-                      boxShadow: currentTarget.ticketType === 'DAILY' ? '0 4px 12px rgba(4, 120, 87, 0.1)' : 'none'
+                      boxShadow: currentTarget.ticketType === 'DAILY' ? '0 6px 16px rgba(0, 0, 0, 0.08)' : 'none'
                     }}
                   >
-                    <div style={{ fontWeight: 800, fontSize: '17px', color: '#0f172a' }}>💳 일일 타석권 결제</div>
-                    <div style={{ fontSize: '13px', color: '#047857', fontWeight: 700, marginTop: '4px' }}>{dailyPrice.toLocaleString()} 원 ({currentTarget.durationMin}분 이용)</div>
+                    <div style={{ fontWeight: 900, fontSize: '17px', color: '#1d1d1f' }}>💳 일일 타석권 결제</div>
+                    <div style={{ fontSize: '13px', color: '#1d1d1f', fontWeight: 800, marginTop: '4px' }}>{dailyPrice.toLocaleString()} 원 ({currentTarget.durationMin}분 이용)</div>
                   </button>
                 </div>
               </div>
@@ -664,7 +686,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
         <div 
           style={{
             padding: '24px 36px',
-            borderTop: '1px solid #e2e8f0',
+            borderTop: '1px solid #e5e5ea',
             background: '#ffffff',
             display: 'flex',
             alignItems: 'center',
@@ -672,21 +694,23 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           }}
         >
           <div>
-            <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 600 }}>총 결제 필요 금액</span>
-            <div style={{ fontSize: '28px', fontWeight: 900, color: '#047857' }}>
-              {totalPrice.toLocaleString()} <span style={{ fontSize: '20px' }}>원</span>
+            <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>총 결제 필요 금액</span>
+            <div style={{ fontSize: '30px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-0.8px' }}>
+              {totalPrice.toLocaleString()} <span style={{ fontSize: '20px', fontWeight: 800 }}>원</span>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '16px' }}>
+          <div style={{ display: 'flex', gap: '14px' }}>
             <button
+              type="button"
               onClick={onCancel}
               style={{
-                padding: '16px 32px',
-                borderRadius: '16px',
-                border: '1px solid #cbd5e1',
-                background: '#ffffff',
-                color: '#475569',
+                height: '60px',
+                padding: '0 32px',
+                borderRadius: '999px',
+                border: '1px solid #d2d2d7',
+                background: '#f5f5f7',
+                color: '#1d1d1f',
                 fontSize: '18px',
                 fontWeight: 800,
                 cursor: 'pointer'
@@ -695,17 +719,19 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
               이전으로
             </button>
             <button
+              type="button"
               onClick={handleConfirmAll}
               style={{
-                padding: '16px 40px',
-                borderRadius: '16px',
+                height: '60px',
+                padding: '0 40px',
+                borderRadius: '999px',
                 border: 'none',
-                background: 'linear-gradient(135deg, #064e3b 0%, #059669 100%)',
+                background: '#1d1d1f',
                 color: '#ffffff',
                 fontSize: '18px',
                 fontWeight: 900,
                 cursor: 'pointer',
-                boxShadow: '0 10px 20px rgba(5, 150, 105, 0.3)'
+                boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)'
               }}
             >
               {totalPrice > 0 ? '일괄 결제 진행' : '다중 배정 확정'}

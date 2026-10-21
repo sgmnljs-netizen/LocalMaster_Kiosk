@@ -141,17 +141,17 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
           width: '76px',
           height: '76px',
           borderRadius: '50%',
-          background: isPrinting ? 'rgba(99, 102, 241, 0.1)' : 'rgba(16, 185, 129, 0.1)',
-          border: `2px solid ${isPrinting ? 'var(--neon-indigo)' : 'var(--neon-green)'}`,
+          background: isPrinting ? 'rgba(255, 255, 255, 0.12)' : 'rgba(16, 185, 129, 0.15)',
+          border: `2px solid ${isPrinting ? '#ffffff' : '#10b981'}`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           animation: isPrinting ? 'pulse 1.5s infinite' : 'none'
         }}>
           {isPrinting ? (
-            <Printer size={38} style={{ color: 'var(--neon-indigo)', animation: 'wiggle 0.5s infinite' }} />
+            <Printer size={38} style={{ color: '#ffffff', animation: 'wiggle 0.5s infinite' }} />
           ) : (
-            <CheckCircle size={44} style={{ color: 'var(--neon-green)' }} />
+            <CheckCircle size={44} style={{ color: '#10b981' }} />
           )}
         </div>
         
@@ -225,7 +225,7 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>승인번호:</span>
-            <span style={{ fontWeight: 700, color: '#2e7559' }}>{receiptData.apprNo}</span>
+            <span style={{ fontWeight: 700, color: '#1d1d1f' }}>{receiptData.apprNo}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>예약번호:</span>
@@ -262,7 +262,7 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 900, marginTop: '4px' }}>
             <span>합계 금액:</span>
-            <span style={{ color: '#2e7559' }}>₩{formatAmount(receiptData.totalAmount)}</span>
+            <span style={{ color: '#1d1d1f' }}>₩{formatAmount(receiptData.totalAmount)}</span>
           </div>
         </div>
 
@@ -314,16 +314,20 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
       {/* 완료 확인 버튼 (인쇄 완료 후에만 터치 가능하도록 노출) */}
       {!isPrinting && (
         <button
+          type="button"
           onClick={onClose}
-          className="kiosk-btn kiosk-btn-success"
+          className="kiosk-btn"
           style={{
             marginTop: '32px',
-            height: '76px',
-            fontSize: '24px',
+            height: '72px',
+            fontSize: '22px',
             fontWeight: 900,
             padding: '0 64px',
-            borderRadius: '16px',
-            boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)',
+            borderRadius: '999px',
+            background: '#1d1d1f',
+            color: '#ffffff',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            boxShadow: '0 14px 32px rgba(0, 0, 0, 0.35)',
             cursor: 'pointer',
             zIndex: 3,
             animation: 'slideUp 0.3s ease-in-out'

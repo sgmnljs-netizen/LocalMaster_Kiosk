@@ -340,6 +340,15 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     }
   }, [selectedBayNo, onBaySelected, currentBay?.bay_no]);
 
+  const getBayFloorNo = (b: Bay): number => {
+    if (b.floor_no && !isNaN(b.floor_no)) return b.floor_no;
+    if (b.floor) {
+      const parsed = parseInt(String(b.floor).replace(/[^0-9]/g, ''), 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    return 1;
+  };
+
   // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출
   const floorBays = bays.filter(b => {
     const zCode = String((b as any).zone_code || (b as any).zoneCode || '');
@@ -355,23 +364,24 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       return false;
     }
 
-    return b.floor_no === activeFloor;
+    return getBayFloorNo(b) === activeFloor;
   });
 
   const availableFloors = Array.from(
     new Set(
       bays
         .filter(b => String((b as any).zone_code || (b as any).zoneCode || '').toUpperCase() !== 'PAR3')
-        .map(b => b.floor_no || 1)
+        .map(b => getBayFloorNo(b))
     )
   ).sort((a, b) => a - b);
   const floorTabs = availableFloors.length > 0 ? availableFloors : [1];
 
   // [BUG-V07] 현재 이용 중인 타석 층으로 초기 탭 자동 포커싱 및 유효 층 동기화
   useEffect(() => {
-    if (isMoveMode && currentBay?.floor_no && !hasAutoFocusedFloorRef.current) {
-      if (floorTabs.includes(currentBay.floor_no)) {
-        setActiveFloor(currentBay.floor_no);
+    const currentFloor = currentBay ? getBayFloorNo(currentBay) : null;
+    if (isMoveMode && currentFloor && !hasAutoFocusedFloorRef.current) {
+      if (floorTabs.includes(currentFloor)) {
+        setActiveFloor(currentFloor);
         hasAutoFocusedFloorRef.current = true;
         return;
       }
@@ -379,7 +389,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     if (floorTabs.length > 0 && !floorTabs.includes(activeFloor)) {
       setActiveFloor(floorTabs[0]);
     }
-  }, [isMoveMode, currentBay?.floor_no, floorTabs, activeFloor]);
+  }, [isMoveMode, currentBay, floorTabs, activeFloor]);
 
   return (
     <div 

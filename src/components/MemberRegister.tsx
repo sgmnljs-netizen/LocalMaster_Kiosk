@@ -381,7 +381,11 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
 
   return (
     <div 
-      onClick={() => {
+      onClick={(e) => {
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === 'INPUT' || target.closest('input') || target.closest('[data-virtual-keyboard]'))) {
+          return;
+        }
         if (activeField === 'NAME') setActiveField(null);
       }}
       style={{
@@ -675,13 +679,16 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
                 {lang === 'EN' ? 'Full Name' : '이름 (실명 입력)'}
               </label>
               <input
+                data-testid="member-name-input"
                 type="text"
                 maxLength={50}
                 onClick={(e) => {
                   e.stopPropagation();
                   setActiveField('NAME');
                 }}
-                onFocus={() => setActiveField('NAME')}
+                onFocus={() => {
+                  setActiveField('NAME');
+                }}
                 onChange={(e) => setName(e.target.value.slice(0, 50))}
                 value={name}
                 placeholder={lang === 'EN' ? 'Touch here to enter your name' : '여기를 터치하여 이름을 입력하세요'}

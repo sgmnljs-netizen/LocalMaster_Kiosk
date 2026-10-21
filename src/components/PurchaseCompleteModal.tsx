@@ -374,7 +374,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
               height: '62px',
               marginBottom: '12px',
               borderRadius: '999px',
-              background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+              background: '#059669',
               color: '#ffffff',
               border: 'none',
               fontSize: '19px',
@@ -385,7 +385,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               gap: '10px',
-              boxShadow: '0 10px 25px rgba(37, 99, 235, 0.3)',
+              boxShadow: '0 8px 20px rgba(5, 150, 105, 0.25)',
               transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
             }}
           >
@@ -402,11 +402,11 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
               flex: '1',
               height: '64px',
               borderRadius: '999px',
-              background: '#f1f5f9',
-              color: '#0f172a',
-              border: '1px solid #cbd5e1',
+              background: '#f5f5f7',
+              color: '#1d1d1f',
+              border: '1px solid #e5e5ea',
               fontSize: '18px',
-              fontWeight: 700,
+              fontWeight: 800,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -415,7 +415,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
               transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
             }}
           >
-            <Printer size={20} style={{ color: '#047857' }} />
+            <Printer size={20} style={{ color: '#1d1d1f' }} />
             <span>{lang === 'KO' ? '영수증 재출력' : 'Reprint'}</span>
           </button>
 
@@ -425,7 +425,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
               flex: '2',
               height: '64px',
               borderRadius: '999px',
-              background: 'linear-gradient(135deg, #047857 0%, #059669 100%)',
+              background: '#1d1d1f',
               color: '#ffffff',
               border: 'none',
               fontSize: '20px',
@@ -436,7 +436,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               gap: '10px',
-              boxShadow: '0 10px 25px rgba(5, 150, 105, 0.35)',
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.18)',
               transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
             }}
             onMouseDown={(e) => {

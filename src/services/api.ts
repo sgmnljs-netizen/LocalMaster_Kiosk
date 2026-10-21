@@ -1235,7 +1235,14 @@ class HybridAPIClient {
           headers: this.getSecureHeaders()
         });
         if (res.ok) {
-          const bayList = (await res.json()) as Bay[];
+          const rawBays = (await res.json()) as any[];
+          const bayList: Bay[] = rawBays.map(b => {
+            const parsedFloor = b.floor_no ?? (b.floor ? parseInt(String(b.floor).replace(/[^0-9]/g, ''), 10) : 1);
+            return {
+              ...b,
+              floor_no: isNaN(parsedFloor) || parsedFloor <= 0 ? 1 : parsedFloor
+            };
+          });
           if (bayList && bayList.length > 0 && bayList[0].server_epoch_ms) {
             TimeMaster.syncServerTime(bayList[0].server_epoch_ms);
           }

@@ -56,3 +56,5 @@
 - **`PaymentTerminal.tsx (v6.2)`**: 애플 미니멀 중앙 플로팅 시트 리뉴얼 (`maxWidth: 860px`, `borderRadius: 32px`, 원색 도배 90% 제거, 고대비 모노톤 SF Pro 딥 블랙 `#1d1d1f` 및 애플 딥 차콜 완전 원형 `999px` 필 버튼 전역 통일).
 - **`PaymentTerminal.tsx (v6.3)`**: 27인치 대형 화면 황금 비례 스케일업 (`maxWidth: 940px`, `padding: 44px 48px`, 48px 대형 금액 타이포, 76px 시그니처 딥 차콜 필 버튼, ProductShop과 100% 비례 통일).
 - **`CheckinSelect.tsx & TeeboxMap.tsx (v6.5)`**: 당일 사전 예약 체크인 화면 및 셀프 타석 이동 화면의 구형 다크 그린/네온 인디고 테마를 전면 폐기하고, 애플 스노우 화이트 글래스 카드(`#ffffff`), `#f5f5f7` 서브 패널, `#1d1d1f` 시그니처 원형 필 버튼으로 리뉴얼 완료 (전역 `KioskBottomBar`와 중복되던 내부 취소/이전 버튼 정리).
+- **`VirtualKeyboard.tsx, ProductShop.tsx, Par3Allocation.tsx & PurchaseCompleteModal.tsx (v6.6)`**: 즉석 회원가입용 가상 키보드의 다크 네온 인디고 테마를 폐기하고 스노우 화이트(`#ffffff` / `#f5f5f7` 키캡)로 전환했으며, 회원권 매대 카테고리 세그먼트 컨트롤, 파3 라운딩 예약 버튼/모달, 구매 완료 확인 버튼까지 모두 `#1d1d1f` 딥 차콜 원형 필(Pill) 스타일로 100% 일원화 완료.
+- **`ErrorMessageModal.tsx, CompanionSetupModal.tsx, MaintenanceOverlay.tsx, ReceiptPrinter.tsx & KioskApp.tsx Fail-Safe Modals (v6.7)`**: 에러 안내 팝업, 네트워크/미들웨어 단절 차단 모달, 마감 단축 배정 모달, 동반자 다중 배정 설정창, 시스템 점검 오버레이, 영수증 인쇄 확인 버튼까지 모든 예외·안전망 화면을 스노우 화이트(`#ffffff` / `#f5f5f7`)와 `#1d1d1f` 딥 차콜 필 버튼으로 100% 일원화 완료.

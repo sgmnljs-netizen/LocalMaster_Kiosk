@@ -238,13 +238,16 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       </div>
 
       {/* 동적 카테고리 탭 목록 (회원권 구매 전용 매대) */}
-      {!isDailyPurpose && (
+      {!isDailyPurpose && displayCategories.length > 0 && (
         <div 
           style={{ 
             display: 'flex', 
             overflowX: 'auto',
-            gap: '12px',
-            paddingBottom: '4px'
+            gap: '8px',
+            padding: '6px',
+            background: '#f5f5f7',
+            borderRadius: '20px',
+            border: '1px solid #e5e5ea'
           }}
         >
           {/* 어드민에서 설정한 동적 카테고리 탭 렌더링 (회원권, 쿠폰, 라카, 파3 등) */}
@@ -259,22 +262,21 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 style={{
                   flex: displayCategories.length <= 4 ? '1' : '0 0 auto',
                   minWidth: '140px',
-                  padding: '20px 10px',
-                  fontSize: '18px',
+                  padding: '16px 14px',
+                  fontSize: '17px',
                   fontWeight: 800,
                   borderRadius: '14px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '8px',
-                  border: '1px solid',
+                  border: 'none',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease',
-                  opacity: isLocked ? 0.35 : 1,
-                  color: isActive ? '#fff' : 'var(--text-secondary)',
-                  background: isActive ? 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)' : 'var(--bg-secondary)',
-                  borderColor: isActive ? 'var(--neon-indigo)' : 'var(--glass-border)',
-                  boxShadow: isActive ? '0 0 15px var(--neon-indigo-glow)' : 'none'
+                  opacity: isLocked ? 0.45 : 1,
+                  color: isActive ? '#ffffff' : '#86868b',
+                  background: isActive ? '#1d1d1f' : 'transparent',
+                  boxShadow: isActive ? '0 4px 12px rgba(0, 0, 0, 0.14)' : 'none'
                 }}
               >
                 <Layers size={18} />
@@ -296,7 +298,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         }}
       >
         {loading ? (
-          <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: 'var(--text-secondary)' }}>
+          <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#86868b', fontWeight: 700 }}>
             상품 정보를 로딩하고 있습니다...
           </div>
         ) : filteredProducts.length > 0 ? (
@@ -561,7 +563,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           })
         ) : (
           <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '240px', gap: '10px' }}>
-            <span style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 700 }}>이 카테고리에는 판매 중인 상품이 없습니다.</span>
+            <span style={{ fontSize: '18px', color: '#86868b', fontWeight: 700 }}>이 카테고리에는 판매 중인 상품이 없습니다.</span>
           </div>
         )}
       </div>
@@ -569,18 +571,17 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       {/* 하단 구매 안내 문구 */}
       <div 
         style={{
-          background: 'rgba(0, 113, 227, 0.04)',
-          border: '1px solid rgba(0, 113, 227, 0.12)',
+          background: '#f5f5f7',
+          border: '1px solid #e5e5ea',
           borderRadius: '20px',
-          padding: '20px 24px',
+          padding: '18px 24px',
           fontSize: '14px',
           color: '#515154',
           lineHeight: '1.6'
         }}
       >
-        <strong style={{ color: '#0071e3', display: 'block', marginBottom: '6px', fontSize: '15px', fontWeight: 800 }}>[무인 키오스크 구매 안내]</strong>
-        • 일일 타석권은 결제 즉시 타석 선택창으로 전환되며, 10분 내로 타석에 입장하여 주셔야 이용이 개시됩니다.<br />
-        • 모든 결제는 신용카드만 가능하며, 현금 결제나 환불은 파트너센터 및 주간 관리 데스크로 문의해 주세요.
+        <strong style={{ color: '#1d1d1f', display: 'block', marginBottom: '4px', fontSize: '15px', fontWeight: 800 }}>[무인 키오스크 구매 안내]</strong>
+        • 일일 타석권은 결제 즉시 타석 배정이 완료되며, 모든 결제는 신용카드만 가능합니다 (현금 결제/환불은 안내 데스크 문의).
       </div>
 
       {/* 회원 전용 상품 인증 및 시간 초과 안내 모달 (동기식 alert 대체) */}
@@ -602,38 +603,38 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         }}>
           <div style={{
             background: '#ffffff',
-            borderRadius: '24px',
+            borderRadius: '28px',
             padding: '36px 32px',
             maxWidth: '440px',
             width: '100%',
             textAlign: 'center',
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
-            border: '1px solid #e2e8f0'
+            border: '1px solid #e5e5ea'
           }}>
             <div style={{ fontSize: '48px', marginBottom: '16px' }}>
               {warningMessage.includes('다음 예약') ? '⏰' : '🔒'}
             </div>
-            <h3 style={{ fontSize: '22px', fontWeight: 800, color: '#1e293b', marginBottom: '12px' }}>
+            <h3 style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', marginBottom: '12px' }}>
               {warningMessage.includes('다음 예약')
                 ? '이용 시간 초과 상품 안내'
                 : (warningMessage.includes('전용]') ? '상품 구매 제한 안내' : '회원 인증 필요')}
             </h3>
-            <p style={{ fontSize: '16px', color: '#64748b', lineHeight: '1.6', whiteSpace: 'pre-line', marginBottom: '28px' }}>
+            <p style={{ fontSize: '16px', color: '#515154', lineHeight: '1.6', whiteSpace: 'pre-line', marginBottom: '28px', fontWeight: 600 }}>
               {warningMessage}
             </p>
             <button
               onClick={() => setWarningMessage(null)}
               style={{
                 width: '100%',
-                padding: '16px 0',
-                borderRadius: '16px',
-                background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                height: '56px',
+                borderRadius: '999px',
+                background: '#1d1d1f',
                 color: '#ffffff',
                 fontSize: '18px',
-                fontWeight: 700,
+                fontWeight: 800,
                 border: 'none',
                 cursor: 'pointer',
-                boxShadow: '0 8px 16px rgba(37, 99, 235, 0.3)'
+                boxShadow: '0 8px 18px rgba(0, 0, 0, 0.16)'
               }}
             >
               확인

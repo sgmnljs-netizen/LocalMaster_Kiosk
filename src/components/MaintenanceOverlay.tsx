@@ -19,7 +19,7 @@ export const MaintenanceOverlay: React.FC<MaintenanceOverlayProps> = ({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: '#0c0e12',
+        backgroundColor: '#fbfbfd',
         zIndex: 99990,
         display: 'flex',
         flexDirection: 'column',
@@ -32,6 +32,7 @@ export const MaintenanceOverlay: React.FC<MaintenanceOverlayProps> = ({
     >
       {/* Invisible Top-Left 5-Tap Zone to Unlock */}
       <button
+        type="button"
         onClick={onHiddenTap}
         style={{
           position: 'absolute',
@@ -54,41 +55,47 @@ export const MaintenanceOverlay: React.FC<MaintenanceOverlayProps> = ({
           flexDirection: 'column',
           alignItems: 'center',
           textAlign: 'center',
-          maxWidth: '520px',
+          maxWidth: '580px',
+          width: '100%',
+          background: '#ffffff',
+          borderRadius: '36px',
+          border: '1px solid #e5e5ea',
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.08)',
+          padding: '52px 44px',
           gap: '24px',
         }}
       >
         <div
           style={{
-            width: '96px',
-            height: '96px',
+            width: '92px',
+            height: '92px',
             borderRadius: '28px',
-            background: 'rgba(245, 158, 11, 0.1)',
-            border: '2px solid rgba(245, 158, 11, 0.3)',
+            background: '#f5f5f7',
+            border: '1px solid #e5e5ea',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#fbbf24',
-            boxShadow: '0 20px 50px rgba(245, 158, 11, 0.15)',
+            color: '#1d1d1f',
           }}
         >
-          <Wrench size={48} />
+          <Wrench size={44} />
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <span
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '4px 14px',
+                padding: '6px 16px',
                 borderRadius: '999px',
-                background: 'rgba(245, 158, 11, 0.15)',
-                color: '#fbbf24',
+                background: '#f5f5f7',
+                border: '1px solid #e5e5ea',
+                color: '#1d1d1f',
                 fontSize: '12px',
                 fontWeight: 800,
-                letterSpacing: '1px',
+                letterSpacing: '0.8px',
                 textTransform: 'uppercase',
               }}
             >
@@ -96,22 +103,22 @@ export const MaintenanceOverlay: React.FC<MaintenanceOverlayProps> = ({
               System Maintenance
             </span>
           </div>
-          <h1 style={{ fontSize: '28px', fontWeight: 900, color: '#ffffff', margin: '8px 0 0 0', letterSpacing: '-0.5px' }}>
+          <h1 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', margin: '8px 0 0 0', letterSpacing: '-0.6px' }}>
             현재 시스템 점검 중입니다
           </h1>
           {noticeMessage ? (
-            <p style={{ fontSize: '15px', color: '#e5e7eb', lineHeight: 1.6, margin: '8px 0 0 0', whiteSpace: 'pre-line', wordBreak: 'keep-all' }}>
+            <p style={{ fontSize: '17px', color: '#48484a', fontWeight: 600, lineHeight: 1.6, margin: '8px 0 0 0', whiteSpace: 'pre-line', wordBreak: 'keep-all' }}>
               {noticeMessage}
             </p>
           ) : (
-            <p style={{ fontSize: '15px', color: '#9ca3af', lineHeight: 1.6, margin: '8px 0 0 0' }}>
+            <p style={{ fontSize: '17px', color: '#6e6e73', fontWeight: 600, lineHeight: 1.6, margin: '8px 0 0 0' }}>
               더 안정적인 서비스 제공을 위해 장비 점검을 진행하고 있습니다.<br />
-              타석 배정 및 결제는 <strong style={{ color: '#34d399', fontWeight: 700 }}>카운터 포스</strong>를 이용해 주시기 바랍니다.
+              타석 배정 및 결제는 <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>카운터(안내 데스크)</strong>를 이용해 주시기 바랍니다.
             </p>
           )}
         </div>
 
-        <div style={{ paddingTop: '32px', fontSize: '12px', color: '#4b5563', fontFamily: 'monospace' }}>
+        <div style={{ paddingTop: '16px', fontSize: '12px', color: '#86868b', fontFamily: 'monospace' }}>
           GOLFOS Kiosk Engine {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'v0.3.0'}
         </div>
       </div>

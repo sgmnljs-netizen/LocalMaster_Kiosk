@@ -4,6 +4,29 @@ import path from 'path';
 
 const DB_PATH = path.resolve(process.cwd(), '../LocalMaster_Backend/local_master.db');
 
+async function authenticateWithKeypad(page: any, phone: string = '01012345678') {
+  const keypadTab = page.locator('button:has-text("전화번호")').first();
+  await expect(keypadTab).toBeVisible({ timeout: 5000 });
+  await keypadTab.click();
+
+  for (const char of phone.split('')) {
+    await page.locator(`button.keypad-num-btn:text-is("${char}")`).first().click();
+  }
+  const submitBtn = page.locator('button:has-text("회원 조회하기")');
+  await expect(submitBtn).toBeEnabled({ timeout: 5000 });
+  await submitBtn.click();
+
+  const candidateBtn = page.locator('button:has-text("M260501")').or(page.locator('button:has-text("김*프")')).first();
+  try {
+    await candidateBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await candidateBtn.click();
+  } catch {}
+
+  const confirmModalBtn = page.locator('button:has-text("예, 맞습니다!")');
+  await confirmModalBtn.waitFor({ state: 'visible', timeout: 5000 });
+  await confirmModalBtn.click();
+}
+
 function resetDatabaseForTests() {
   try {
     const sql = `
@@ -16,7 +39,7 @@ function resetDatabaseForTests() {
       INSERT OR REPLACE INTO members (id, member_no, store_cd, member_name, hp, grade_id, status_cd, total_point, unpaid_amt, is_group_leader, privacy_agree_yn, marketing_agree_yn, face_auth_yn, finger_auth_yn, use_yn) VALUES ('MEM-M260501', 'M260501', 'H01-SE-001', '김골프', '010-1234-5678', 'MANAGER', '10', 0, 0, 0, 'Y', 'Y', 'N', 'N', 'Y');
       INSERT OR REPLACE INTO member_items (item_id, member_id, store_cd, product_id, product_nm, sub_type, start_dt, end_dt, total_count, rem_count, purchase_dt, status, deleted_at) VALUES (99901, 'MEM-M260501', 'H01-SE-001', 'PER-002', '타석이용권 1개월', 'PERIOD', '2026-01-01', '2029-12-31', 0, 0, '20260101', 'ACTIVE', 0);
       UPDATE lockers SET member_no = 'M260501', status = 'OCCUPIED', start_dt = '2026-01-01', end_dt = '2026-12-31' WHERE locker_no = 3;
-      UPDATE store_info SET close_time = '05:00' WHERE store_cd = 'H01-SE-001';
+      UPDATE store_info SET close_time = '05:00', meta_data = json_set(meta_data, '$.break_start', '', '$.break_end', '', '$.operation.break_start', '', '$.operation.break_end', '') WHERE store_cd = 'H01-SE-001';
     `.replace(/\n/g, ' ').trim();
     execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "${sql}"`);
   } catch (e) {
@@ -62,18 +85,26 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(page.locator('text=배정 방식을 선택해 주세요')).toBeVisible({ timeout: 5000 });
     await page.locator('text=보유 회원권으로 배정').click();
 
-    // 5. 회원 인증 모달 (스마트 태그 탭 활성화 후 DEV 시뮬레이터 김골프 클릭)
-    const smartTagBtn = page.locator('button:has-text("스마트폰 태그")').first();
-    if (await smartTagBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await smartTagBtn.click();
-    }
-    const debugNfcBtn = page.locator('button:has-text("안드로이드 NFC (김골프)")');
-    await expect(debugNfcBtn).toBeVisible({ timeout: 5000 });
-    await debugNfcBtn.click();
+    // 5. 회원 인증 모달 (전화번호 키패드로 전체 11자리 01012345678 입력 및 조회)
+    const keypadTab = page.locator('button:has-text("전화번호")').first();
+    await expect(keypadTab).toBeVisible({ timeout: 5000 });
+    await keypadTab.click();
 
-    // 6. 본인 확인 다이얼로그 확인 -> [예, 맞습니다!] 클릭
-    await expect(page.locator('text=본인이 맞으신가요?')).toBeVisible({ timeout: 5000 });
-    await page.locator('button:has-text("예, 맞습니다!")').click();
+    for (const char of ['0', '1', '0', '1', '2', '3', '4', '5', '6', '7', '8']) {
+      await page.locator(`button.keypad-num-btn:text-is("${char}")`).first().click();
+    }
+    const submitBtn = page.locator('button:has-text("회원 조회하기")');
+    await expect(submitBtn).toBeEnabled({ timeout: 5000 });
+    await submitBtn.click();
+
+    // 6. 다중 후보 선택 후 본인 확인 다이얼로그
+    const candidateBtn = page.locator('button:has-text("M260501")').or(page.locator('button:has-text("김*프")')).first();
+    await candidateBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await candidateBtn.click();
+
+    const confirmModalBtn = page.locator('button:has-text("예, 맞습니다!")');
+    await confirmModalBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await confirmModalBtn.click();
 
     // 7. 보유 이용권 선택 모달 표출 확인
     await expect(page.locator('text=보유 이용권 선택')).toBeVisible({ timeout: 5000 });
@@ -88,7 +119,7 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
 
     // 8. 골프 타석 배정표 (디지털 티켓 팝업) 확인!
     await expect(page.locator('text=골프 타석 배정표')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('text=배정 타석')).toBeVisible();
+    await expect(page.locator('text=/배정 위치|배정 타석/')).toBeVisible();
     await expect(page.getByText('이용 시간', { exact: true })).toBeVisible();
 
     // 확인 닫기 버튼 클릭
@@ -158,6 +189,12 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
   });
 
   test('Pass 3: 회원 타석 이동 플로우 검증 (Bay Move Flow)', async ({ page }) => {
+    // 0. 타석 11번 김골프 이용 중 상태로 설정 (타석 이동 사전 조건)
+    execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "
+      UPDATE bays SET status = 'OCCUPIED', current_member_no = 'M260501', member_name = '김골프', start_time = datetime('now'), end_time = datetime('now', '+60 minutes') WHERE bay_no = 11;
+      INSERT OR REPLACE INTO reservation_master (res_id, store_cd, resource_type, resource_no, member_no, guest_nm, hp_no, res_date, start_time, end_time, duration_min, prepare_min, lesson_type, max_capacity, res_type, status_cd, payment_status, payment_mode, companion_count, transfer_cnt, created_at, updated_at) VALUES ('KSK_MOVE_001', 'H01-SE-001', 'BAY', '11', 'M260501', '김골프', '010-1234-5678', strftime('%Y%m%d', 'now', 'localtime'), strftime('%H%M', 'now', 'localtime'), strftime('%H%M', 'now', '+60 minutes', 'localtime'), 60, 0, 'PRIVATE', 1, 'SLOT', 'USE', 'PAID', 'OFFLINE', 0, 0, datetime('now'), datetime('now'));
+    "`);
+
     // 1. 대기 화면 진입
     await page.goto('/');
     await page.locator('text=화면을 터치하여 시작하세요').click();
@@ -166,43 +203,36 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 5000 });
     await page.locator('text=타석 이동').first().click();
 
-    // 3. 회원 인증 화면 -> 스마트폰 태그 탭 활성화 -> [안드로이드 NFC (김골프)] 시뮬레이터 클릭
-    const smartTagBtn = page.locator('button:has-text("스마트폰 태그")').first();
-    if (await smartTagBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await smartTagBtn.click();
-    }
-    const debugNfcBtn = page.locator('button:has-text("안드로이드 NFC (김골프)")');
-    await expect(debugNfcBtn).toBeVisible({ timeout: 5000 });
-    await debugNfcBtn.click();
-
-    // 본인 확인 모달 -> [예, 맞습니다!]
-    await expect(page.locator('text=본인이 맞으신가요?')).toBeVisible({ timeout: 5000 });
-    await page.locator('button:has-text("예, 맞습니다!")').click();
+    // 3. 회원 인증 (전화번호 키패드 인증)
+    await authenticateWithKeypad(page, '01012345678');
 
     // 4. 이동하실 타석 선택 화면 표출 확인
     await expect(page.locator('text=이동하실 타석 선택')).toBeVisible({ timeout: 10000 });
 
     // 5. 이동 목적지 빈 타석(18번) 카드 터치
     const targetBay = page.locator('span:text-is("18")').first();
-    if (await targetBay.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await targetBay.click();
-      await page.waitForTimeout(500);
+    await expect(targetBay).toBeVisible({ timeout: 5000 });
+    await targetBay.click();
+    await page.waitForTimeout(500);
 
-      // 하단 [타석 이동 확정] 버튼 클릭
-      const moveConfirmBtn = page.locator('button:has-text("타석 이동 확정")');
-      if (await moveConfirmBtn.isEnabled({ timeout: 3000 }).catch(() => false)) {
-        await moveConfirmBtn.click();
-      }
+    // 하단 [타석 이동 확정] 버튼 클릭
+    const moveConfirmBtn = page.locator('button:has-text("타석 이동 확정")');
+    if (await moveConfirmBtn.isEnabled({ timeout: 3000 }).catch(() => false)) {
+      await moveConfirmBtn.click();
     }
 
-    // 메인 대시보드 또는 완료 화면 복귀 확인
-    await expect(
-      page.locator('text=원하시는 서비스를 선택해 주세요')
-        .or(page.locator('text=이동하실 타석 선택'))
-    ).toBeVisible({ timeout: 10000 });
+    // 타석 이동 완료 배정표 모달 표출 확인 및 닫기
+    const moveModal = page.locator('text=/타석 이동.*확인표|골프 타석 배정표/');
+    await expect(moveModal).toBeVisible({ timeout: 10000 });
+    const confirmCloseBtn = page.locator('button:has-text("확인")').last();
+    await confirmCloseBtn.click({ force: true });
+
+    // 메인 대시보드 복귀 확인
+    await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
   });
 
   test('Pass 4: 신규 간편 회원가입 및 등록 플로우 (Member Quick Registration)', async ({ page }) => {
+    page.on('console', msg => console.log('PAGE LOG:', msg.text()));
     // 1. 대기 화면 진입
     await page.goto('/');
     await page.locator('text=화면을 터치하여 시작하세요').click();
@@ -211,12 +241,16 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await page.locator('text=회원가입').first().click();
     await expect(page.getByRole('heading', { name: '무인 스튜디오 30초 즉석 회원가입' })).toBeVisible({ timeout: 5000 });
 
-    // 3. 이름 입력: 가상 키보드 열어서 '김' 입력 후 '입력 완료'
-    await page.locator('input[placeholder="여기를 터치하여 이름을 입력하세요"]').click();
+    // 3. 이름 입력: 가상 키보드 열어서 '김영' 입력 후 '입력 완료'
+    const nameInput = page.locator('input[placeholder="여기를 터치하여 이름을 입력하세요"]');
+    await nameInput.focus();
     await expect(page.locator('text=가상 자판을 터치하여 입력하세요')).toBeVisible({ timeout: 5000 });
     await page.locator('button:has-text("ㄱ")').click();
     await page.locator('button:has-text("ㅣ")').click();
     await page.locator('button:has-text("ㅁ")').click();
+    await page.locator('button:has-text("ㅇ")').click();
+    await page.locator('button:has-text("ㅕ")').click();
+    await page.locator('button:has-text("ㅇ")').click();
     await page.locator('button:has-text("입력 완료")').click();
 
     // 4. 중복 방지 랜덤 휴대폰 번호 생성 (010 + 8자리 난수)
@@ -255,18 +289,8 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(shopMenuCard).toBeVisible({ timeout: 5000 });
     await shopMenuCard.click();
 
-    // 3. 회원 인증 화면 -> 스마트폰 태그(김골프)
-    const smartTagBtn = page.locator('button:has-text("스마트폰 태그")').first();
-    if (await smartTagBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await smartTagBtn.click();
-    }
-    const debugNfcBtn = page.locator('button:has-text("안드로이드 NFC (김골프)")');
-    await expect(debugNfcBtn).toBeVisible({ timeout: 5000 });
-    await debugNfcBtn.click();
-
-    // 4. 본인 확인 다이얼로그 -> [예, 맞습니다!]
-    await expect(page.locator('text=본인이 맞으신가요?')).toBeVisible({ timeout: 5000 });
-    await page.locator('button:has-text("예, 맞습니다!")').click();
+    // 3. 회원 인증 (전화번호 키패드 인증)
+    await authenticateWithKeypad(page, '01012345678');
 
     // 5. ProductShop 상품 매대 화면 표출 확인
     await expect(
@@ -310,18 +334,8 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(lockerMenuCard).toBeVisible({ timeout: 5000 });
     await lockerMenuCard.click();
 
-    // 3. 회원 인증 화면 -> 스마트폰 태그(김골프)
-    const smartTagBtn = page.locator('button:has-text("스마트폰 태그")').first();
-    if (await smartTagBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await smartTagBtn.click();
-    }
-    const debugNfcBtn = page.locator('button:has-text("안드로이드 NFC (김골프)")');
-    await expect(debugNfcBtn).toBeVisible({ timeout: 5000 });
-    await debugNfcBtn.click();
-
-    // 4. 본인 확인 다이얼로그 -> [예, 맞습니다!]
-    await expect(page.locator('text=본인이 맞으신가요?')).toBeVisible({ timeout: 5000 });
-    await page.locator('button:has-text("예, 맞습니다!")').click();
+    // 3. 회원 인증 (전화번호 키패드 인증)
+    await authenticateWithKeypad(page, '01012345678');
 
     // 5. LockerExtend 화면 표출 확인
     await expect(page.locator('text=개인 사물함 연장')).toBeVisible({ timeout: 10000 });
@@ -337,13 +351,10 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(extendProdCard).toBeVisible({ timeout: 5000 });
     await extendProdCard.click();
 
-    // 포인트 결제 화면 등 결제 시작 버튼이 표출될 경우 클릭
-    const startPayBtn = page.locator('button:has-text("결제 시작")')
-      .or(page.locator('button:has-text("카드 결제")'))
-      .first();
-    if (await startPayBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await startPayBtn.click({ force: true });
-    }
+    // 2-Step 결제 확인 화면에서 [카드 결제 시작] 클릭
+    const lockerStartPayBtn = page.locator('button:has-text("결제 시작")').first();
+    await expect(lockerStartPayBtn).toBeVisible({ timeout: 5000 });
+    await lockerStartPayBtn.click();
 
     // 6. 가상 결제 단말기 자동 승인 및 완료 모달 표출 확인
     await expect(
@@ -381,51 +392,31 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(checkinBtn).toBeVisible({ timeout: 5000 });
     await checkinBtn.click();
 
-    // 3. 회원 인증: [출입 QR 스캔] 탭 전환 및 QR 코드 인식 검증
-    const qrTab = page.locator('button:has-text("출입 QR 스캔")').first();
-    if (await qrTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await qrTab.click();
-      await expect(page.locator('text=모바일 출입 QR을 스캐너에 비춰주세요')).toBeVisible({ timeout: 5000 });
-    }
+    // 3. 회원 인증 (전화번호 키패드 인증)
+    await authenticateWithKeypad(page, '01012345678');
 
-    // 시뮬레이터 출입 QR 스캔 버튼 클릭 (또는 window 이벤트)
-    const qrSimBtn = page.locator('button:has-text("출입 QR 스캔 시뮬레이션")').first();
-    if (await qrSimBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await qrSimBtn.click();
-    } else {
-      await page.evaluate(() => {
-        if ((window as any).__LM_TRIGGER_SMART_AUTH__) {
-          (window as any).__LM_TRIGGER_SMART_AUTH__('QR-M260501');
-        }
-      });
-    }
-
-    // 4. 본인 확인 다이얼로그 -> [예, 맞습니다!]
-    await expect(page.locator('text=본인이 맞으신가요?')).toBeVisible({ timeout: 5000 });
-    await page.locator('button:has-text("예, 맞습니다!")').click();
-
-    // 5. 사전 예약 타석 체크인 화면 (CheckinSelect) 표출 확인
+    // 4. 사전 예약 타석 체크인 화면 (CheckinSelect) 표출 확인
     await expect(page.locator('text=사전 예약 타석 체크인')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('text=11번 타석')).toBeVisible({ timeout: 5000 });
 
-    // 6. [체크인] 클릭
+    // 5. [체크인] 클릭
     const doCheckinBtn = page.locator('button:has-text("체크인")').first();
     await expect(doCheckinBtn).toBeVisible({ timeout: 5000 });
     await doCheckinBtn.click();
 
-    // 7. 배정 완료 배정표 모달 표출 확인
-    await expect(page.locator('text=골프 타석 배정표')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('text=배정 타석')).toBeVisible();
+    // 6. 배정 완료 배정표/사전체크인 확인표 모달 표출 확인
+    await expect(page.locator('text=/사전 체크인 접수 확인표|골프 타석 배정표/')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=/배정 위치|배정 타석/')).toBeVisible();
 
     const confirmBtn = page.locator('button:has-text("확인")').last();
     if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await confirmBtn.click({ force: true });
     }
 
-    // 8. 메인 대시보드 복귀 확인
+    // 7. 메인 대시보드 복귀 확인
     await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 10000 });
 
-    // 9. 백엔드 DB 상태 교차 검증 (Zero-Assumption: reservation_master status_cd = 'CHK'/'PREPARE', checkin_master COMPLETED)
+    // 8. 백엔드 DB 상태 교차 검증 (Zero-Assumption: reservation_master status_cd = 'CHK'/'PREPARE', checkin_master COMPLETED)
     const resStatus = execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "SELECT status_cd FROM reservation_master WHERE res_id = 'KSK_CHK_001';"`)
       .toString().trim();
     expect(['CHK', 'PREPARE', 'USE']).toContain(resStatus);

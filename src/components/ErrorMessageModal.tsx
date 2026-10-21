@@ -78,38 +78,36 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
         style={{
           width: '680px',
           maxWidth: '92vw',
-          background: 'linear-gradient(145deg, rgba(24, 26, 32, 0.98) 0%, rgba(12, 14, 18, 0.99) 100%)',
-          borderRadius: '32px',
-          border: isHw
-            ? '2px solid rgba(245, 158, 11, 0.6)'
-            : '2px solid rgba(239, 68, 68, 0.6)',
-          boxShadow: isHw
-            ? '0 20px 60px rgba(245, 158, 11, 0.25), 0 0 40px rgba(245, 158, 11, 0.1)'
-            : '0 20px 60px rgba(239, 68, 68, 0.25), 0 0 40px rgba(239, 68, 68, 0.1)',
-          padding: '40px',
+          background: 'rgba(255, 255, 255, 0.98)',
+          borderRadius: '36px',
+          border: '1px solid #e5e5ea',
+          boxShadow: '0 32px 80px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.04)',
+          padding: '44px 40px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           textAlign: 'center',
           position: 'relative',
+          color: '#1d1d1f',
         }}
       >
         {/* 닫기 버튼 */}
         <button
+          type="button"
           onClick={handleClose}
           style={{
             position: 'absolute',
             top: '24px',
             right: '24px',
-            background: 'rgba(255, 255, 255, 0.06)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            background: '#f5f5f7',
+            border: '1px solid #e5e5ea',
             borderRadius: '50%',
             width: '44px',
             height: '44px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#a1a1aa',
+            color: '#48484a',
             cursor: 'pointer',
             transition: 'all 0.2s ease',
           }}
@@ -120,32 +118,32 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
         {/* 메인 에러 아이콘 */}
         <div
           style={{
-            width: '96px',
-            height: '96px',
+            width: '88px',
+            height: '88px',
             borderRadius: '50%',
-            backgroundColor: isHw ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-            border: isHw ? '2px solid rgba(245, 158, 11, 0.4)' : '2px solid rgba(239, 68, 68, 0.4)',
+            backgroundColor: isHw ? '#fffbeb' : '#fef2f2',
+            border: isHw ? '1.5px solid #fde68a' : '1.5px solid #fecaca',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            marginBottom: '24px',
+            marginBottom: '20px',
           }}
         >
           {isHw ? (
-            <Wrench size={48} color="#f59e0b" />
+            <Wrench size={42} color="#d97706" />
           ) : (
-            <AlertTriangle size={48} color="#ef4444" />
+            <AlertTriangle size={42} color="#dc2626" />
           )}
         </div>
 
         {/* 에러 타이틀 */}
         <h3
           style={{
-            fontSize: '30px',
+            fontSize: '28px',
             fontWeight: 900,
-            color: isHw ? '#fbbf24' : '#f87171',
-            margin: '0 0 12px 0',
-            letterSpacing: '-0.5px',
+            color: '#1d1d1f',
+            margin: '0 0 14px 0',
+            letterSpacing: '-0.6px',
           }}
         >
           {data.title || (isHw ? '타석 기기 가동 확인 필요' : '타석 배정 오류')}
@@ -154,20 +152,20 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
         {/* 에러 상세 메시지 */}
         <div
           style={{
-            backgroundColor: 'rgba(0, 0, 0, 0.4)',
-            borderRadius: '20px',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            padding: '20px 24px',
-            marginBottom: '24px',
+            backgroundColor: '#f5f5f7',
+            borderRadius: '22px',
+            border: '1px solid #e5e5ea',
+            padding: '22px 24px',
+            marginBottom: '20px',
             width: '100%',
             boxSizing: 'border-box',
           }}
         >
           <p
             style={{
-              fontSize: '20px',
-              fontWeight: 600,
-              color: '#f4f4f5',
+              fontSize: '19px',
+              fontWeight: 700,
+              color: '#1d1d1f',
               lineHeight: 1.6,
               margin: 0,
               wordBreak: 'keep-all',
@@ -179,10 +177,10 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
           {data.errorCode && (
             <p
               style={{
-                fontSize: '14px',
+                fontSize: '13px',
                 fontWeight: 700,
-                color: '#71717a',
-                margin: '12px 0 0 0',
+                color: '#86868b',
+                margin: '10px 0 0 0',
                 fontFamily: 'monospace',
               }}
             >
@@ -199,36 +197,38 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
             justifyContent: 'space-between',
             width: '100%',
             padding: '12px 20px',
-            backgroundColor: 'rgba(255, 255, 255, 0.04)',
+            backgroundColor: '#f5f5f7',
             borderRadius: '14px',
-            fontSize: '15px',
-            color: '#a1a1aa',
+            fontSize: '14px',
+            color: '#6e6e73',
             marginBottom: '28px',
+            boxSizing: 'border-box',
           }}
         >
-          <span>
+          <span style={{ fontWeight: 600 }}>
             {isHw
               ? '💡 배정은 등록되었으나 기기가 시작되지 않았습니다. 카운터에 문의해 주세요.'
               : '💡 직원의 안내를 받으시거나 다시 시도해 주세요.'}
           </span>
-          <span style={{ fontWeight: 800, color: '#e4e4e7', minWidth: '70px', textAlign: 'right' }}>
+          <span style={{ fontWeight: 800, color: '#1d1d1f', minWidth: '75px', textAlign: 'right' }}>
             {countdown}초 후 닫힘
           </span>
         </div>
 
         {/* 하단 액션 버튼 */}
-        <div style={{ display: 'flex', gap: '16px', width: '100%' }}>
+        <div style={{ display: 'flex', gap: '14px', width: '100%' }}>
           {onRetry && (
             <button
+              type="button"
               onClick={handleRetry}
               style={{
                 flex: 1,
                 height: '64px',
-                borderRadius: '18px',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                background: 'rgba(255, 255, 255, 0.08)',
-                color: '#fff',
-                fontSize: '20px',
+                borderRadius: '999px',
+                border: '1px solid #d2d2d7',
+                background: '#f5f5f7',
+                color: '#1d1d1f',
+                fontSize: '19px',
                 fontWeight: 800,
                 cursor: 'pointer',
                 display: 'flex',
@@ -237,27 +237,24 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
                 gap: '8px',
               }}
             >
-              <RefreshCw size={22} />
+              <RefreshCw size={20} />
               다시 시도
             </button>
           )}
           <button
+            type="button"
             onClick={handleClose}
             style={{
               flex: 1,
               height: '64px',
-              borderRadius: '18px',
+              borderRadius: '999px',
               border: 'none',
-              background: isHw
-                ? 'linear-gradient(135deg, #d97706 0%, #b45309 100%)'
-                : 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
-              color: '#fff',
-              fontSize: '22px',
+              background: '#1d1d1f',
+              color: '#ffffff',
+              fontSize: '20px',
               fontWeight: 900,
               cursor: 'pointer',
-              boxShadow: isHw
-                ? '0 8px 20px rgba(217, 119, 6, 0.4)'
-                : '0 8px 20px rgba(220, 38, 38, 0.4)',
+              boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)',
             }}
           >
             확 인

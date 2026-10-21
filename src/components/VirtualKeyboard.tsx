@@ -274,35 +274,49 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
 
   return (
     <div 
-      className="glass-panel" 
+      data-virtual-keyboard="true"
       style={{
-        position: 'absolute', // 키오스크 프레임 내에 절대 위치 지정
+        position: 'absolute',
         bottom: '100px', // 하단 플로팅 바(KioskBottomBar, bottom: 24px, height: 60px)와 중첩되지 않도록 여백 확보
         left: '50%',
-        transform: 'translateX(-50%)', // 가로 중앙 정렬!
-        width: '900px', // 회원가입 카드(900px)와 가로폭 일치시켜 잘림 방지!
+        transform: 'translateX(-50%)',
+        width: '920px',
         boxSizing: 'border-box',
-        background: '#0c0f16',
-        border: '1.5px solid var(--neon-indigo)',
-        borderRadius: '20px',
-        padding: '16px 20px',
-        boxShadow: '0 10px 40px rgba(0,0,0,0.9)',
-        zIndex: 99999, // 최상단 노출
+        background: 'rgba(255, 255, 255, 0.98)',
+        backdropFilter: 'blur(30px)',
+        WebkitBackdropFilter: 'blur(30px)',
+        border: '1.5px solid #e5e5ea',
+        borderRadius: '28px',
+        padding: '20px 24px',
+        boxShadow: '0 24px 60px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.06)',
+        zIndex: 99999,
         display: 'flex',
         flexDirection: 'column',
-        gap: '8px'
+        gap: '12px'
       }}
       onClick={(e) => e.stopPropagation()}
     >
       {/* 텍스트 입력 가이드 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Smile size={22} style={{ color: 'var(--neon-indigo)' }} />
-          <span style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 600 }}>가상 자판을 터치하여 입력하세요</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#f5f5f7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Smile size={20} style={{ color: '#1d1d1f' }} />
+          </div>
+          <span style={{ fontSize: '17px', color: '#515154', fontWeight: 700 }}>가상 자판을 터치하여 입력하세요</span>
         </div>
         <button 
-          className="kiosk-btn kiosk-btn-primary" 
-          style={{ padding: '10px 32px', fontSize: '18px', borderRadius: '10px' }}
+          type="button"
+          style={{
+            padding: '10px 28px',
+            fontSize: '16px',
+            fontWeight: 800,
+            borderRadius: '999px',
+            background: '#1d1d1f',
+            color: '#ffffff',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.14)'
+          }}
           onClick={onClose}
         >
           입력 완료
@@ -335,20 +349,23 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
                 displayChar = lang === 'EN' ? char.toLowerCase() : char;
               }
 
+              const isShiftedChar = isShift && displayChar !== char;
+
               return (
                 <button
+                  type="button"
                   key={char}
                   onClick={() => handleKeyClick(char)}
                   style={{
-                    width: '76px', // 900px 가로폭에 맞추기 위해 축소
-                    height: '54px',
-                    borderRadius: '8px',
-                    fontSize: '22px', // 시인성을 위해 글자 크기 상향
-                    fontWeight: 800, // 더 굵게 지정
-                    color: isShift && displayChar !== char ? 'var(--neon-amber)' : '#ffffff', // 선명한 흰색 글자
-                    background: '#1d2433', // 라이트 테마 영향을 받지 않는 선명한 다크 그레이 버튼 배경
-                    border: '1px solid rgba(255, 255, 255, 0.15)', // 테두리 선명화
-                    boxShadow: '0 3px 6px rgba(0,0,0,0.4)',
+                    width: '78px',
+                    height: '56px',
+                    borderRadius: '14px',
+                    fontSize: '22px',
+                    fontWeight: 800,
+                    color: isShiftedChar ? '#ffffff' : '#1d1d1f',
+                    background: isShiftedChar ? '#1d1d1f' : '#f5f5f7',
+                    border: isShiftedChar ? '1px solid #1d1d1f' : '1px solid #e5e5ea',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -365,16 +382,17 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
         ))}
 
         {/* 제어 키 라인 */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '2px' }}>
           <button
+            type="button"
             onClick={() => setLang(lang === 'KO' ? 'EN' : 'KO')}
             style={{
-              width: '110px',
-              height: '54px',
-              borderRadius: '8px',
-              background: '#1d2433',
-              border: '1px solid var(--glass-border)',
-              color: 'var(--neon-indigo)',
+              width: '120px',
+              height: '56px',
+              borderRadius: '14px',
+              background: '#f5f5f7',
+              border: '1px solid #e5e5ea',
+              color: '#1d1d1f',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -390,14 +408,15 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
           </button>
 
           <button
+            type="button"
             onClick={() => setIsShift(!isShift)}
             style={{
-              width: '110px',
-              height: '54px',
-              borderRadius: '8px',
-              background: isShift ? 'rgba(245, 158, 11, 0.25)' : '#1d2433', // 활성 시 앰버 오버레이, 비활성 시 다크 그레이
-              border: `1.5px solid ${isShift ? 'var(--neon-amber)' : 'rgba(255, 255, 255, 0.15)'}`,
-              color: isShift ? 'var(--neon-amber)' : '#ffffff', // 글자색 흰색으로 변경하여 시인성 확보
+              width: '120px',
+              height: '56px',
+              borderRadius: '14px',
+              background: isShift ? '#1d1d1f' : '#f5f5f7',
+              border: `1.5px solid ${isShift ? '#1d1d1f' : '#e5e5ea'}`,
+              color: isShift ? '#ffffff' : '#1d1d1f',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -411,17 +430,19 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
           </button>
 
           <button
+            type="button"
             onClick={() => handleKeyClick(' ')}
             style={{
-              width: '270px',
-              height: '54px',
-              borderRadius: '8px',
-              background: '#1d2433', // 선명한 다크 그레이 배경
-              border: '1px solid rgba(255, 255, 255, 0.15)',
-              color: '#ffffff', // 선명한 흰색 글자
-              fontSize: '17px',
+              width: '280px',
+              height: '56px',
+              borderRadius: '14px',
+              background: '#ffffff',
+              border: '1.5px solid #d2d2d7',
+              color: '#1d1d1f',
+              fontSize: '16px',
               fontWeight: 800,
-              cursor: 'pointer'
+              cursor: 'pointer',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
             }}
             className="keypad-btn"
           >
@@ -429,20 +450,21 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
           </button>
 
           <button
+            type="button"
             onClick={handleDelete}
             style={{
               width: '130px',
-              height: '54px',
-              borderRadius: '8px',
-              background: '#3a1f26',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: 'var(--neon-red)',
+              height: '56px',
+              borderRadius: '14px',
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              color: '#dc2626',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '6px',
               fontSize: '16px',
-              fontWeight: 700,
+              fontWeight: 800,
               cursor: 'pointer'
             }}
             className="keypad-btn"

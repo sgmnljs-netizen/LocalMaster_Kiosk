@@ -25,7 +25,7 @@ test.describe('Layer 1: 키오스크 스모크 크롤러 (Smoke Crawler)', () =>
     await expect(page.locator('text=연습타석 배정').first()).toBeVisible();
     await expect(page.locator('text=파3 코스 배정').first()).toBeVisible();
     await expect(page.locator('text=회원권/상품 구매').first()).toBeVisible();
-    await expect(page.locator('text=라카 대여/연장').first()).toBeVisible();
+    await expect(page.locator('text=/라카.*연장/').first()).toBeVisible();
     await expect(page.locator('text=타석 이동').first()).toBeVisible();
     await expect(page.locator('text=회원가입').first()).toBeVisible();
 

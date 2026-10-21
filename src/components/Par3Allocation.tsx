@@ -920,12 +920,12 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: '80px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{
-            background: 'rgba(46, 117, 89, 0.05)',
-            border: '1px solid rgba(46, 117, 89, 0.15)',
-            padding: '10px',
-            borderRadius: '16px'
+            background: '#f5f5f7',
+            border: '1px solid #e5e5ea',
+            padding: '12px',
+            borderRadius: '18px'
           }}>
-            <Calendar size={36} style={{ color: '#2e7559' }} />
+            <Calendar size={34} style={{ color: '#1d1d1f' }} />
           </div>
           <div>
             <h2 style={{ fontSize: '30px', fontWeight: 900, letterSpacing: '-1px', color: '#1d1d1f', margin: 0 }}>파3 미니 라운딩 실시간 배정</h2>
@@ -937,13 +937,13 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         <button 
           onClick={onCancel}
           style={{
-            background: '#ffffff',
-            border: '1px solid #d2d2d7',
+            background: '#f5f5f7',
+            border: '1px solid #e5e5ea',
             color: '#1d1d1f',
             padding: '10px 24px',
             fontSize: '16px',
             fontWeight: 800,
-            borderRadius: '12px',
+            borderRadius: '999px',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -1038,7 +1038,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                 const isReserved = s.status !== 'AVAILABLE' || isImminentClosed;
                 
                 const btnBg = isSelected 
-                  ? '#2e7559' 
+                  ? '#1d1d1f' 
                   : (isReserved 
                     ? '#f5f5f7' 
                     : '#ffffff');
@@ -1046,7 +1046,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                   ? '#ffffff' 
                   : (isReserved ? '#c8c8cd' : '#1d1d1f');
                 const borderCol = isSelected
-                  ? '#2e7559'
+                  ? '#1d1d1f'
                   : (isReserved ? 'transparent' : '#e5e5ea');
 
                 return (
@@ -1066,7 +1066,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                       opacity: isReserved ? 0.8 : 1,
                       transition: 'all 0.15s cubic-bezier(0.25, 0.8, 0.25, 1)',
                       boxShadow: isSelected 
-                        ? '0 8px 18px rgba(46, 117, 89, 0.15)' 
+                        ? '0 8px 18px rgba(0, 0, 0, 0.15)' 
                         : (isReserved ? 'none' : '0 2px 6px rgba(0,0,0,0.02)'),
                       transform: isSelected ? 'scale(0.98)' : 'none'
                     }}
@@ -1095,8 +1095,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                     style={{
                       height: '84px',
                       borderRadius: '16px',
-                      border: `1.5px solid ${isActive ? '#2e7559' : '#e5e5ea'}`,
-                      background: isActive ? '#2e7559' : '#ffffff',
+                      border: `1.5px solid ${isActive ? '#1d1d1f' : '#e5e5ea'}`,
+                      background: isActive ? '#1d1d1f' : '#ffffff',
                       color: isActive ? '#ffffff' : '#1d1d1f',
                       fontSize: '18px',
                       fontWeight: 900,
@@ -1106,11 +1106,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                       justifyContent: 'center',
                       gap: '8px',
                       transition: 'all 0.15s ease',
-                      boxShadow: isActive ? '0 8px 20px rgba(46, 117, 89, 0.12)' : 'none'
+                      boxShadow: isActive ? '0 8px 20px rgba(0, 0, 0, 0.12)' : 'none'
                     }}
                   >
                     <span>{z.zone_name}</span>
-                    {isActive && <Check size={18} style={{ color: '#ffffff' }} />}
+                    {isActive && <Check size={18} style={{ color: '#34c759' }} />}
                   </button>
                 );
               })}
@@ -1123,7 +1123,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               <span style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '0.5px' }}>
                 3. 배정 인원 목록 (최대 4인)
               </span>
-              <span style={{ fontSize: '14px', color: '#2e7559', fontWeight: 800 }}>
+              <span style={{ fontSize: '14px', color: '#1d1d1f', fontWeight: 800 }}>
                 {players.length} / 4 명
               </span>
             </div>
@@ -1145,7 +1145,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             >
               {players.length === 0 ? (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '30px 0' }}>
-                  <HelpCircle size={28} style={{ color: '#2e7559' }} />
+                  <HelpCircle size={28} style={{ color: '#86868b' }} />
                   <span style={{ fontSize: '15px', color: '#1d1d1f', fontWeight: 800 }}>배정 목록이 비어 있습니다.</span>
                   <p style={{ fontSize: '13px', color: '#86868b', margin: 0, textAlign: 'center', lineHeight: 1.4, fontWeight: 600 }}>
                     하단의 단추를 누르면 대표자 및 동반자가 추가됩니다.
@@ -1159,7 +1159,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                       padding: '14px 20px',
                       borderRadius: '14px',
                       border: '1px solid #e5e5ea',
-                      background: idx === 0 ? 'rgba(46, 117, 89, 0.03)' : '#fcfcfd',
+                      background: idx === 0 ? '#f5f5f7' : '#ffffff',
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
@@ -1171,10 +1171,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                         <span style={{
                           fontSize: '11px',
                           fontWeight: 900,
-                          padding: '2px 6px',
-                          borderRadius: '6px',
-                          background: p.is_member ? 'rgba(46, 117, 89, 0.1)' : '#f0f0f3',
-                          color: p.is_member ? '#2e7559' : '#8e8e93'
+                          padding: '2px 8px',
+                          borderRadius: '999px',
+                          background: p.is_member ? '#1d1d1f' : '#e5e5ea',
+                          color: p.is_member ? '#ffffff' : '#515154'
                         }}>
                           {idx === 0 ? '대표' : '동반'} | {p.is_member ? '회원' : '비회원'}
                         </span>
@@ -1188,7 +1188,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                       
                       {/* 쿠폰/이용권 사용 배지 */}
                       {p.use_ticket_id && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#2e7559', marginTop: '2px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#059669', marginTop: '2px' }}>
                           <Ticket size={12} />
                           <span style={{ fontSize: '12px', fontWeight: 800 }}>
                             🎟️ {p.use_ticket_name} 사용 (결제액 면제)
@@ -1198,7 +1198,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
                       {/* 회원 등급 할인 배지 */}
                       {!p.use_ticket_id && p.is_member && (p.discount_rate || 0) > 0 && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#1d523e', marginTop: '2px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#059669', marginTop: '2px' }}>
                           <span style={{ fontSize: '12px', fontWeight: 800 }}>
                             👑 회원 등급 {p.discount_rate! < 1 ? Math.round(p.discount_rate! * 100) : p.discount_rate}% 할인 적용 (₩{calculatePlayerPrice(p, getCoursePriceLabel()).toLocaleString()})
                           </span>
@@ -1229,26 +1229,20 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               )}
             </div>
 
-            {/* 인원 추가 버튼 (4명 미만일 때만 활성화 - 럭셔리 입체 센터링 CTA 디자인) */}
+            {/* 인원 추가 버튼 (4명 미만일 때만 활성화 - 애플 럭셔리 캡슐 CTA 디자인) */}
             {players.length < 4 && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', flexShrink: 0 }}>
                 {/* 1. 대표/동반 회원 인증 CTA (Primary) */}
                 <button
-                  className={`kiosk-shimmer-button ${selectedSlot !== null && players.length === 0 ? 'kiosk-attention-bounce breathing-glow' : ''}`}
                   onClick={() => {
                     setModalState('MEMBER_AUTH_MODAL');
                     setModalPhone('');
                   }}
-                  onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
-                  onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; }}
-                  onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
-                  onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; }}
                   style={{
-                    height: '76px',
-                    borderRadius: '16px',
+                    height: '74px',
+                    borderRadius: '18px',
                     border: 'none',
-                    background: 'linear-gradient(135deg, #2e7559 0%, #1d523e 100%)',
+                    background: '#1d1d1f',
                     color: '#ffffff',
                     cursor: 'pointer',
                     display: 'flex',
@@ -1257,41 +1251,33 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                     justifyContent: 'center',
                     gap: '4px',
                     padding: '8px 12px',
-                    boxShadow: selectedSlot !== null && players.length === 0 
-                      ? '0 8px 24px rgba(46, 117, 89, 0.4)' 
-                      : '0 4px 16px rgba(46, 117, 89, 0.22)',
+                    boxShadow: '0 6px 18px rgba(0, 0, 0, 0.14)',
                     transition: 'all 0.15s ease'
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <UserCheck size={18} style={{ color: '#ffffff' }} />
+                    <UserCheck size={18} style={{ color: '#34c759' }} />
                     <span style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.3px', color: '#ffffff', whiteSpace: 'nowrap' }}>
                       {players.length === 0 ? '대표 회원 인증' : '회원 동반자 추가'}
                     </span>
                   </div>
-                  <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.85)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '12px', color: '#a1a1a6', fontWeight: 600, whiteSpace: 'nowrap' }}>
                     회원 혜택 · 이용권 사용
                   </span>
                 </button>
                 
                 {/* 2. 대표/동반 비회원 추가 CTA (Secondary) */}
                 <button
-                  className={`kiosk-shimmer-button ${selectedSlot !== null && players.length === 0 ? 'kiosk-attention-bounce' : ''}`}
                   onClick={() => {
                     setModalState('ADD_GUEST_PHONE');
                     setModalPhone('');
                   }}
-                  onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
-                  onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; }}
-                  onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
-                  onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; }}
                   style={{
-                    height: '76px',
-                    borderRadius: '16px',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'linear-gradient(135deg, #1d1d1f 0%, #2c2c2e 100%)',
-                    color: '#ffffff',
+                    height: '74px',
+                    borderRadius: '18px',
+                    border: '1.5px solid #d2d2d7',
+                    background: '#f5f5f7',
+                    color: '#1d1d1f',
                     cursor: 'pointer',
                     display: 'flex',
                     flexDirection: 'column',
@@ -1299,17 +1285,16 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                     justifyContent: 'center',
                     gap: '4px',
                     padding: '8px 12px',
-                    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
                     transition: 'all 0.15s ease'
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <UserPlus size={18} style={{ color: '#ffffff' }} />
-                    <span style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.3px', color: '#ffffff', whiteSpace: 'nowrap' }}>
+                    <UserPlus size={18} style={{ color: '#1d1d1f' }} />
+                    <span style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.3px', color: '#1d1d1f', whiteSpace: 'nowrap' }}>
                       {players.length === 0 ? '대표 비회원 추가' : '비회원 동반자 추가'}
                     </span>
                   </div>
-                  <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 600, whiteSpace: 'nowrap' }}>
                     일일권 · 현장 즉시 결제
                   </span>
                 </button>
@@ -1328,7 +1313,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           flexDirection: 'column',
           gap: '14px',
           background: '#ffffff',
-          border: '1px solid #d2d2d7',
+          border: '1px solid #e5e5ea',
           boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
           minHeight: '130px',
           flexShrink: 0,
@@ -1344,17 +1329,17 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               justifyContent: 'space-between',
               gap: '12px',
               padding: '10px 16px',
-              background: '#f8fafc',
-              border: '1px solid #cbd5e1',
+              background: '#f5f5f7',
+              border: '1px solid #e5e5ea',
               borderRadius: '14px',
               flexWrap: 'wrap'
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 900, color: '#1e293b' }}>
+              <span style={{ fontSize: '14px', fontWeight: 900, color: '#1d1d1f' }}>
                 💳 할부 개월 선택
               </span>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#2e7559', background: '#ecfdf5', padding: '2px 8px', borderRadius: '999px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '999px' }}>
                 5만원 이상 할부 가능
               </span>
             </div>
@@ -1368,11 +1353,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                     data-testid={`par3-installment-option-${months}`}
                     onClick={() => setInstallmentMonths(months)}
                     style={{
-                      padding: '6px 12px',
-                      borderRadius: '10px',
-                      border: isSelected ? '2px solid #2e7559' : '1px solid #cbd5e1',
-                      background: isSelected ? '#2e7559' : '#ffffff',
-                      color: isSelected ? '#ffffff' : '#334155',
+                      padding: '6px 14px',
+                      borderRadius: '999px',
+                      border: isSelected ? '1.5px solid #1d1d1f' : '1px solid #d2d2d7',
+                      background: isSelected ? '#1d1d1f' : '#ffffff',
+                      color: isSelected ? '#ffffff' : '#515154',
                       fontSize: '13px',
                       fontWeight: isSelected ? 900 : 700,
                       cursor: 'pointer'
@@ -1408,10 +1393,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                 {currentTotalAmount >= MIN_INSTALLMENT_AMOUNT ? ` · ${installmentMonths === 0 ? '일시불' : `${installmentMonths}개월 할부`}` : ''}
               </span>
               <span style={{ 
-                fontSize: '32px', 
-                fontWeight: 900, 
-                color: '#2e7559',
-                letterSpacing: '-0.5px'
+                fontSize: '34px', 
+                fontWeight: 950, 
+                color: '#1d1d1f',
+                letterSpacing: '-1px'
               }}>
                 ₩{currentTotalAmount.toLocaleString()}
               </span>
@@ -1424,16 +1409,16 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                 height: '68px',
                 fontSize: '20px',
                 fontWeight: 900,
-                padding: '0 48px',
-                borderRadius: '16px',
+                padding: '0 44px',
+                borderRadius: '999px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                background: loading || !selectedSlot || players.length === 0 ? '#d2d2d7' : '#2e7559',
-                color: '#ffffff',
+                background: loading || !selectedSlot || players.length === 0 ? '#e5e5ea' : '#1d1d1f',
+                color: loading || !selectedSlot || players.length === 0 ? '#86868b' : '#ffffff',
                 border: 'none',
                 cursor: loading || !selectedSlot || players.length === 0 ? 'not-allowed' : 'pointer',
-                boxShadow: loading || !selectedSlot || players.length === 0 ? 'none' : '0 8px 24px rgba(46, 117, 89, 0.18)',
+                boxShadow: loading || !selectedSlot || players.length === 0 ? 'none' : '0 8px 24px rgba(0, 0, 0, 0.16)',
                 transition: 'all 0.15s ease',
                 flexShrink: 0
               }}
@@ -1530,16 +1515,15 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             <div 
               style={{
                 height: '76px',
-                background: '#fafafa',
+                background: '#f5f5f7',
                 borderRadius: '16px',
-                border: '1.5px solid rgba(0,0,0,0.06)',
-                boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.02)',
+                border: '1.5px solid #e5e5ea',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: '32px',
                 fontWeight: 900,
-                color: modalPhone ? '#2e7559' : '#d1d1d6',
+                color: modalPhone ? '#1d1d1f' : '#d1d1d6',
                 fontFamily: 'monospace',
                 letterSpacing: '2px'
               }}
@@ -1616,23 +1600,20 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             <button
               onClick={handlePhoneModalSubmit}
               disabled={loading}
-              onMouseDown={(e) => { if(!loading) e.currentTarget.style.transform = 'scale(0.97)'; }}
-              onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
               style={{
                 height: '64px',
-                borderRadius: '16px',
-                background: loading ? '#86868b' : 'linear-gradient(135deg, #2e7559 0%, #245c46 100%)',
-                color: '#ffffff',
+                borderRadius: '999px',
+                background: loading ? '#e5e5ea' : '#1d1d1f',
+                color: loading ? '#86868b' : '#ffffff',
                 border: 'none',
-                fontSize: '20px',
+                fontSize: '19px',
                 fontWeight: 900,
                 cursor: loading ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 8px 24px rgba(46, 117, 89, 0.3)',
-                transition: 'transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease',
+                boxShadow: loading ? 'none' : '0 8px 24px rgba(0, 0, 0, 0.16)',
+                transition: 'all 0.15s ease',
                 marginTop: '4px'
               }}
             >
@@ -1661,8 +1642,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             style={{
               width: '480px',
               background: '#ffffff',
-              borderRadius: '24px',
-              padding: '30px',
+              borderRadius: '28px',
+              padding: '32px',
               display: 'flex',
               flexDirection: 'column',
               gap: '20px',
@@ -1697,10 +1678,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                     onClick={() => addMemberSlot(selectedMemberForTicket.member, selectedMemberForTicket.isLeader, ticket)}
                     style={{
                       padding: '16px 20px',
-                      borderRadius: '12px',
-                      border: '1.5px solid #2e7559',
-                      background: 'rgba(46, 117, 89, 0.04)',
-                      color: '#2e7559',
+                      borderRadius: '16px',
+                      border: '1.5px solid #1d1d1f',
+                      background: '#f5f5f7',
+                      color: '#1d1d1f',
                       textAlign: 'left',
                       cursor: 'pointer',
                       display: 'flex',
@@ -1717,7 +1698,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                           : `잔여 횟수: ${remCount}회`}
                       </span>
                     </div>
-                    <Ticket size={24} />
+                    <Ticket size={24} style={{ color: '#059669' }} />
                   </button>
                 );
               })}
@@ -1728,14 +1709,13 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               onClick={() => addMemberSlot(selectedMemberForTicket.member, selectedMemberForTicket.isLeader, undefined)}
               style={{
                 height: '56px',
-                borderRadius: '12px',
-                background: '#8e8e93',
-                color: '#ffffff',
-                border: 'none',
+                borderRadius: '999px',
+                background: '#f5f5f7',
+                color: '#515154',
+                border: '1px solid #e5e5ea',
                 fontSize: '16px',
                 fontWeight: 800,
-                cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+                cursor: 'pointer'
               }}
             >
               이용권 사용 안 함 (일반 카드 결제 추가)
@@ -1801,16 +1781,16 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               width: '90px',
               height: '90px',
               borderRadius: '50%',
-              background: 'rgba(46, 117, 89, 0.06)',
+              background: '#f5f5f7',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              border: '2px solid rgba(46, 117, 89, 0.2)'
+              border: '2px solid #e5e5ea'
             }}>
               {paymentState === 'INSERT_WAIT' ? (
-                <CardIcon size={42} className="animate-bounce" style={{ color: '#2e7559' }} />
+                <CardIcon size={42} className="animate-bounce" style={{ color: '#1d1d1f' }} />
               ) : (
-                <RefreshCw size={42} className="animate-spin" style={{ color: '#2e7559' }} />
+                <RefreshCw size={42} className="animate-spin" style={{ color: '#1d1d1f' }} />
               )}
             </div>
 
@@ -1833,7 +1813,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                 style={{ 
                   width: `${authProgress}%`, 
                   height: '100%', 
-                  background: '#2e7559', 
+                  background: '#1d1d1f', 
                   transition: 'width 0.5s ease-in-out',
                   borderRadius: '4px'
                 }} 
@@ -1841,7 +1821,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             </div>
 
             <div style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>
-              결제 요청 금액 : <span style={{ color: '#2e7559', fontWeight: 800 }}>₩{calculateTotalAmount().toLocaleString()}</span>
+              결제 요청 금액 : <span style={{ color: '#1d1d1f', fontWeight: 900 }}>₩{calculateTotalAmount().toLocaleString()}</span>
             </div>
 
             {paymentState === 'INSERT_WAIT' && (
@@ -1849,13 +1829,13 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                 onClick={handleCancelInsertWait}
                 style={{
                   width: '100%',
-                  padding: '12px 16px',
-                  borderRadius: '12px',
-                  border: '1.5px solid #d2d2d7',
+                  padding: '14px 16px',
+                  borderRadius: '999px',
+                  border: '1.5px solid #e5e5ea',
                   background: '#f5f5f7',
-                  color: '#4b5563',
+                  color: '#1d1d1f',
                   fontSize: '15px',
-                  fontWeight: 700,
+                  fontWeight: 800,
                   cursor: 'pointer'
                 }}
               >
