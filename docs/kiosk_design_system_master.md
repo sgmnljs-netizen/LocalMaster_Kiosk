@@ -52,3 +52,7 @@
 - **`PracticeSelect.tsx`**: 타석 배정 방식 선택 모달 원색 제거 및 애플 화이트/차콜 리뉴얼.
 - **`AllocationCompleteModal.tsx`**: 100% 한글 애플 스노우 화이트 타석 배정표 디지털 티켓 구축.
 - **`ProductShop.tsx`**: 일일 타석권 상품별 BEST 뱃지, 48px 대형 숫자, 애플 딥 차콜 필 결제 버튼 반영.
+- **`PaymentTerminal.tsx`**: 군더더기 줄글/과장 안내문 전면 삭제, 담백한 `[👤 회원 인증 / 로그인]` 단일 버튼 및 실보유 혜택 한정 표출, 하단 플로팅 네비게이션 충돌 원천 차단 및 컴팩트 4-Zone 결제 독 구축.
+- **`PaymentTerminal.tsx (v6.2)`**: 애플 미니멀 중앙 플로팅 시트 리뉴얼 (`maxWidth: 860px`, `borderRadius: 32px`, 원색 도배 90% 제거, 고대비 모노톤 SF Pro 딥 블랙 `#1d1d1f` 및 애플 딥 차콜 완전 원형 `999px` 필 버튼 전역 통일).
+- **`PaymentTerminal.tsx (v6.3)`**: 27인치 대형 화면 황금 비례 스케일업 (`maxWidth: 940px`, `padding: 44px 48px`, 48px 대형 금액 타이포, 76px 시그니처 딥 차콜 필 버튼, ProductShop과 100% 비례 통일).
+- **`CheckinSelect.tsx & TeeboxMap.tsx (v6.5)`**: 당일 사전 예약 체크인 화면 및 셀프 타석 이동 화면의 구형 다크 그린/네온 인디고 테마를 전면 폐기하고, 애플 스노우 화이트 글래스 카드(`#ffffff`), `#f5f5f7` 서브 패널, `#1d1d1f` 시그니처 원형 필 버튼으로 리뉴얼 완료 (전역 `KioskBottomBar`와 중복되던 내부 취소/이전 버튼 정리).

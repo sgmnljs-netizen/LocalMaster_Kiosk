@@ -226,35 +226,9 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         await api.releaseBay(selectedBayNo).catch(console.error);
         onRefreshBays();
       }
-      let mwMin = 0;
-      if (bay.config_json) {
-        try {
-          const cfg = typeof bay.config_json === 'string' ? JSON.parse(bay.config_json) : bay.config_json;
-          if (cfg && cfg.remaining_time !== undefined) {
-            mwMin = parseInt(cfg.remaining_time, 10) || 0;
-          }
-        } catch {}
-      }
-
-      let currentRemMin = mwMin > 0 ? mwMin : TimeMaster.getRemainingMinutes(bay);
-
-      const extendMin = (bay as any).extend_min || 0;
-      const waitingCount = (bay as any).waiting_res_count || 0;
-      const waitingMin = (bay as any).waiting_res_total_min || 0;
-      const bufferGapMin = waitingCount > 0 ? (waitingCount * 1) : 1; // 1분 정비 갭
-      
-      const holdSec = (bay as any).preoccupy_hold_sec || 0;
-      const holdMin = Math.ceil(holdSec / 60);
-      let prepareMin = (bay as any).prepare_min || (bay as any).prepare_time || 0;
-      if (((bay.status as string) === 'PREPARE' || (bay as any).status_cd === 'PREPARE') && prepareMin === 0) {
-        prepareMin = 1;
-      }
-
-      const totalWaitMin = Math.max(1, currentRemMin + extendMin + waitingMin + bufferGapMin + holdMin + prepareMin);
-
-      const nowMs = TimeMaster.getSyncedNowMs();
-      const startDate = new Date(nowMs + totalWaitMin * 60 * 1000);
-      const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
+      // 🛡️ [SSOT 시간 동기화] 상단 미니보드 & 메인 타일과 100% 동일한 TimeMaster SSOT 산식 적용
+      const totalWaitMin = Math.max(1, TimeMaster.getTotalWaitMinutes(bay));
+      const startTimeStr = TimeMaster.formatAvailableFromTime(bay);
 
       setErrorMsg('');
       setChainedInfo({ startTimeStr, minutesWait: totalWaitMin });
@@ -297,10 +271,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           // 타석 클릭 즉시 배정 방식 선택 모달 팝업
           setShowDecisionModal(true);
         } else {
-          setErrorMsg(lang === 'KO' ? '타석 선점에 실패했습니다. 다시 시도해 주세요.' : 'Failed to secure teebox.');
+          setErrorMsg(lang === 'KO' ? '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.' : 'This teebox is already being selected by another customer. Please choose another teebox.');
         }
       } catch {
-        setErrorMsg(lang === 'KO' ? '타석 선점 중 오류가 발생했습니다.' : 'Error occurred while securing teebox.');
+        setErrorMsg(lang === 'KO' ? '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.' : 'This teebox is already being selected by another customer. Please choose another teebox.');
       } finally {
         isLockingRef.current = false;
         setPreoccupyLoading(false);
@@ -351,10 +325,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         if (success) {
           setSelectedBayNos(nextList);
         } else {
-          setErrorMsg(lang === 'KO' ? '타석 다중 선점에 실패했습니다.' : 'Failed to secure group teeboxes.');
+          setErrorMsg(lang === 'KO' ? '선택하신 타석 중 이미 다른 고객님이 선택 중인 타석이 있습니다. 다시 선택해 주세요.' : 'Some selected teeboxes are already being selected. Please choose another teebox.');
         }
       } catch {
-        setErrorMsg(lang === 'KO' ? '다중 선점 처리 중 오류가 발생했습니다.' : 'Error securing group teeboxes.');
+        setErrorMsg(lang === 'KO' ? '선택하신 타석 중 이미 다른 고객님이 선택 중인 타석이 있습니다. 다시 선택해 주세요.' : 'Error securing group teeboxes. Please choose another teebox.');
       } finally {
         isLockingRef.current = false;
         setPreoccupyLoading(false);
@@ -944,25 +918,31 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                 <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '6px' }}>
                   <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>{lang === 'KO' ? '이용 시작 시간' : 'Start Time'}</span>
                   {!isOccupied ? (
-                    <span style={{ fontSize: '22px', fontWeight: 800, color: '#0071e3', letterSpacing: '-0.5px' }}>
-                      {lang === 'KO' ? '즉시 입장 가능 (NOW)' : 'Start Immediately'}
-                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ fontSize: '22px', fontWeight: 800, color: '#0071e3', letterSpacing: '-0.5px' }}>
+                        {lang === 'KO' ? '즉시 입장 가능 (NOW)' : 'Start Immediately'}
+                      </span>
+                      {typeof selectedBay.max_assignable_min === 'number' && selectedBay.max_assignable_min > 0 && (
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: '#d97706' }}>
+                          ⚠️ 다음 예약({selectedBay.next_limit_res_start_time || '예정'}) 전 최대 {selectedBay.max_assignable_min}분 이용 가능
+                        </span>
+                      )}
+                    </div>
                   ) : (
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', justifyContent: 'center' }}>
-                      <span style={{ fontSize: '24px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
-                        {chainedInfo?.startTimeStr 
-                          ? chainedInfo.startTimeStr
-                          : (selectedBay.end_time 
-                              ? (selectedBay.end_time.includes(':') 
-                                  ? (selectedBay.end_time.split(' ')[1] || selectedBay.end_time).slice(0, 5) 
-                                  : `${selectedBay.end_time.slice(0, 2)}:${selectedBay.end_time.slice(2, 4)}`)
-                              : '대기 중')}
-                      </span>
-                      <span style={{ fontSize: '15px', fontWeight: 700, color: '#0071e3' }}>
-                        예상 {chainedInfo?.minutesWait !== undefined || selectedBay.minutes_left !== undefined 
-                          ? `(약 ${chainedInfo?.minutesWait ?? selectedBay.minutes_left}분 대기)` 
-                          : ''}
-                      </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', justifyContent: 'center' }}>
+                        <span style={{ fontSize: '24px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
+                          {chainedInfo?.startTimeStr || TimeMaster.formatAvailableFromTime(selectedBay)}
+                        </span>
+                        <span style={{ fontSize: '15px', fontWeight: 700, color: '#0071e3' }}>
+                          예상 {`(약 ${chainedInfo?.minutesWait ?? Math.max(1, TimeMaster.getTotalWaitMinutes(selectedBay))}분 대기)`}
+                        </span>
+                      </div>
+                      {typeof selectedBay.max_assignable_min === 'number' && selectedBay.max_assignable_min > 0 && (
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: '#d97706' }}>
+                          ⚠️ 다음 예약({selectedBay.next_limit_res_start_time || '예정'}) 전 최대 {selectedBay.max_assignable_min}분 이용 가능
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

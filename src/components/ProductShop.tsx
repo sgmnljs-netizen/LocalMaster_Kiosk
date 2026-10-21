@@ -9,6 +9,9 @@ interface ProductShopProps {
   discountRate?: number;
   gradeName?: string;
   purposeType?: 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT' | 'SELECT_DAILY_PASS';
+  maxAssignableMin?: number | null;
+  nextLimitResStartTime?: string | null;
+  initialProducts?: Product[];
   onProductSelected: (product: Product) => void;
   onCancel: () => void;
 }
@@ -27,6 +30,9 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   discountRate = 0,
   gradeName,
   purposeType,
+  maxAssignableMin = null,
+  nextLimitResStartTime = null,
+  initialProducts,
   onProductSelected,
   onCancel
 }) => {
@@ -37,7 +43,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
     isDailyPurpose ? 'DAILY_PASS' : 0
   );
   const [displayCategories, setDisplayCategories] = useState<DisplayCategoryItem[]>([]);
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>(initialProducts || []);
   const [loading, setLoading] = useState(false);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
@@ -107,11 +113,12 @@ export const ProductShop: React.FC<ProductShopProps> = ({
     loadKioskShopData();
   }, [memberNo, purposeType]);
 
-  // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB 물리 컬럼 ➔ JSON access_rules/rules_detail 직접 참조)
+  // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB 물리 컬럼 ➔ time_min ➔ JSON access_rules/rules_detail 직접 참조)
   const getDurationMin = (prod: Product) => {
     if (prod.duration_min != null && prod.duration_min > 0) return prod.duration_min;
+    if (prod.time_min != null && prod.time_min > 0) return prod.time_min;
     const jsonDuration = prod.access_rules?.duration_min || prod.rules_detail?.duration_min;
-    if (jsonDuration != null && jsonDuration > 0) return jsonDuration;
+    if (jsonDuration != null && jsonDuration > 0) return Number(jsonDuration);
     return 60;
   };
 
@@ -195,6 +202,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 {isDailyPurpose 
                   ? '※ 원하시는 이용 시간(N분)을 선택하여 결제를 진행해 주세요.'
                   : '※ 회원 전용 상품으로 정기 회원권 및 부가 서비스를 구매하실 수 있습니다.'}
+              </p>
+            )}
+            {isDailyPurpose && typeof maxAssignableMin === 'number' && maxAssignableMin > 0 && (
+              <p style={{ fontSize: '14px', color: '#dc2626', fontWeight: 800, marginTop: '4px', margin: 0 }}>
+                ⚠️ 선택하신 타석은 다음 예약({nextLimitResStartTime || '예정'}) 전까지 최대 [{maxAssignableMin}분] 이용 가능합니다.
               </p>
             )}
           </div>
@@ -321,7 +333,16 @@ export const ProductShop: React.FC<ProductShopProps> = ({
             ).toUpperCase();
             const targetGenderNorm = rawTargetGender === 'MALE' ? 'M' : rawTargetGender === 'FEMALE' ? 'F' : rawTargetGender;
             const genderBadge = targetGenderNorm === 'F' ? '여성 전용' : targetGenderNorm === 'M' ? '남성 전용' : null;
-            const badgeText = customBadge ? customBadge : `${durationMin}분 이용`;
+            const isDurationExceeded = Boolean(
+              isDailyPurpose &&
+              isDaily &&
+              typeof maxAssignableMin === 'number' &&
+              maxAssignableMin > 0 &&
+              durationMin > maxAssignableMin
+            );
+            const badgeText = isDurationExceeded
+              ? `⚠️ 최대 ${maxAssignableMin}분 가능 (초과)`
+              : (customBadge ? customBadge : `${durationMin}분 이용`);
             const displayName = prod.meta_data?.display_nm || prod.prod_nm;
 
             return (
@@ -329,7 +350,14 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 key={prod.prod_cd}
                 data-testid={`product-card-${prod.prod_cd}`}
                 data-duration={durationMin}
+                data-disabled={isDurationExceeded ? 'true' : 'false'}
                 onClick={() => {
+                  if (isDurationExceeded) {
+                    setWarningMessage(
+                      `선택하신 타석은 다음 예약(${nextLimitResStartTime || '예정'})으로 인해 최대 [${maxAssignableMin}분]까지만 이용 가능합니다.\n\n${durationMin}분 상품을 이용하시려면 우측 상단 [돌아가기]를 눌러 다른 타석을 선택해 주세요.`
+                    );
+                    return;
+                  }
                   if (!memberNo && (prod.logic_type || '').toUpperCase() !== 'DAILY' && !checkIfDaily(prod)) {
                     setWarningMessage('회원 전용 상품입니다. 먼저 회원 인증을 진행해 주세요.');
                     return;
@@ -348,24 +376,27 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 style={{
                   padding: '36px 30px',
                   borderRadius: '28px',
-                  border: '1px solid #e5e5ea',
-                  background: '#ffffff',
-                  cursor: 'pointer',
+                  border: isDurationExceeded ? '1.5px dashed #cbd5e1' : '1px solid #e5e5ea',
+                  background: isDurationExceeded ? '#f8fafc' : '#ffffff',
+                  opacity: isDurationExceeded ? 0.56 : 1,
+                  cursor: isDurationExceeded ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
                   gap: '24px',
-                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.04)',
+                  boxShadow: isDurationExceeded ? 'none' : '0 10px 30px rgba(0, 0, 0, 0.04)',
                   transition: 'all 0.25s cubic-bezier(0.25, 1, 0.5, 1)',
                   position: 'relative',
                   overflow: 'hidden'
                 }}
                 onMouseEnter={(e) => {
+                  if (isDurationExceeded) return;
                   e.currentTarget.style.borderColor = '#0071e3';
                   e.currentTarget.style.transform = 'translateY(-4px)';
                   e.currentTarget.style.boxShadow = '0 15px 40px rgba(0, 113, 227, 0.12)';
                 }}
                 onMouseLeave={(e) => {
+                  if (isDurationExceeded) return;
                   e.currentTarget.style.borderColor = '#e5e5ea';
                   e.currentTarget.style.transform = 'translateY(0)';
                   e.currentTarget.style.boxShadow = '0 10px 30px rgba(0, 0, 0, 0.04)';
@@ -398,9 +429,10 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                       fontWeight: 800,
                       padding: '6px 14px',
                       borderRadius: '999px',
-                      background: customBadge ? '#34c759' : '#0071e3',
-                      color: '#ffffff',
-                      boxShadow: customBadge ? '0 4px 12px rgba(52, 199, 89, 0.25)' : '0 4px 12px rgba(0, 113, 227, 0.25)'
+                      background: isDurationExceeded ? '#fef3c7' : (customBadge ? '#34c759' : '#0071e3'),
+                      color: isDurationExceeded ? '#b45309' : '#ffffff',
+                      border: isDurationExceeded ? '1px solid #fcd34d' : 'none',
+                      boxShadow: isDurationExceeded ? 'none' : (customBadge ? '0 4px 12px rgba(52, 199, 89, 0.25)' : '0 4px 12px rgba(0, 113, 227, 0.25)')
                     }}>
                       {badgeText}
                     </span>
@@ -494,27 +526,34 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                   </div>
 
                   <button
+                    disabled={isDurationExceeded}
                     style={{
                       width: '100%',
                       height: '56px',
                       borderRadius: '999px',
-                      background: '#1d1d1f',
-                      color: '#ffffff',
+                      background: isDurationExceeded ? '#e2e8f0' : '#1d1d1f',
+                      color: isDurationExceeded ? '#64748b' : '#ffffff',
                       border: 'none',
                       fontSize: '17px',
                       fontWeight: 700,
                       letterSpacing: '-0.3px',
-                      cursor: 'pointer',
+                      cursor: isDurationExceeded ? 'not-allowed' : 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: '8px',
-                      boxShadow: '0 6px 18px rgba(0, 0, 0, 0.12)',
+                      boxShadow: isDurationExceeded ? 'none' : '0 6px 18px rgba(0, 0, 0, 0.12)',
                       transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
                     }}
                   >
-                    <Hand size={18} className="animate-hand-tap" style={{ color: customBadge ? '#34c759' : '#2997ff' }} />
-                    <span>{priceFormatted}원 선택 및 결제</span>
+                    {isDurationExceeded ? (
+                      <span>다음 예약({nextLimitResStartTime || '예정'})으로 선택 불가 (최대 {maxAssignableMin}분)</span>
+                    ) : (
+                      <>
+                        <Hand size={18} className="animate-hand-tap" style={{ color: customBadge ? '#34c759' : '#2997ff' }} />
+                        <span>{priceFormatted}원 선택 및 결제</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -544,7 +583,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         • 모든 결제는 신용카드만 가능하며, 현금 결제나 환불은 파트너센터 및 주간 관리 데스크로 문의해 주세요.
       </div>
 
-      {/* 회원 전용 상품 인증 안내 모달 (동기식 alert 대체) */}
+      {/* 회원 전용 상품 인증 및 시간 초과 안내 모달 (동기식 alert 대체) */}
       {warningMessage && (
         <div style={{
           position: 'fixed',
@@ -571,9 +610,13 @@ export const ProductShop: React.FC<ProductShopProps> = ({
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
             border: '1px solid #e2e8f0'
           }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>
+              {warningMessage.includes('다음 예약') ? '⏰' : '🔒'}
+            </div>
             <h3 style={{ fontSize: '22px', fontWeight: 800, color: '#1e293b', marginBottom: '12px' }}>
-              {warningMessage.includes('전용]') ? '상품 구매 제한 안내' : '회원 인증 필요'}
+              {warningMessage.includes('다음 예약')
+                ? '이용 시간 초과 상품 안내'
+                : (warningMessage.includes('전용]') ? '상품 구매 제한 안내' : '회원 인증 필요')}
             </h3>
             <p style={{ fontSize: '16px', color: '#64748b', lineHeight: '1.6', whiteSpace: 'pre-line', marginBottom: '28px' }}>
               {warningMessage}

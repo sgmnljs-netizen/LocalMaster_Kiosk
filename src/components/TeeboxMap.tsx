@@ -198,7 +198,6 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const isReservedNotStarted = ['CHK', 'RSV', 'RESERVED'].includes(currentBayStatus);
   const currentRemMin = calculateRemMin(currentBay);
   const isGlobalPaused = Boolean(
-    isMoveMode &&
     bays.some(b => Boolean((b as any).is_global_paused) || String((b as any).pause_type || '').toUpperCase() === 'GLOBAL')
   );
   const isTimeRestricted = Boolean(
@@ -283,6 +282,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
     const isBlocked =
       (bay as any).is_active === false ||
+      (bay as any).is_paused === true ||
+      (bay as any).is_global_paused === true ||
       ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
     if (isBlocked) return;
     if (['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus)) return;
@@ -313,10 +314,10 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         if (success) {
           setSelectedBayNo(bay.bay_no);
         } else {
-          setErrorMsg(lang === 'KO' ? '타석 선점에 실패했습니다. 다시 시도해 주세요.' : 'Failed to preoccupy teebox.');
+          setErrorMsg(lang === 'KO' ? '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.' : 'This teebox is already being selected by another customer. Please choose another teebox.');
         }
       } catch {
-        setErrorMsg(lang === 'KO' ? '타석 선점 중 오류가 발생했습니다.' : 'Error preoccupying teebox.');
+        setErrorMsg(lang === 'KO' ? '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.' : 'This teebox is already being selected by another customer. Please choose another teebox.');
       } finally {
         setPreoccupyLoading(false);
         onRefreshBays(); // 즉시 상태 갱신
@@ -382,58 +383,84 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
 
   return (
     <div 
-      className="glass-panel" 
       onClickCapture={() => {
         if (feedbackCountdown !== null && onCancelCountdown) {
           onCancelCountdown();
         }
       }}
       style={{
-        width: '1000px',
+        width: '100%',
+        maxWidth: '1020px',
         margin: '15px auto 120px auto',
-        padding: '30px 40px',
+        padding: '36px 40px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '24px',
-        border: '1px solid rgba(255,255,255,0.1)'
+        gap: '22px',
+        background: '#ffffff',
+        borderRadius: '32px',
+        border: '1px solid rgba(0,0,0,0.08)',
+        boxShadow: '0 24px 60px rgba(0,0,0,0.1)',
+        color: '#1d1d1f'
       }}
     >
       {/* 타석 맵 헤더 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {isMoveMode ? (
-            <ArrowLeftRight size={32} style={{ color: 'var(--neon-indigo)' }} />
-          ) : (
-            <Compass size={32} style={{ color: 'var(--neon-indigo)' }} />
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div
+            style={{
+              width: '54px',
+              height: '54px',
+              borderRadius: '18px',
+              background: '#f5f5f7',
+              border: '1px solid #e5e5ea',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            {isMoveMode ? (
+              <ArrowLeftRight size={28} style={{ color: '#1d1d1f' }} />
+            ) : (
+              <Compass size={28} style={{ color: '#1d1d1f' }} />
+            )}
+          </div>
           <div>
-            <h2 style={{ fontSize: '28px', fontWeight: 900 }}>
+            <h2 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.8px' }}>
               {isMoveMode ? '이동하실 타석 선택' : '이용하실 타석 선택'}
             </h2>
             {memberName && (
-              <p style={{ fontSize: '15px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                회원명: <strong style={{ color: '#fff' }}>{memberName}</strong> 님
+              <p style={{ fontSize: '15px', color: '#86868b', margin: '4px 0 0 0', fontWeight: 600 }}>
+                회원명: <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>{memberName}</strong> 님
               </p>
             )}
           </div>
         </div>
 
         {/* 층별 탭 전환 스위치 */}
-        <div className="glass-panel" style={{ display: 'flex', padding: '6px', borderRadius: '12px', background: 'rgba(0,0,0,0.2)' }}>
+        <div
+          style={{
+            display: 'flex',
+            padding: '6px',
+            borderRadius: '18px',
+            background: '#f5f5f7',
+            border: '1px solid #e5e5ea',
+            gap: '4px'
+          }}
+        >
           {floorTabs.map(f => (
             <button
               key={f}
               onClick={() => setActiveFloor(f)}
               style={{
                 padding: '10px 24px',
-                fontSize: '18px',
+                fontSize: '16px',
                 fontWeight: 800,
-                borderRadius: '8px',
+                borderRadius: '14px',
                 border: 'none',
                 cursor: 'pointer',
-                color: activeFloor === f ? '#fff' : 'var(--text-secondary)',
-                background: activeFloor === f ? 'var(--neon-indigo)' : 'transparent',
-                boxShadow: activeFloor === f ? '0 0 10px var(--neon-indigo-glow)' : 'none',
+                color: activeFloor === f ? '#ffffff' : '#86868b',
+                background: activeFloor === f ? '#1d1d1f' : 'transparent',
+                boxShadow: activeFloor === f ? '0 4px 12px rgba(0,0,0,0.12)' : 'none',
                 transition: 'all 0.2s ease',
                 display: 'flex',
                 alignItems: 'center',
@@ -452,10 +479,9 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         <>
           {hasNoActiveBay ? (
             <div
-              className="neon-border-red"
               style={{
-                background: 'rgba(239, 68, 68, 0.12)',
-                border: '2px solid var(--neon-red)',
+                background: '#fef2f2',
+                border: '1.5px solid #fecaca',
                 borderRadius: '20px',
                 padding: '20px 24px',
                 display: 'flex',
@@ -464,12 +490,14 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <ShieldAlert size={36} style={{ color: 'var(--neon-red)' }} />
+                <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ShieldAlert size={26} style={{ color: '#dc2626' }} />
+                </div>
                 <div>
-                  <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#ffffff', margin: 0 }}>
+                  <h3 style={{ fontSize: '19px', fontWeight: 900, color: '#991b1b', margin: 0 }}>
                     현재 이용 중인 타석 내역이 없습니다
                   </h3>
-                  <p style={{ fontSize: '15px', color: '#fca5a5', margin: '4px 0 0 0' }}>
+                  <p style={{ fontSize: '14px', color: '#b91c1c', margin: '4px 0 0 0', fontWeight: 600 }}>
                     <strong>{memberName || '고객'}</strong> 님 명의로 점유 중인 타석을 찾을 수 없습니다. [연습타석배정] 메뉴에서 신규 배정을 진행해 주세요.
                   </p>
                 </div>
@@ -477,13 +505,13 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               <button
                 onClick={onCancel}
                 style={{
-                  padding: '12px 20px',
-                  borderRadius: '12px',
-                  background: '#ffffff',
-                  color: '#1d1d1f',
+                  padding: '12px 22px',
+                  borderRadius: '999px',
+                  background: '#1d1d1f',
+                  color: '#ffffff',
                   border: 'none',
                   fontWeight: 800,
-                  fontSize: '15px',
+                  fontSize: '14px',
                   cursor: 'pointer'
                 }}
               >
@@ -492,10 +520,9 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             </div>
           ) : isGlobalPaused ? (
             <div
-              className="neon-border-red"
               style={{
-                background: 'rgba(239, 68, 68, 0.12)',
-                border: '2px solid var(--neon-red)',
+                background: '#fef2f2',
+                border: '1.5px solid #fecaca',
                 borderRadius: '20px',
                 padding: '20px 24px',
                 display: 'flex',
@@ -504,26 +531,28 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <ShieldAlert size={36} style={{ color: 'var(--neon-red)' }} />
+                <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ShieldAlert size={26} style={{ color: '#dc2626' }} />
+                </div>
                 <div>
-                  <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#ffffff', margin: 0 }}>
-                    ⏸️ 일시정지 회원 타석 이동 제한
+                  <h3 style={{ fontSize: '19px', fontWeight: 900, color: '#991b1b', margin: 0 }}>
+                    ⏸️ 매장 볼회수(전체 일시정지) 중 타석 {isMoveMode ? '이동' : '배정'} 제한
                   </h3>
-                  <p style={{ fontSize: '15px', color: '#fca5a5', margin: '4px 0 0 0' }}>
-                    현재 회원권 일시정지 상태입니다. 프론트 데스크에서 일시정지 해제 후 이용해 주세요.
+                  <p style={{ fontSize: '14px', color: '#b91c1c', margin: '4px 0 0 0', fontWeight: 600 }}>
+                    현재 매장 볼회수(전체 일시정지)가 진행 중입니다. 볼회수 종료 후 타석 {isMoveMode ? '이동' : '배정'}을 이용해 주세요.
                   </p>
                 </div>
               </div>
               <button
                 onClick={onCancel}
                 style={{
-                  padding: '12px 20px',
-                  borderRadius: '12px',
-                  background: '#ffffff',
-                  color: '#1d1d1f',
+                  padding: '12px 22px',
+                  borderRadius: '999px',
+                  background: '#1d1d1f',
+                  color: '#ffffff',
                   border: 'none',
                   fontWeight: 800,
-                  fontSize: '15px',
+                  fontSize: '14px',
                   cursor: 'pointer'
                 }}
               >
@@ -532,10 +561,9 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             </div>
           ) : isTimeRestricted ? (
             <div
-              className="neon-border-red"
               style={{
-                background: 'rgba(239, 68, 68, 0.12)',
-                border: '2px solid var(--neon-red)',
+                background: '#fef2f2',
+                border: '1.5px solid #fecaca',
                 borderRadius: '20px',
                 padding: '20px 24px',
                 display: 'flex',
@@ -544,24 +572,27 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <ShieldAlert size={36} style={{ color: 'var(--neon-red)' }} />
+                <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ShieldAlert size={26} style={{ color: '#dc2626' }} />
+                </div>
                 <div>
-                  <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#ffffff', margin: 0 }}>
+                  <h3 style={{ fontSize: '19px', fontWeight: 900, color: '#991b1b', margin: 0 }}>
                     ⏱️ 타석 이동 불가 (잔여시간 5분 미만)
                   </h3>
-                  <p style={{ fontSize: '15px', color: '#fca5a5', margin: '4px 0 0 0' }}>
+                  <p style={{ fontSize: '14px', color: '#b91c1c', margin: '4px 0 0 0', fontWeight: 600 }}>
                     현재 이용 중인 <strong>{currentBay?.bay_no}번 타석</strong>의 남은 시간이 5분 미만(<strong>{currentRemMin}분 남음</strong>)이므로 자리 이동이 제한됩니다.
                   </p>
                 </div>
               </div>
               <span
                 style={{
-                  fontSize: '14px',
+                  fontSize: '13px',
                   fontWeight: 800,
-                  color: '#ef4444',
+                  color: '#dc2626',
                   background: '#ffffff',
+                  border: '1px solid #fecaca',
                   padding: '8px 16px',
-                  borderRadius: '12px'
+                  borderRadius: '999px'
                 }}
               >
                 이용 종료 임박
@@ -570,48 +601,74 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           ) : (
             <div
               style={{
-                background: 'linear-gradient(135deg, #031510 0%, #022c22 100%)',
-                border: '2px solid #10b981',
-                borderRadius: '20px',
-                padding: '20px 28px',
+                background: '#f5f5f7',
+                border: '1.5px solid #e5e5ea',
+                borderRadius: '22px',
+                padding: '20px 26px',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                boxShadow: '0 8px 24px rgba(6, 78, 59, 0.3)'
+                justifyContent: 'space-between'
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <div style={{ background: 'rgba(16, 185, 129, 0.2)', padding: '12px', borderRadius: '16px', border: '1px solid #10b981' }}>
-                  <ArrowLeftRight size={28} style={{ color: '#10b981' }} />
+                <div
+                  style={{
+                    background: '#ffffff',
+                    padding: '12px',
+                    borderRadius: '16px',
+                    border: '1px solid #e5e5ea',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                  }}
+                >
+                  <ArrowLeftRight size={26} style={{ color: '#059669' }} />
                 </div>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 900, background: isReservedNotStarted ? '#f59e0b' : '#10b981', color: '#ffffff', padding: '3px 10px', borderRadius: '8px' }}>
+                    <span
+                      style={{
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        background: isReservedNotStarted ? '#fef3c7' : '#d1fae5',
+                        color: isReservedNotStarted ? '#92400e' : '#065f46',
+                        padding: '4px 10px',
+                        borderRadius: '999px'
+                      }}
+                    >
                       {isReservedNotStarted ? '사전체크인/예약 대기 중' : '현재 이용 중'}
                     </span>
-                    <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#ffffff', margin: 0 }}>
+                    <h3 style={{ fontSize: '23px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.5px' }}>
                       {currentBay?.bay_no}번 타석
                     </h3>
                     {selectedBayNo !== null && (
                       <>
-                        <span style={{ fontSize: '20px', color: '#10b981', fontWeight: 900 }}>➔</span>
-                        <span style={{ fontSize: '13px', fontWeight: 900, background: '#3b82f6', color: '#ffffff', padding: '3px 10px', borderRadius: '8px' }}>
+                        <span style={{ fontSize: '18px', color: '#86868b', fontWeight: 900 }}>➔</span>
+                        <span
+                          style={{
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            background: '#1d1d1f',
+                            color: '#ffffff',
+                            padding: '4px 10px',
+                            borderRadius: '999px'
+                          }}
+                        >
                           이동 대상
                         </span>
-                        <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#60a5fa', margin: 0 }}>
+                        <h3 style={{ fontSize: '23px', fontWeight: 900, color: '#059669', margin: 0, letterSpacing: '-0.5px' }}>
                           {selectedBayNo}번 타석
                         </h3>
                       </>
                     )}
                   </div>
-                  <p style={{ fontSize: '15px', color: '#a7f3d0', margin: '4px 0 0 0' }}>
-                    회원명: <strong style={{ color: '#fff' }}>{memberName}</strong> | {isReservedNotStarted ? '예정 이용 시간: ' : '이용 잔여 시간: '}<strong style={{ color: '#6ee7b7' }}>{currentRemMin}분</strong> {currentBay?.end_time ? `(종료: ${currentBay.end_time})` : ''}
+                  <p style={{ fontSize: '14px', color: '#515154', margin: '6px 0 0 0', fontWeight: 600 }}>
+                    회원명: <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>{memberName}</strong> | {isReservedNotStarted ? '예정 이용 시간: ' : '이용 잔여 시간: '}
+                    <strong style={{ color: '#059669', fontWeight: 800 }}>{currentRemMin}분</strong> {currentBay?.end_time ? `(종료: ${currentBay.end_time})` : ''}
                   </p>
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '13px', color: '#6ee7b7', fontWeight: 800 }}>잔여시간 100% 보전 (상품 호환)</div>
-                <div style={{ fontSize: '14px', color: '#a7f3d0', marginTop: '2px' }}>
+                <div style={{ fontSize: '13px', color: '#059669', fontWeight: 800 }}>잔여시간 100% 보전 (상품 호환)</div>
+                <div style={{ fontSize: '13px', color: '#86868b', marginTop: '4px', fontWeight: 600 }}>
                   {selectedBayNo !== null
                     ? `하단 [${isMoveMode ? '타석 이동 확정' : '선택 완료'}] 버튼을 누르면 즉시 이동됩니다.`
                     : '이동을 원하시는 빈 타석 카드를 선택해 주세요.'}
@@ -626,43 +683,41 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       {feedbackCountdown !== undefined && feedbackCountdown !== null && (
         <div style={{
           width: '100%',
-          background: 'linear-gradient(135deg, #064e3b 0%, #022c22 100%)',
-          borderRadius: '16px',
+          background: '#ecfdf5',
+          borderRadius: '18px',
           padding: '16px 24px',
-          border: '2px solid #10b981',
-          boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)',
+          border: '1.5px solid #a7f3d0',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          color: '#ffffff'
+          color: '#065f46'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{ fontSize: '20px' }}>✨</span>
             <div>
-              <span style={{ fontSize: '18px', fontWeight: 900, color: '#ffffff', display: 'block' }}>
+              <span style={{ fontSize: '17px', fontWeight: 900, color: '#065f46', display: 'block' }}>
                 {lang === 'KO' ? `${justAllocatedBayNo}번 타석 배정이 성공적으로 완료되었습니다!` : `Bay ${justAllocatedBayNo} Allocation Confirmed!`}
               </span>
-              <span style={{ fontSize: '13px', color: '#a7f3d0' }}>
+              <span style={{ fontSize: '13px', color: '#047857', fontWeight: 600 }}>
                 {lang === 'KO' ? '타석 타일에서 이용 중 상태를 확인하세요.' : 'Check active status on the tile below.'}
               </span>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <span style={{ fontSize: '18px', fontWeight: 900, color: '#34d399' }}>
+            <span style={{ fontSize: '16px', fontWeight: 900, color: '#059669' }}>
               ⏱ {feedbackCountdown}초 후 메인으로
             </span>
             <button
               onClick={onCancel}
               style={{
-                padding: '8px 18px',
-                borderRadius: '12px',
-                background: '#ffffff',
-                color: '#064e3b',
+                padding: '9px 18px',
+                borderRadius: '999px',
+                background: '#1d1d1f',
+                color: '#ffffff',
                 border: 'none',
-                fontWeight: 900,
-                fontSize: '14px',
-                cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                fontWeight: 800,
+                fontSize: '13px',
+                cursor: 'pointer'
               }}
             >
               {lang === 'KO' ? '지금 메인으로' : 'Go Home Now'}
@@ -673,58 +728,56 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
 
       {/* 에러 또는 주의 알림 */}
       {errorMsg && (
-        <div className="neon-border-red" style={{ background: 'rgba(239,68,68,0.1)', padding: '12px 18px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <ShieldAlert size={20} style={{ color: 'var(--neon-red)' }} />
-          <span style={{ fontSize: '16px', fontWeight: 700, color: '#fca5a5' }}>{errorMsg}</span>
+        <div
+          style={{
+            background: '#fef2f2',
+            border: '1.5px solid #fecaca',
+            padding: '12px 18px',
+            borderRadius: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}
+        >
+          <ShieldAlert size={20} style={{ color: '#dc2626' }} />
+          <span style={{ fontSize: '15px', fontWeight: 700, color: '#991b1b' }}>{errorMsg}</span>
         </div>
       )}
 
-      {/* 상태 안내 범례 */}
+      {/* 상태 안내 범례 및 층별 장비 스펙 통합 바 */}
       <div 
         style={{ 
           display: 'flex', 
-          justifyContent: 'center', 
-          gap: '30px', 
-          background: 'rgba(0,0,0,0.15)', 
-          padding: '14px', 
-          borderRadius: '12px',
-          border: '1px solid var(--glass-border)' 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          background: '#f5f5f7', 
+          padding: '14px 20px', 
+          borderRadius: '16px',
+          border: '1px solid #e5e5ea' 
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{ width: '16px', height: '16px', borderRadius: '4px', backgroundColor: 'var(--neon-green)', boxShadow: '0 0 6px var(--neon-green-glow)' }} />
-          <span style={{ fontSize: '15px', fontWeight: 700 }}>이용 가능 (Green)</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#354238' }} />
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#1d1d1f' }}>이용 가능</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#d2d2d7' }} />
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#515154' }}>이용 중</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#34c759' }} />
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#1d4e33' }}>선택 완료</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#ff453a' }} />
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#991b1b' }}>점검/고장</span>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{ width: '16px', height: '16px', borderRadius: '4px', backgroundColor: 'var(--neon-indigo)', boxShadow: '0 0 6px var(--neon-indigo-glow)' }} />
-          <span style={{ fontSize: '15px', fontWeight: 700 }}>사용 중 (Indigo)</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{ width: '16px', height: '16px', borderRadius: '4px', backgroundColor: 'var(--neon-amber)', boxShadow: '0 0 6px var(--neon-amber-glow)' }} />
-          <span style={{ fontSize: '15px', fontWeight: 700 }}>선택 중 (Amber)</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{ width: '16px', height: '16px', borderRadius: '4px', backgroundColor: 'var(--neon-red)', boxShadow: '0 0 6px var(--neon-red-glow)' }} />
-          <span style={{ fontSize: '15px', fontWeight: 700 }}>점검/고장 (Red)</span>
-        </div>
-      </div>
 
-      {/* 층별 테크 스펙 안내 바 (Data Density 강화 - Zero-Hardcoding 동적 산출) */}
-      <div 
-        style={{ 
-          background: 'rgba(255,255,255,0.02)', 
-          border: '1px solid var(--glass-border)', 
-          padding: '12px 20px', 
-          borderRadius: '12px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: '14px',
-          color: 'var(--text-secondary)'
-        }}
-      >
-        <span>
+        <span style={{ fontSize: '13px', color: '#86868b', fontWeight: 600 }}>
           ⛳ 층별 장비 스펙:{' '}
-          <strong style={{ color: 'var(--neon-indigo)' }}>
+          <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>
             {(() => {
               if (!floorBays || floorBays.length === 0) return `${activeFloor}층 타석 정보 없음`;
               const minBay = Math.min(...floorBays.map((b) => b.bay_no));
@@ -749,7 +802,6 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             })()}
           </strong>
         </span>
-        <span>• 좌타/우타 방향 및 레슨 전용 여부를 확인 후 선택해 주세요.</span>
       </div>
 
       {/* 0. 애플 모션 스타일 전용 CSS 스타일 태그 주입 */}
@@ -1101,7 +1153,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           display: 'flex', 
           justifyContent: 'space-between', 
           alignItems: 'center', 
-          borderTop: '1px solid var(--bg-tertiary)', 
+          borderTop: '1px solid #e5e5ea', 
           paddingTop: '20px' 
         }}
       >
@@ -1110,59 +1162,59 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
               <div
                 style={{
-                  background: 'linear-gradient(135deg, #064e3b 0%, #022c22 100%)',
-                  border: '2px solid #10b981',
-                  borderRadius: '16px',
+                  background: '#f5f5f7',
+                  border: '1.5px solid #e5e5ea',
+                  borderRadius: '18px',
                   padding: '12px 24px',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '16px',
-                  boxShadow: '0 4px 16px rgba(16, 185, 129, 0.25)'
+                  gap: '16px'
                 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <span style={{ fontSize: '12px', color: '#a7f3d0', fontWeight: 700 }}>이전 타석</span>
-                  <span style={{ fontSize: '22px', fontWeight: 900, color: '#ffffff' }}>{currentBay.bay_no}번</span>
+                  <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 700 }}>이전 타석</span>
+                  <span style={{ fontSize: '21px', fontWeight: 900, color: '#1d1d1f' }}>{currentBay.bay_no}번</span>
                 </div>
-                <ArrowLeftRight size={24} style={{ color: '#10b981' }} />
+                <ArrowLeftRight size={22} style={{ color: '#059669' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <span style={{ fontSize: '12px', color: '#34d399', fontWeight: 700 }}>이동할 타석</span>
-                  <span style={{ fontSize: '22px', fontWeight: 900, color: '#6ee7b7' }}>{selectedBayNo}번</span>
+                  <span style={{ fontSize: '12px', color: '#059669', fontWeight: 700 }}>이동할 타석</span>
+                  <span style={{ fontSize: '21px', fontWeight: 900, color: '#059669' }}>{selectedBayNo}번</span>
                 </div>
-                <div style={{ width: '1px', height: '32px', background: 'rgba(255,255,255,0.2)', margin: '0 4px' }} />
+                <div style={{ width: '1px', height: '32px', background: '#e5e5ea', margin: '0 4px' }} />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontSize: '14px', color: '#ffffff', fontWeight: 800 }}>남은 {currentRemMin}분 100% 보전</span>
-                  <span style={{ fontSize: '12px', color: '#a7f3d0' }}>선점 락: {countdown}초 남음</span>
+                  <span style={{ fontSize: '14px', color: '#1d1d1f', fontWeight: 800 }}>남은 {currentRemMin}분 100% 보전</span>
+                  <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 600 }}>선점 락: {countdown}초 남음</span>
                 </div>
               </div>
             </div>
           ) : selectedBayNo !== null ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div 
-                className="neon-border-indigo"
                 style={{ 
-                  background: 'rgba(99,102,241,0.1)', 
+                  background: '#f5f5f7', 
+                  border: '1.5px solid #e5e5ea',
                   padding: '10px 20px', 
-                  borderRadius: '10px', 
-                  fontSize: '18px', 
+                  borderRadius: '14px', 
+                  fontSize: '17px', 
                   fontWeight: 800,
+                  color: '#1d1d1f',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px'
                 }}
               >
-                <Check size={18} style={{ color: 'var(--neon-indigo)' }} />
-                <span>선택된 타석: <strong style={{ color: '#fff', fontSize: '22px' }}>{selectedBayNo}</strong>번</span>
+                <Check size={18} style={{ color: '#059669' }} />
+                <span>선택된 타석: <strong style={{ color: '#059669', fontSize: '21px' }}>{selectedBayNo}</strong>번</span>
               </div>
-              <span style={{ fontSize: '15px', color: 'var(--neon-amber)', fontWeight: 700 }}>
+              <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>
                 (배정 대기 시간: {countdown}초 남음)
               </span>
             </div>
           ) : (
-            <span style={{ fontSize: '16px', color: (isTimeRestricted || isGlobalPaused) ? 'var(--neon-red)' : 'var(--text-secondary)', fontWeight: 700 }}>
+            <span style={{ fontSize: '15px', color: (isTimeRestricted || isGlobalPaused) ? '#dc2626' : '#86868b', fontWeight: 700 }}>
               {isMoveMode 
                 ? isGlobalPaused
-                  ? '⏸️ 일시정지 상태 회원은 타석 이동이 제한됩니다.'
+                  ? '⏸️ 매장 볼회수(전체 일시정지) 중에는 타석 이동이 제한됩니다.'
                   : isTimeRestricted 
                   ? '⏱️ 이용 종료 임박(5분 미만)으로 자리 이동이 불가능합니다.' 
                   : hasNoActiveBay 
@@ -1173,30 +1225,22 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: '16px' }}>
-          <button 
-            className="kiosk-btn" 
-            style={{ width: '140px', height: '64px', borderRadius: '12px', fontSize: '18px' }}
-            onClick={async () => {
-              await handleRelease();
-              onCancel();
-            }}
-          >
-            이전으로
-          </button>
-          
+        <div style={{ display: 'flex', gap: '14px' }}>
           <button
             onClick={handleConfirm}
             disabled={selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused}
-            className="kiosk-btn kiosk-btn-primary"
             style={{ 
-              width: '220px', 
-              height: '64px', 
-              borderRadius: '12px', 
-              fontSize: '20px', 
+              padding: '0 36px',
+              height: '62px', 
+              borderRadius: '999px', 
+              fontSize: '19px', 
               fontWeight: 800,
-              opacity: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 0.5 : 1,
-              cursor: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 'not-allowed' : 'pointer'
+              border: 'none',
+              background: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? '#e5e5ea' : '#1d1d1f',
+              color: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? '#86868b' : '#ffffff',
+              boxShadow: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 'none' : '0 8px 24px rgba(0, 0, 0, 0.14)',
+              cursor: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s ease'
             }}
           >
             {preoccupyLoading ? '선점 처리 중...' : isMoveMode ? '타석 이동 확정' : '선택 완료'}

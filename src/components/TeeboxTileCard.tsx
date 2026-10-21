@@ -33,8 +33,8 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   const isSelfLocked = isPreOccupied && (isSelected || (!!bay.lock_terminal_id && bay.lock_terminal_id === api.getTerminalId()));
   const isClickable = !isMaintenance && (isAvailable || isOccupied || isPrepare || isSelected || isSelfLocked || isLessonOnly);
 
-  const totalRemainingMin = (bay as any).status_info?.minutes_left ?? TimeMaster.getRemainingMinutes(bay);
-  const finalEndTimeStr = TimeMaster.formatEndTime(bay);
+  const totalRemainingMin = TimeMaster.getTotalWaitMinutes(bay);
+  const finalEndTimeStr = TimeMaster.formatAvailableFromTime(bay);
 
   const progressPercent = totalRemainingMin >= 60
     ? 100
@@ -324,17 +324,6 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
             <div style={{ fontSize: '12px', fontWeight: 600, color: isSelected ? 'rgba(255,255,255,0.8)' : '#71717a', letterSpacing: '-0.2px', paddingLeft: '2px' }}>
               {bay.is_paused ? '볼회수/일시정지 중' : `${finalEndTimeStr} 빈타석 예정`}
             </div>
-
-            {/* 2-1. 다음 연쇄/대기 예약 안내 뱃지 */}
-            {bay.next_res_start_time && (() => {
-              const cleanNext = String(bay.next_res_start_time).replace(/:/g, '');
-              const formattedNext = cleanNext.length >= 4 ? `${cleanNext.slice(0, 2)}:${cleanNext.slice(2, 4)}` : String(bay.next_res_start_time);
-              return (
-                <div style={{ fontSize: '11px', fontWeight: 700, color: isSelected ? '#fed7aa' : '#ea580c', letterSpacing: '-0.2px', paddingLeft: '2px' }}>
-                  대기예약 ({formattedNext})
-                </div>
-              );
-            })()}
 
             {/* 잔여시간 누적 프로그레스 게이지 바 */}
             <div style={{ width: '100%', height: '5px', backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#e4e4e7', borderRadius: '3px', overflow: 'hidden', marginTop: '2px' }}>

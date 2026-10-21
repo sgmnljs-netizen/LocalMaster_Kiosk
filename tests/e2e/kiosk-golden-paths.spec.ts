@@ -136,6 +136,11 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
         : anyCheckoutBtn;
     await checkoutBtn.click();
 
+    // 5-1. 2-Step 결제 확인 화면에서 [카드 결제 시작] 버튼 명시적 터치
+    const dailyStartPayBtn = page.locator('button:has-text("결제 시작")').first();
+    await expect(dailyStartPayBtn).toBeVisible({ timeout: 5000 });
+    await dailyStartPayBtn.click();
+
     // 6. 가상 결제 단말기 자동 승인 및 배정 완료 티켓/대시보드 복귀 확인
     await expect(
       page.locator('text=골프 타석 배정표')
@@ -273,6 +278,11 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     const buyBtn = page.locator('button:has-text("선택 및 결제")').first();
     await expect(buyBtn).toBeVisible({ timeout: 5000 });
     await buyBtn.click();
+
+    // 5-1. 2-Step 결제 확인 화면에서 [카드 결제 시작] 버튼 명시적 터치
+    const shopStartPayBtn = page.locator('button:has-text("결제 시작")').first();
+    await expect(shopStartPayBtn).toBeVisible({ timeout: 5000 });
+    await shopStartPayBtn.click();
 
     // 6. 가상 결제 단말기 자동 승인 및 완료 모달 표출 확인
     await expect(

@@ -85,6 +85,9 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const [formDefaultAuthMode, setFormDefaultAuthMode] = useState<KioskAuthModeKey>(
     settings.defaultAuthMode || 'SMART_TAG'
   );
+  const [formMinGapMinutes, setFormMinGapMinutes] = useState<number>(
+    settings.minGapMinutes ?? 60
+  );
   const [policyGuardMsg, setPolicyGuardMsg] = useState<string | null>(null);
 
   const [isPinging, setIsPinging] = useState(false);
@@ -138,6 +141,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
         ...(settings.authMethods || {}),
       });
       setFormDefaultAuthMode(settings.defaultAuthMode || 'SMART_TAG');
+      setFormMinGapMinutes(settings.minGapMinutes ?? 60);
       setPolicyGuardMsg(null);
       setPingStatus(null);
       setSaveSuccess(false);
@@ -273,6 +277,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       menuOverrides: formMenuOverrides,
       authMethods: formAuthMethods,
       defaultAuthMode: formDefaultAuthMode,
+      minGapMinutes: formMinGapMinutes,
     };
 
     try {
@@ -299,41 +304,50 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
 
   return (
     <div
+      data-testid="kiosk-settings-overlay"
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.85)',
+        backgroundColor: 'rgba(15, 23, 42, 0.55)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
         zIndex: 99999,
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'center',
-        padding: '24px',
+        paddingTop: '9vh',
+        paddingLeft: '24px',
+        paddingRight: '24px',
+        paddingBottom: '24px',
+        boxSizing: 'border-box',
       }}
     >
       <div
+        data-testid="kiosk-settings-modal-card"
         style={{
-          width: '660px',
+          width: '680px',
           maxWidth: '94vw',
-          background: 'linear-gradient(145deg, #1e222d 0%, #12151c 100%)',
-          borderRadius: '32px',
-          border: '1.5px solid rgba(255, 255, 255, 0.12)',
-          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(16, 185, 129, 0.1)',
+          maxHeight: '82vh',
+          background: '#ffffff',
+          borderRadius: '28px',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 24px 60px rgba(15, 23, 42, 0.18), 0 4px 16px rgba(15, 23, 42, 0.06)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          color: '#ffffff',
+          color: '#0f172a',
           fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
           boxSizing: 'border-box',
         }}
       >
-        {/* Header */}
+        {/* Header (Fixed Top) */}
         <div
+          data-testid="kiosk-settings-header"
           style={{
-            padding: '24px 28px',
-            background: 'rgba(255, 255, 255, 0.03)',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            flexShrink: 0,
+            padding: '22px 28px',
+            background: '#f8fafc',
+            borderBottom: '1px solid #e2e8f0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -343,10 +357,10 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
             <div
               style={{
                 padding: '10px',
-                background: 'rgba(16, 185, 129, 0.15)',
-                border: '1px solid rgba(16, 185, 129, 0.3)',
+                background: '#ecfdf5',
+                border: '1px solid #a7f3d0',
                 borderRadius: '14px',
-                color: '#34d399',
+                color: '#059669',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -355,39 +369,46 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
               <Settings size={22} />
             </div>
             <div>
-              <h2 style={{ fontSize: '20px', fontWeight: 800, margin: 0, letterSpacing: '-0.5px' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
                 무인 키오스크 시스템 설정
               </h2>
-              <p style={{ fontSize: '12px', color: '#9ca3af', margin: '2px 0 0 0' }}>
+              <p style={{ fontSize: '12.5px', color: '#64748b', margin: '3px 0 0 0', fontWeight: 500 }}>
                 단말기(TID), 기기별 노출 메뉴 및 회원인증 방식을 설정합니다.
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             style={{
-              background: 'rgba(255, 255, 255, 0.08)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
+              background: '#ffffff',
+              border: '1px solid #cbd5e1',
               borderRadius: '50%',
               width: '38px',
               height: '38px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#a1a1aa',
+              color: '#475569',
               cursor: 'pointer',
+              boxShadow: '0 1px 2px rgba(15, 23, 42, 0.05)',
             }}
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Tab Navigation */}
+        {/* Tab Navigation (Fixed Top - Never shifts vertically on tab change) */}
         <div
+          data-testid="kiosk-settings-tabbar"
           style={{
-            display: 'flex',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            background: 'rgba(0, 0, 0, 0.2)',
+            flexShrink: 0,
+            padding: '10px 20px',
+            background: '#f1f5f9',
+            borderBottom: '1px solid #e2e8f0',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: '8px',
           }}
         >
           {[
@@ -395,41 +416,61 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
             { key: 'menus', label: '메뉴 & 인증 설정', icon: <LayoutGrid size={15} /> },
             { key: 'connection', label: '서버 / 연결 설정', icon: <Wifi size={15} /> },
             { key: 'maintenance', label: '운영 모드 & PIN', icon: <Shield size={15} /> },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key as any)}
-              style={{
-                flex: 1,
-                padding: '14px 8px',
-                fontSize: '13px',
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                border: 'none',
-                borderBottom: activeTab === tab.key ? '2px solid #34d399' : '2px solid transparent',
-                background: activeTab === tab.key ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
-                color: activeTab === tab.key ? '#34d399' : '#9ca3af',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
+          ].map((tab) => {
+            const isTabActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                data-testid={`settings-tab-${tab.key}`}
+                onClick={() => setActiveTab(tab.key as any)}
+                style={{
+                  padding: '11px 8px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  borderRadius: '12px',
+                  border: isTabActive ? '1px solid #cbd5e1' : '1px solid transparent',
+                  background: isTabActive ? '#ffffff' : 'transparent',
+                  color: isTabActive ? '#059669' : '#64748b',
+                  boxShadow: isTabActive ? '0 2px 8px rgba(15, 23, 42, 0.06)' : 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Tab Body */}
-        <div style={{ padding: '24px 28px', minHeight: '320px', maxHeight: '68vh', overflowY: 'auto', boxSizing: 'border-box' }}>
+        {/* Tab Body (Scrollable / Expands Downwards Only) */}
+        <div
+          data-testid="kiosk-settings-body"
+          style={{
+            flex: 1,
+            padding: '24px 28px',
+            overflowY: 'auto',
+            background: '#ffffff',
+            boxSizing: 'border-box',
+          }}
+        >
           {/* Tab 1: Device */}
           {activeTab === 'device' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#e5e7eb', marginBottom: '6px' }}>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '18px',
+                }}
+              >
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                   현재 키오스크 기기 지정
                 </label>
                 <select
@@ -437,32 +478,39 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   onChange={(e) => handleDeviceSelect(e.target.value)}
                   style={{
                     width: '100%',
-                    background: '#262a36',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    borderRadius: '14px',
-                    padding: '12px 16px',
-                    color: '#ffffff',
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '12px',
+                    padding: '12px 14px',
+                    color: '#0f172a',
                     fontSize: '14px',
-                    fontWeight: 600,
+                    fontWeight: 700,
                     outline: 'none',
                     boxSizing: 'border-box',
                     cursor: 'pointer',
                   }}
                 >
                   {terminalList.map((opt) => (
-                    <option key={opt.device_id} value={opt.device_id} style={{ background: '#181a20', color: '#fff' }}>
+                    <option key={opt.device_id} value={opt.device_id} style={{ background: '#ffffff', color: '#0f172a' }}>
                       {opt.device_name} {opt.terminal_id ? `(TID: ${opt.terminal_id} / ${opt.van_provider})` : ''}
                     </option>
                   ))}
                 </select>
-                <p style={{ fontSize: '12px', color: '#9ca3af', margin: '6px 0 0 0' }}>
+                <p style={{ fontSize: '12px', color: '#047857', fontWeight: 600, margin: '8px 0 0 0' }}>
                   * 선택 시 파트너센터에 등록된 단말기 번호(TID)가 자동 바인딩됩니다.
                 </p>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#e5e7eb', marginBottom: '6px' }}>
+                <div
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '16px',
+                    padding: '16px',
+                  }}
+                >
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                     연동 단말기 번호 (TID)*
                   </label>
                   <input
@@ -472,20 +520,28 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                     placeholder="예: 88010003"
                     style={{
                       width: '100%',
-                      background: '#262a36',
-                      border: '1px solid rgba(255, 255, 255, 0.15)',
-                      borderRadius: '14px',
+                      background: '#ffffff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '12px',
                       padding: '12px 14px',
-                      color: '#ffffff',
+                      color: '#0f172a',
                       fontFamily: 'monospace',
                       fontSize: '14px',
+                      fontWeight: 700,
                       outline: 'none',
                       boxSizing: 'border-box',
                     }}
                   />
                 </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#e5e7eb', marginBottom: '6px' }}>
+                <div
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '16px',
+                    padding: '16px',
+                  }}
+                >
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                     VCAT 데몬 포트
                   </label>
                   <input
@@ -495,13 +551,14 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                     placeholder="예: 9099"
                     style={{
                       width: '100%',
-                      background: '#262a36',
-                      border: '1px solid rgba(255, 255, 255, 0.15)',
-                      borderRadius: '14px',
+                      background: '#ffffff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '12px',
                       padding: '12px 14px',
-                      color: '#ffffff',
+                      color: '#0f172a',
                       fontFamily: 'monospace',
                       fontSize: '14px',
+                      fontWeight: 700,
                       outline: 'none',
                       boxSizing: 'border-box',
                     }}
@@ -509,8 +566,15 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#e5e7eb', marginBottom: '6px' }}>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '16px',
+                }}
+              >
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                   결제 제공사 (VAN)
                 </label>
                 <select
@@ -518,50 +582,51 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   onChange={(e) => setFormProviderType(e.target.value)}
                   style={{
                     width: '100%',
-                    background: '#262a36',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    borderRadius: '14px',
-                    padding: '12px 16px',
-                    color: '#ffffff',
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '12px',
+                    padding: '12px 14px',
+                    color: '#0f172a',
                     fontSize: '14px',
-                    fontWeight: 600,
+                    fontWeight: 700,
                     outline: 'none',
                     boxSizing: 'border-box',
                     cursor: 'pointer',
                   }}
                 >
-                  <option value="KCP_VAN" style={{ background: '#181a20', color: '#fff' }}>💳 NHN KCP VAN (현장 단말기)</option>
-                  <option value="KOCES_VAN" style={{ background: '#181a20', color: '#fff' }}>💳 KOCES 코세스 VAN (현장 단말기)</option>
-                  <option value="NICE_VAN" style={{ background: '#181a20', color: '#fff' }}>💳 NICE 정보통신 VAN (현장 단말기)</option>
+                  <option value="KCP_VAN" style={{ background: '#ffffff', color: '#0f172a' }}>💳 NHN KCP VAN (현장 단말기)</option>
+                  <option value="KOCES_VAN" style={{ background: '#ffffff', color: '#0f172a' }}>💳 KOCES 코세스 VAN (현장 단말기)</option>
+                  <option value="NICE_VAN" style={{ background: '#ffffff', color: '#0f172a' }}>💳 NICE 정보통신 VAN (현장 단말기)</option>
                 </select>
               </div>
 
-              <div style={{ paddingTop: '6px' }}>
+              <div style={{ paddingTop: '2px' }}>
                 <button
                   type="button"
                   onClick={handlePingVcat}
                   disabled={isPinging}
                   style={{
                     width: '100%',
-                    padding: '12px',
-                    background: 'rgba(255, 255, 255, 0.07)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    padding: '13px',
+                    background: '#f8fafc',
+                    border: '1px solid #cbd5e1',
                     borderRadius: '14px',
-                    color: '#e5e7eb',
-                    fontSize: '13px',
-                    fontWeight: 700,
+                    color: '#1e293b',
+                    fontSize: '13.5px',
+                    fontWeight: 800,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '8px',
                     cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
                   }}
                 >
-                  {isPinging ? <Loader2 size={16} className="animate-spin" color="#34d399" /> : <Zap size={16} color="#fbbf24" />}
+                  {isPinging ? <Loader2 size={16} className="animate-spin" color="#059669" /> : <Zap size={16} color="#d97706" />}
                   단말기 통신 점검 (VCAT Ping)
                 </button>
                 {pingStatus && (
-                  <p style={{ fontSize: '12px', color: '#34d399', fontWeight: 700, textAlign: 'center', marginTop: '8px', margin: '8px 0 0 0' }}>
+                  <p style={{ fontSize: '12.5px', color: '#059669', fontWeight: 700, textAlign: 'center', margin: '8px 0 0 0' }}>
                     {pingStatus}
                   </p>
                 )}
@@ -571,35 +636,42 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
 
           {/* Tab 1.5: Menus & Auth Methods */}
           {activeTab === 'menus' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
               {policyGuardMsg && (
                 <div
                   style={{
-                    padding: '10px 14px',
-                    background: 'rgba(245, 158, 11, 0.14)',
-                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                    padding: '11px 14px',
+                    background: '#fffbeb',
+                    border: '1px solid #fde68a',
                     borderRadius: '12px',
-                    color: '#fbbf24',
-                    fontSize: '12px',
-                    fontWeight: 700,
+                    color: '#b45309',
+                    fontSize: '12.5px',
+                    fontWeight: 800,
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
                   }}
                 >
-                  <AlertTriangle size={16} />
+                  <AlertTriangle size={16} color="#d97706" />
                   <span>{policyGuardMsg}</span>
                 </div>
               )}
 
               {/* Section 1: Kiosk Menu On/Off */}
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '16px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                   <div>
-                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', margin: 0 }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a', margin: 0 }}>
                       메인 화면 메뉴 노출 제어 (기기별 개별 설정)
                     </h4>
-                    <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0 0' }}>
+                    <p style={{ fontSize: '11.5px', color: '#64748b', margin: '2px 0 0 0', fontWeight: 500 }}>
                       파트너센터 설정과 무관하게 현재 키오스크에서 특정 메뉴만 개별 ON/OFF 할 수 있습니다.
                     </p>
                   </div>
@@ -608,16 +680,16 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                     onClick={handleResetMenuOverrides}
                     disabled={Object.keys(formMenuOverrides).length === 0}
                     style={{
-                      padding: '6px 10px',
+                      padding: '7px 11px',
                       borderRadius: '10px',
-                      fontSize: '11px',
-                      fontWeight: 700,
+                      fontSize: '11.5px',
+                      fontWeight: 800,
                       display: 'flex',
                       alignItems: 'center',
                       gap: '5px',
-                      background: Object.keys(formMenuOverrides).length > 0 ? 'rgba(52, 211, 153, 0.12)' : 'rgba(255, 255, 255, 0.04)',
-                      border: Object.keys(formMenuOverrides).length > 0 ? '1px solid rgba(52, 211, 153, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
-                      color: Object.keys(formMenuOverrides).length > 0 ? '#34d399' : '#6b7280',
+                      background: Object.keys(formMenuOverrides).length > 0 ? '#ecfdf5' : '#f1f5f9',
+                      border: Object.keys(formMenuOverrides).length > 0 ? '1px solid #6ee7b7' : '1px solid #e2e8f0',
+                      color: Object.keys(formMenuOverrides).length > 0 ? '#047857' : '#94a3b8',
                       cursor: Object.keys(formMenuOverrides).length > 0 ? 'pointer' : 'not-allowed',
                     }}
                   >
@@ -639,20 +711,21 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                         style={{
                           padding: '10px 12px',
                           borderRadius: '12px',
-                          background: isEnabled ? 'rgba(16, 185, 129, 0.09)' : 'rgba(255, 255, 255, 0.03)',
-                          border: isEnabled ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
+                          background: isEnabled ? '#ffffff' : '#f1f5f9',
+                          border: isEnabled ? '1.5px solid #10b981' : '1px solid #cbd5e1',
+                          boxShadow: isEnabled ? '0 2px 6px rgba(16, 185, 129, 0.08)' : 'none',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
                           gap: '8px',
                           cursor: 'pointer',
-                          opacity: isEnabled ? 1 : 0.65,
+                          opacity: isEnabled ? 1 : 0.72,
                         }}
                       >
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span style={{ fontSize: '14px' }}>{menu.emoji}</span>
-                            <span style={{ fontSize: '13px', fontWeight: 800, color: isEnabled ? '#ffffff' : '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 800, color: isEnabled ? '#0f172a' : '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {menu.label}
                             </span>
                           </div>
@@ -660,11 +733,11 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                             <span
                               style={{
                                 fontSize: '10px',
-                                fontWeight: 700,
-                                padding: '1px 6px',
+                                fontWeight: 800,
+                                padding: '2px 6px',
                                 borderRadius: '6px',
-                                background: isOverridden ? 'rgba(245, 158, 11, 0.18)' : 'rgba(255, 255, 255, 0.07)',
-                                color: isOverridden ? '#fbbf24' : '#9ca3af',
+                                background: isOverridden ? '#fef3c7' : '#e2e8f0',
+                                color: isOverridden ? '#b45309' : '#475569',
                               }}
                             >
                               {isOverridden ? '기기 개별설정' : `파트너센터(${partnerDefault ? 'ON' : 'OFF'})`}
@@ -678,8 +751,8 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                             borderRadius: '999px',
                             fontSize: '11px',
                             fontWeight: 800,
-                            background: isEnabled ? '#10b981' : '#374151',
-                            color: isEnabled ? '#051b14' : '#9ca3af',
+                            background: isEnabled ? '#10b981' : '#cbd5e1',
+                            color: isEnabled ? '#ffffff' : '#475569',
                             flexShrink: 0,
                           }}
                         >
@@ -692,12 +765,19 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
               </div>
 
               {/* Section 2: Member Auth Methods On/Off & Default Tab */}
-              <div style={{ paddingTop: '14px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                <div style={{ marginBottom: '10px' }}>
-                  <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', margin: 0 }}>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '16px',
+                }}
+              >
+                <div style={{ marginBottom: '12px' }}>
+                  <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a', margin: 0 }}>
                     회원인증 수단 ON/OFF 및 기본 시작 탭
                   </h4>
-                  <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0 0' }}>
+                  <p style={{ fontSize: '11.5px', color: '#64748b', margin: '2px 0 0 0', fontWeight: 500 }}>
                     이 키오스크에 장착된 하드웨어(카메라, QR리더기, NFC)에 맞춰 인증 탭을 켜거나 끄고 첫 화면 기본 탭을 지정합니다.
                   </p>
                 </div>
@@ -714,17 +794,18 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                         style={{
                           padding: '10px 12px',
                           borderRadius: '12px',
-                          background: isEnabled ? 'rgba(59, 130, 246, 0.09)' : 'rgba(255, 255, 255, 0.03)',
+                          background: isEnabled ? '#ffffff' : '#f1f5f9',
                           border: isDefault
-                            ? '1.5px solid #34d399'
+                            ? '2px solid #059669'
                             : isEnabled
-                            ? '1px solid rgba(59, 130, 246, 0.35)'
-                            : '1px solid rgba(255, 255, 255, 0.08)',
+                            ? '1px solid #93c5fd'
+                            : '1px solid #cbd5e1',
+                          boxShadow: isEnabled ? '0 2px 6px rgba(15, 23, 42, 0.04)' : 'none',
                           display: 'flex',
                           flexDirection: 'column',
                           justifyContent: 'space-between',
                           gap: '8px',
-                          opacity: isEnabled ? 1 : 0.65,
+                          opacity: isEnabled ? 1 : 0.72,
                         }}
                       >
                         <div
@@ -740,11 +821,11 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span style={{ fontSize: '14px' }}>{item.emoji}</span>
-                              <span style={{ fontSize: '12.5px', fontWeight: 800, color: isEnabled ? '#ffffff' : '#9ca3af' }}>
+                              <span style={{ fontSize: '12.5px', fontWeight: 800, color: isEnabled ? '#0f172a' : '#64748b' }}>
                                 {item.label}
                               </span>
                             </div>
-                            <p style={{ fontSize: '10.5px', color: '#9ca3af', margin: '3px 0 0 0' }}>
+                            <p style={{ fontSize: '11px', color: '#64748b', margin: '3px 0 0 0', fontWeight: 500 }}>
                               {isServerDisabledFace ? '매장 정책상 안면인식 비활성화됨' : item.desc}
                             </p>
                           </div>
@@ -755,8 +836,8 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                               borderRadius: '999px',
                               fontSize: '11px',
                               fontWeight: 800,
-                              background: isEnabled ? '#3b82f6' : '#374151',
-                              color: '#ffffff',
+                              background: isEnabled ? '#2563eb' : '#cbd5e1',
+                              color: isEnabled ? '#ffffff' : '#475569',
                               flexShrink: 0,
                             }}
                           >
@@ -764,14 +845,14 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid #f1f5f9' }}>
                           <button
                             type="button"
                             disabled={!isEnabled}
                             onClick={() => isEnabled && setFormDefaultAuthMode(item.key)}
                             style={{
                               width: '100%',
-                              padding: '4px 8px',
+                              padding: '5px 8px',
                               borderRadius: '8px',
                               fontSize: '11px',
                               fontWeight: 800,
@@ -779,17 +860,64 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                               alignItems: 'center',
                               justifyContent: 'center',
                               gap: '4px',
-                              background: isDefault ? 'rgba(52, 211, 153, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                              border: isDefault ? '1px solid rgba(52, 211, 153, 0.5)' : '1px solid transparent',
-                              color: isDefault ? '#34d399' : isEnabled ? '#d1d5db' : '#6b7280',
+                              background: isDefault ? '#ecfdf5' : '#f8fafc',
+                              border: isDefault ? '1px solid #10b981' : '1px solid #e2e8f0',
+                              color: isDefault ? '#047857' : isEnabled ? '#475569' : '#94a3b8',
                               cursor: isEnabled ? 'pointer' : 'not-allowed',
                             }}
                           >
-                            <Star size={11} fill={isDefault ? '#34d399' : 'none'} />
+                            <Star size={11} fill={isDefault ? '#059669' : 'none'} color={isDefault ? '#059669' : 'currentColor'} />
                             {isDefault ? '현재 기본 시작 탭' : '기본 시작 탭으로 지정'}
                           </button>
                         </div>
                       </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section C: Intermediate Gap Threshold */}
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '16px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <div>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                      ⏱️ 중간 빈타석 표시 기준 시간 (대기시간 포함 자동 계산)
+                    </h4>
+                    <p style={{ fontSize: '11.5px', color: '#64748b', margin: '2px 0 0 0', fontWeight: 500 }}>
+                      예약과 다음 예약 사이의 빈 시간이 기준 시간 미만이면 뒤 예약과 하나로 묶어 통합 종료시각으로 표시합니다. (기기 표준값: 60분)
+                    </p>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '8px' }}>
+                  {[50, 60, 70, 80, 90, 120].map((minOpt) => {
+                    const isSelected = formMinGapMinutes === minOpt;
+                    return (
+                      <button
+                        key={minOpt}
+                        type="button"
+                        data-testid={`min-gap-opt-${minOpt}`}
+                        onClick={() => setFormMinGapMinutes(minOpt)}
+                        style={{
+                          padding: '10px 6px',
+                          borderRadius: '10px',
+                          fontSize: '13px',
+                          fontWeight: 800,
+                          background: isSelected ? '#10b981' : '#ffffff',
+                          border: isSelected ? '1.5px solid #059669' : '1px solid #cbd5e1',
+                          color: isSelected ? '#ffffff' : '#334155',
+                          boxShadow: isSelected ? '0 3px 8px rgba(16, 185, 129, 0.25)' : 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {minOpt}분{minOpt === 60 ? ' (표준)' : ''}
+                      </button>
                     );
                   })}
                 </div>
@@ -800,8 +928,15 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
           {/* Tab 2: Connection */}
           {activeTab === 'connection' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#e5e7eb', marginBottom: '6px' }}>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '16px',
+                }}
+              >
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                   로컬 서버 API 주소
                 </label>
                 <input
@@ -811,21 +946,29 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   placeholder="예: http://127.0.0.1:8000"
                   style={{
                     width: '100%',
-                    background: '#262a36',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    borderRadius: '14px',
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '12px',
                     padding: '12px 14px',
-                    color: '#ffffff',
+                    color: '#0f172a',
                     fontFamily: 'monospace',
                     fontSize: '14px',
+                    fontWeight: 700,
                     outline: 'none',
                     boxSizing: 'border-box',
                   }}
                 />
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#e5e7eb', marginBottom: '6px' }}>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '16px',
+                }}
+              >
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                   매장 코드 (Store Code)
                 </label>
                 <input
@@ -835,13 +978,14 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   placeholder="예: H01-SE-001"
                   style={{
                     width: '100%',
-                    background: '#262a36',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    borderRadius: '14px',
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '12px',
                     padding: '12px 14px',
-                    color: '#ffffff',
+                    color: '#0f172a',
                     fontFamily: 'monospace',
                     fontSize: '14px',
+                    fontWeight: 700,
                     textTransform: 'uppercase',
                     outline: 'none',
                     boxSizing: 'border-box',
@@ -849,8 +993,15 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 />
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#e5e7eb', marginBottom: '6px' }}>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '16px',
+                }}
+              >
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                   키오스크 기기 인증키
                 </label>
                 <input
@@ -860,13 +1011,14 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   placeholder="파트너센터 발급 기기 인증키"
                   style={{
                     width: '100%',
-                    background: '#262a36',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    borderRadius: '14px',
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '12px',
                     padding: '12px 14px',
-                    color: '#ffffff',
+                    color: '#0f172a',
                     fontFamily: 'monospace',
                     fontSize: '14px',
+                    fontWeight: 700,
                     outline: 'none',
                     boxSizing: 'border-box',
                   }}
@@ -877,24 +1029,24 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
 
           {/* Tab 3: Maintenance */}
           {activeTab === 'maintenance' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
               <div
                 style={{
                   padding: '18px 20px',
-                  background: 'rgba(255, 255, 255, 0.04)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '18px',
+                  background: formIsMaintenance ? '#fffbeb' : '#f8fafc',
+                  border: formIsMaintenance ? '1.5px solid #f59e0b' : '1px solid #e2e8f0',
+                  borderRadius: '16px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                 }}
               >
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', fontWeight: 700, color: '#ffffff', marginBottom: '4px' }}>
-                    <AlertTriangle size={16} color="#fbbf24" />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
+                    <AlertTriangle size={17} color="#d97706" />
                     임시 점검 모드 (화면 잠금)
                   </div>
-                  <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0 }}>
+                  <p style={{ fontSize: '12px', color: '#64748b', margin: 0, fontWeight: 500 }}>
                     활성화 시 일반 고객의 터치를 차단하고 점검 안내를 띄웁니다.
                   </p>
                 </div>
@@ -902,12 +1054,19 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   type="checkbox"
                   checked={formIsMaintenance}
                   onChange={(e) => setFormIsMaintenance(e.target.checked)}
-                  style={{ width: '22px', height: '22px', accentColor: '#10b981', cursor: 'pointer' }}
+                  style={{ width: '24px', height: '24px', accentColor: '#10b981', cursor: 'pointer' }}
                 />
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#e5e7eb', marginBottom: '6px' }}>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '18px',
+                }}
+              >
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                   관리자 마스터 PIN 번호 (4자리)
                 </label>
                 <input
@@ -918,20 +1077,21 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   placeholder="0000"
                   style={{
                     width: '100%',
-                    background: '#262a36',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    borderRadius: '14px',
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '12px',
                     padding: '12px 14px',
-                    color: '#ffffff',
+                    color: '#0f172a',
                     fontFamily: 'monospace',
-                    fontSize: '18px',
+                    fontSize: '20px',
+                    fontWeight: 800,
                     textAlign: 'center',
-                    letterSpacing: '6px',
+                    letterSpacing: '8px',
                     outline: 'none',
                     boxSizing: 'border-box',
                   }}
                 />
-                <p style={{ fontSize: '12px', color: '#9ca3af', margin: '6px 0 0 0' }}>
+                <p style={{ fontSize: '12px', color: '#64748b', margin: '8px 0 0 0', fontWeight: 500 }}>
                   * 좌측 상단 5회 탭 시 입력할 관리자 비밀번호입니다.
                 </p>
               </div>
@@ -939,12 +1099,14 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer (Fixed Bottom) */}
         <div
+          data-testid="kiosk-settings-footer"
           style={{
+            flexShrink: 0,
             padding: '18px 28px',
-            background: 'rgba(255, 255, 255, 0.03)',
-            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+            background: '#f8fafc',
+            borderTop: '1px solid #e2e8f0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -954,12 +1116,13 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
             type="button"
             onClick={onClose}
             style={{
-              padding: '12px 20px',
-              background: 'transparent',
-              border: 'none',
-              color: '#9ca3af',
-              fontSize: '13px',
-              fontWeight: 700,
+              padding: '12px 22px',
+              background: '#ffffff',
+              border: '1px solid #cbd5e1',
+              borderRadius: '12px',
+              color: '#475569',
+              fontSize: '13.5px',
+              fontWeight: 800,
               cursor: 'pointer',
             }}
           >

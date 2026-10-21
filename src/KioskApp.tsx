@@ -22,6 +22,7 @@ import { PurchaseCompleteModal, CompletedPurchaseInfo } from './components/Purch
 import { api, Member, Product, Bay } from './services/api';
 import type { CardApprovalResult } from './services/van/van_types';
 import { kioskVanClient } from './services/van/van_client';
+import { executeKioskAutoReversal } from './services/van/kioskPaymentReversal';
 import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
 import { KioskBottomBar } from './components/KioskBottomBar';
 import { useKioskSettings } from './stores/kioskSettings';
@@ -30,6 +31,7 @@ import { AdminPinModal } from './components/AdminPinModal';
 import { KioskSettingsModal } from './components/KioskSettingsModal';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 import { useKioskHardwareHeartbeat } from './hooks/useKioskHardwareHeartbeat';
+import { recordKioskBlackBox } from './utils/kioskBlackBox';
 
 type KioskStep = 
   | 'INTRO' 
@@ -175,6 +177,7 @@ export default function KioskApp() {
   const selectedBayNoRef = useRef<number | null>(null);
   const selectedBayNosRef = useRef<number[]>([]);
   const currentHoldResIdRef = useRef<string | null>(null);
+  const authReturnStepRef = useRef<'PRODUCT_SHOP' | 'PAYMENT' | null>(null);
   useEffect(() => { selectedBayNoRef.current = selectedBayNo; }, [selectedBayNo]);
   useEffect(() => { selectedBayNosRef.current = selectedBayNos; }, [selectedBayNos]);
   useEffect(() => { currentHoldResIdRef.current = currentHoldResId; }, [currentHoldResId]);
@@ -203,6 +206,8 @@ export default function KioskApp() {
     isVisible: boolean;
     maxMin: number;
     closeTime: string;
+    title?: string;
+    reason?: string;
     message?: string;
     noticeText?: string;
     onConfirm: () => void;
@@ -224,15 +229,18 @@ export default function KioskApp() {
     cardNoMasked?: string;
     terminalId?: string;
     authNo?: string;
+    installmentMonths?: number;
     vatYn?: string;
     checkinMode?: string;
     noticeMessage?: string;
   } | null>(null);
   const [completedPurchaseInfo, setCompletedPurchaseInfo] = useState<CompletedPurchaseInfo | null>(null);
+  const [inactivityCountdown, setInactivityCountdown] = useState<number | null>(null);
   const keepAuthAfterPurchaseRef = useRef(false);
 
   // 미들웨어 헬스체크 및 키오스크 설정 로드
   const [isMiddlewareOffline, setIsMiddlewareOffline] = useState(false);
+  const [isNetworkOffline, setIsNetworkOffline] = useState(false);
   const [isKioskActive, setIsKioskActive] = useState(true);
   const [inactiveNotice, setInactiveNotice] = useState<string>('');
   const [kioskMenuConfigs, setKioskMenuConfigs] = useState<any[]>([]);
@@ -250,11 +258,41 @@ export default function KioskApp() {
     const checkMw = async () => {
       if (isDemoEnvironment) {
         setIsMiddlewareOffline(false);
+        setIsNetworkOffline(false);
         return;
       }
-      const status = await api.getMiddlewareStatus();
+      const [status, isConnected] = await Promise.all([
+        api.getMiddlewareStatus(),
+        api.checkConnection(),
+      ]);
       setIsMiddlewareOffline(!status.online);
+      setIsNetworkOffline(!isConnected);
+      if (!isConnected) {
+        recordKioskBlackBox('API_ERROR', '[NETWORK_OFFLINE] checkConnection 통신 실패 감지');
+      }
     };
+
+    // F05: 재기동(Reboot) 시 잔여 선점 락 자동 해제 및 로컬 상태 정리
+    setSelectedBayNo(null);
+    setSelectedBayNos([]);
+    selectedBayNoRef.current = null;
+    selectedBayNosRef.current = [];
+    api.releaseOrphanedLocks().catch(() => {});
+
+    const handleWindowOnline = () => {
+      setIsNetworkOffline(false);
+      recordKioskBlackBox('HW_STATUS', '[NETWORK_ONLINE] 네트워크 통신 복구 감지');
+      api.writeKioskLog('NETWORK_ONLINE', '네트워크 통신 정상 복구 - 키오스크 정상 운영 재개').catch(() => {});
+      loadBays();
+    };
+    const handleWindowOffline = () => {
+      setIsNetworkOffline(true);
+      recordKioskBlackBox('API_ERROR', '[NETWORK_OFFLINE] 인터넷/서버 네트워크 단절 감지');
+      api.writeKioskLog('NETWORK_OFFLINE', '인터넷/공유기 네트워크 단절 감지 - Fail-Safe 잠금 전환').catch(() => {});
+    };
+
+    window.addEventListener('online', handleWindowOnline);
+    window.addEventListener('offline', handleWindowOffline);
 
     const loadSettings = async () => {
       try {
@@ -281,8 +319,20 @@ export default function KioskApp() {
       checkMw();
       loadSettings();
     }, 10000); // 10초 주기 Polling 및 어드민 설정 실시간 동기화
-    return () => clearInterval(interval);
+    return () => {
+      window.removeEventListener('online', handleWindowOnline);
+      window.removeEventListener('offline', handleWindowOffline);
+      clearInterval(interval);
+    };
   }, [settings.storeCode, settings.apiUrl]);
+
+  useEffect(() => {
+    recordKioskBlackBox(
+      'STEP',
+      `화면 이동: ${step}${purpose ? ` (목적: ${purpose})` : ''}`,
+      selectedBayNo ? { bayNo: selectedBayNo } : null
+    );
+  }, [step, purpose, selectedBayNo]);
 
   const showErrorModal = (
     message: string, 
@@ -292,9 +342,16 @@ export default function KioskApp() {
     onCloseCallback?: () => void,
     onRetryCallback?: () => void
   ) => {
+    const resolvedTitle = title || (isHw ? '타석 기기 가동 확인 필요' : '타석 배정 오류');
+    api.writeKioskLog(
+      isHw ? 'HW_START_ERROR' : 'UI_ERROR_MODAL',
+      `[${resolvedTitle}] ${message}${errorCode ? ` (Code: ${errorCode})` : ''}`,
+      authMember?.member_no
+    ).catch(() => {});
+
     setErrorModal({
       isVisible: true,
-      title: title || (isHw ? '타석 기기 가동 확인 필요' : '타석 배정 오류'),
+      title: resolvedTitle,
       message,
       errorCode,
       isHardwareFail: isHw,
@@ -419,6 +476,7 @@ export default function KioskApp() {
     }
     selectedBayNoRef.current = null;
     selectedBayNosRef.current = [];
+    authReturnStepRef.current = null;
     cancelFeedbackCountdown();
     setAuthMember(null);
     setSelectedBayNo(null);
@@ -430,6 +488,7 @@ export default function KioskApp() {
     setSelectedAssetId(null);
     setCompletedAllocationInfo(null);
     setCompletedPurchaseInfo(null);
+    setInactivityCountdown(null);
     setSelectedZoneIds([]);
     setIsAdminPinOpen(false);
     setIsSettingsOpen(false);
@@ -439,27 +498,78 @@ export default function KioskApp() {
     setPurpose(null);
     setErrorMasterCard(null);
     setClosingPromptModal(null);
+    setInactivityCountdown(null);
     setStep('INTRO');
   };
 
   const handleLogoutRef = useRef(handleLogout);
   handleLogoutRef.current = handleLogout;
   const isVanBusyRef = useRef(false);
+  const isAdminPinOpenRef = useRef(isAdminPinOpen);
+  isAdminPinOpenRef.current = isAdminPinOpen;
+  const isSettingsOpenRef = useRef(isSettingsOpen);
+  isSettingsOpenRef.current = isSettingsOpen;
+  const completedAllocationInfoRef = useRef(completedAllocationInfo);
+  completedAllocationInfoRef.current = completedAllocationInfo;
+  const completedPurchaseInfoRef = useRef(completedPurchaseInfo);
+  completedPurchaseInfoRef.current = completedPurchaseInfo;
 
-  // 2. 무인기기 비활성 세션 아웃 (40초간 조작이 없으면 자동으로 광고 인트로로 복귀, 결제/파3 화면은 90초 보호 + VAN 통신 중 보호)
+  // 2. 무인기기 비활성 세션 아웃 (40초간 조작이 없으면 자동으로 광고 인트로로 복귀, 결제/파3 화면은 90초 보호 + 만료 10초 전 사전 경고 카운트다운 + VAN 통신/관리자 모드/완료 모달 중 보호)
   useEffect(() => {
+    setInactivityCountdown(prev => (prev !== null ? null : prev));
     if (step === 'INTRO') return;
 
     const timeoutMs = (step === 'PAYMENT' || step === 'PAR3_ALLOCATION' || step === 'MEMBER_REGISTER') ? 90000 : 40000;
+    const warningLeadMs = 10000;
+    let warningTimeout = setTimeout(() => {}, 0);
     let sessionTimeout = setTimeout(() => {}, 0);
+    let countdownInterval: ReturnType<typeof setInterval> | null = null;
+
+    const clearAllTimers = () => {
+      clearTimeout(warningTimeout);
+      clearTimeout(sessionTimeout);
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }
+    };
 
     const resetTimer = () => {
-      clearTimeout(sessionTimeout);
-      sessionTimeout = setTimeout(() => {
-        if (isAllocatingRef.current || isVanBusyRef.current) {
+      clearAllTimers();
+      setInactivityCountdown(prev => (prev !== null ? null : prev));
+
+      warningTimeout = setTimeout(() => {
+        if (
+          isAllocatingRef.current ||
+          isVanBusyRef.current ||
+          isAdminPinOpenRef.current ||
+          isSettingsOpenRef.current ||
+          completedAllocationInfoRef.current !== null ||
+          completedPurchaseInfoRef.current !== null
+        ) {
           resetTimer();
           return;
         }
+        setInactivityCountdown(10);
+        countdownInterval = setInterval(() => {
+          setInactivityCountdown(prev => (prev !== null && prev > 1 ? prev - 1 : prev));
+        }, 1000);
+      }, Math.max(0, timeoutMs - warningLeadMs));
+
+      sessionTimeout = setTimeout(() => {
+        if (
+          isAllocatingRef.current ||
+          isVanBusyRef.current ||
+          isAdminPinOpenRef.current ||
+          isSettingsOpenRef.current ||
+          completedAllocationInfoRef.current !== null ||
+          completedPurchaseInfoRef.current !== null
+        ) {
+          resetTimer();
+          return;
+        }
+        clearAllTimers();
+        setInactivityCountdown(null);
         handleLogoutRef.current();
         showToast(lang === 'KO' ? '일정 시간 조작이 없어 광고 화면으로 복귀합니다.' : 'Session timeout. Returning to ad screen.', false);
       }, timeoutMs);
@@ -471,7 +581,7 @@ export default function KioskApp() {
     events.forEach(ev => window.addEventListener(ev, resetTimer));
     return () => {
       events.forEach(ev => window.removeEventListener(ev, resetTimer));
-      clearTimeout(sessionTimeout);
+      clearAllTimers();
     };
   }, [step, lang]);
 
@@ -520,6 +630,7 @@ export default function KioskApp() {
     }
     selectedBayNoRef.current = null;
     selectedBayNosRef.current = [];
+    authReturnStepRef.current = null;
     cancelFeedbackCountdown();
     setAuthMember(null);
     setSelectedBayNo(null);
@@ -531,6 +642,7 @@ export default function KioskApp() {
     setSelectedAssetId(null);
     setCompletedAllocationInfo(null);
     setCompletedPurchaseInfo(null);
+    setInactivityCountdown(null);
     setSelectedZoneIds([]);
     setIsAdminPinOpen(false);
     setIsSettingsOpen(false);
@@ -587,6 +699,7 @@ export default function KioskApp() {
     setSelectedAssetId(null);
     setCheckinResId(null);
     setClosingPromptModal(null);
+    authReturnStepRef.current = null;
     if (purpose === 'PURCHASE_PRODUCT') {
       setStep('PRODUCT_SHOP');
     } else if (purpose === 'EXTEND_LOCKER') {
@@ -619,6 +732,7 @@ export default function KioskApp() {
     }
     selectedBayNoRef.current = null;
     selectedBayNosRef.current = [];
+    authReturnStepRef.current = null;
     setAuthMember(null); // 메인화면 복귀 시 로그인 세션 즉시 파기 (공용 키오스크 보안 강화)
     setSelectedBayNo(null);
     setSelectedBayNos([]);
@@ -635,6 +749,7 @@ export default function KioskApp() {
     setSelectedAssetId(null);
     setCompletedAllocationInfo(null);
     setCompletedPurchaseInfo(null);
+    setInactivityCountdown(null);
     setSelectedZoneIds([]);
     setIsAdminPinOpen(false);
     setIsSettingsOpen(false);
@@ -645,9 +760,15 @@ export default function KioskApp() {
   // 직전 화면 단계로 복귀 핸들러
   const handleGoBack = () => {
     if (step === 'MEMBER_AUTH') {
-      // 🛡️ BUG-P05: 일일 타석권 상품 매대(PRODUCT_SHOP)에서 [👤 회원 인증하고 혜택 받기]를 눌러 진입한 경우,
-      // [이전 단계로] 터치 시 타석 선점 락을 해제하지 않고 상품 매대(PRODUCT_SHOP)로 안전하게 복귀
+      // 🛡️ BUG-P05: 일일 타석권 상품 매대(PRODUCT_SHOP) 또는 결제창(PAYMENT)에서 [👤 회원 인증하고 혜택 받기]를 눌러 진입한 경우,
+      // [이전 단계로] 터치 시 타석 선점 락을 해제하지 않고 원래 화면(PAYMENT 또는 PRODUCT_SHOP)으로 안전하게 복귀
       if (purpose === 'ALLOCATE_DAILY' && (selectedBayNo ?? selectedBayNoRef.current) !== null) {
+        if (authReturnStepRef.current === 'PAYMENT' && selectedProduct) {
+          authReturnStepRef.current = null;
+          setStep('PAYMENT');
+          return;
+        }
+        authReturnStepRef.current = null;
         setStep('PRODUCT_SHOP');
         return;
       }
@@ -781,7 +902,13 @@ export default function KioskApp() {
         }
       }
     } else if (purpose === 'ALLOCATE_DAILY') {
-      setStep('PRODUCT_SHOP');
+      if (authReturnStepRef.current === 'PAYMENT' && selectedProduct) {
+        authReturnStepRef.current = null;
+        setStep('PAYMENT');
+      } else {
+        authReturnStepRef.current = null;
+        setStep('PRODUCT_SHOP');
+      }
     } else if (purpose === 'PURCHASE_PRODUCT') {
       setStep('PRODUCT_SHOP');
     } else if (purpose === 'EXTEND_LOCKER') {
@@ -806,7 +933,7 @@ export default function KioskApp() {
     await api.writeKioskLog('REGISTER_SUCCESS', `즉석 회원가입 성공 (${member.member_name}, ${member.hp})`, member.member_no);
 
     // 🛡️ BUG-M12: 타석을 이미 선점한 뒤 [30초 신규 회원가입]을 진행한 경우, 선점 락을 해제하지 않고
-    // 가입된 회원 세션(등급 할인/포인트 적립)을 유지한 채 일일 타석권 결제(PRODUCT_SHOP)로 즉시 연결
+    // 가입된 회원 세션(등급 할인/포인트 적립)을 유지한 채 일일 타석권 결제(PAYMENT 또는 PRODUCT_SHOP)로 즉시 연결
     if (activeBayNo !== null && (purpose === 'ALLOCATE_MEMBERSHIP' || purpose === 'ALLOCATE_DAILY')) {
       setAuthMember(member);
       setPurpose('ALLOCATE_DAILY');
@@ -816,7 +943,13 @@ export default function KioskApp() {
           : `Welcome ${member.member_name}! Proceeding to Bay ${activeBayNo} Daily Pass.${warnSuffix}`,
         Boolean((member as any)?.face_enroll_warning)
       );
-      setStep('PRODUCT_SHOP');
+      if (authReturnStepRef.current === 'PAYMENT' && selectedProduct) {
+        authReturnStepRef.current = null;
+        setStep('PAYMENT');
+      } else {
+        authReturnStepRef.current = null;
+        setStep('PRODUCT_SHOP');
+      }
       return;
     }
 
@@ -834,6 +967,12 @@ export default function KioskApp() {
       return;
     }
 
+    const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
+    if (bayToRelease !== null) {
+      api.releaseBay(bayToRelease).catch(console.error);
+      setSelectedBayNo(null);
+      selectedBayNoRef.current = null;
+    }
     const baysToRelease = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
     if (baysToRelease.length > 0) {
       api.releaseBays(baysToRelease).catch(console.error);
@@ -959,11 +1098,9 @@ export default function KioskApp() {
           if (res.hardware_success === false) {
             showErrorModal(`${selectedBayNo}번 타석 배정은 완료되었으나, 센서/타석 기기 시작에 실패했습니다. 직원을 호출해 주세요.`, '타석 기기 가동 미완료', true);
           }
-          const updated = await api.getMember(authMember.member_no);
-          if (updated) setAuthMember(updated);
           
           const allocatedBayNo = selectedBayNo;
-          // 🔒 [1차 방어막] 배정 성공 직후 로그인 세션 및 선점 타석 상태 즉시 완전 파기 (뒷사람 무단 사용 및 유령 선택 원천 차단)
+          // 🔒 [1차 방어막] 배정 성공 직후 로그인 세션 및 선점 타석 상태 즉시 완전 파기 (뒷사람 무단 사용 및 유령 선택 원천 차단 - 0.001초 즉시 파기)
           setAuthMember(null);
           setSelectedAssetId(null);
           setSelectedBayNo(null);
@@ -980,21 +1117,37 @@ export default function KioskApp() {
             payAmount: 0
           });
         } else {
-          // ⏰ [영업 마감 단축 승낙 룰 (SSOT)]: 10분 이상 잔여 시 단축 배정 확인 모달 표출
+          // ⏰ [영업 마감 및 다음 예약 단축 승낙 룰 (SSOT)]: 10분 이상 잔여 시 단축 배정 확인 모달 표출
           if (res.closingPrompt && res.closingPrompt.max_available_min >= 10) {
             const prompt = res.closingPrompt;
+            const isNextResLimit = prompt.reason === 'NEXT_RESERVATION_LIMIT';
             setClosingPromptModal({
               isVisible: true,
               maxMin: prompt.max_available_min,
               closeTime: prompt.close_time,
+              reason: prompt.reason,
+              title: isNextResLimit ? '⚠️ 다음 예약 이용시간 안내' : '⏰ 영업 마감 이용시간 안내',
               message: prompt.message,
-              noticeText: '※ 이용권 1회가 정상 차감되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다.',
+              noticeText: isNextResLimit
+                ? '※ 이용권 1회가 정상 차감되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다. 원치 않으시면 취소 후 다른 타석을 선택해 주세요.'
+                : '※ 이용권 1회가 정상 차감되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다.',
               onConfirm: async () => {
                 setClosingPromptModal(null);
                 await handleAssetSelected(memberItemId, prompt.max_available_min, true);
               },
               onCancel: () => {
                 setClosingPromptModal(null);
+                if (isNextResLimit) {
+                  setSelectedAssetId(null);
+                  const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
+                  if (bayToRelease !== null) {
+                    api.releaseBay(bayToRelease).catch(console.error);
+                    setSelectedBayNo(null);
+                    selectedBayNoRef.current = null;
+                  }
+                  keepAuthAfterPurchaseRef.current = true;
+                  setStep('PRACTICE_SELECT');
+                }
               }
             });
             return;
@@ -1071,10 +1224,13 @@ export default function KioskApp() {
         if (!groupRes.success) {
           if (groupRes.closingPrompt && groupRes.closingPrompt.max_available_min >= 10) {
             const prompt = groupRes.closingPrompt;
+            const isNextResLimit = prompt.reason === 'NEXT_RESERVATION_LIMIT';
             setClosingPromptModal({
               isVisible: true,
               maxMin: prompt.max_available_min,
               closeTime: prompt.close_time,
+              reason: prompt.reason,
+              title: isNextResLimit ? '⚠️ 다음 예약 이용시간 안내' : '⏰ 영업 마감 이용시간 안내',
               message: prompt.message,
               noticeText: '※ 동반자 이용권이 정상 차감되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다.',
               onConfirm: async () => {
@@ -1115,8 +1271,27 @@ export default function KioskApp() {
         showErrorModal(err?.message || (lang === 'KO' ? '동반자 타석 배정 처리 중 오류가 발생했습니다.' : 'Group allocation failed.'));
       }
     } else {
-      // [BUG-09 FIX] 동반자 유료 결제 포함 시에도 결제 진입 전 영업 마감시간 사전 점검 수행
+      // [BUG-09 FIX] 동반자 유료 결제 포함 시에도 결제 진입 전 중간 빈타석 한도 및 영업 마감시간 사전 점검 수행
       if (!acceptClosingTruncate) {
+        for (const t of targets) {
+          const bObj = bays.find(b => b.bay_no === t.bayNo);
+          const tDur = t.durationMin ?? DEFAULT_SESSION_MIN;
+          if (
+            bObj &&
+            typeof bObj.max_assignable_min === 'number' &&
+            bObj.max_assignable_min > 0 &&
+            tDur > bObj.max_assignable_min
+          ) {
+            const limitMin = bObj.max_assignable_min;
+            const nextStartStr = bObj.next_limit_res_start_time || '예정';
+            showErrorModal(
+              `선택하신 ${t.bayNo}번 타석은 다음 예약(${nextStartStr})으로 인해 최대 [${limitMin}분]까지만 이용 가능합니다.\n\n동반자 일일권 초과 결제를 방지하기 위해 다른 타석을 선택해 주세요.`,
+              '이용 가능 시간 초과 안내'
+            );
+            return;
+          }
+        }
+
         const now = TimeMaster.getSyncedDate();
         const diffMin = TimeMaster.getMinutesUntilClose(storeCloseTime, now);
         const PAYMENT_BUFFER_MIN = 2;
@@ -1190,17 +1365,40 @@ export default function KioskApp() {
     }
 
     if (purpose === 'ALLOCATE_DAILY' && selectedBayNo) {
-      // ⏰ [일일권 결제 전 마감시간 사전 점검 (SSOT)]
+      // ⏰ [일일권 결제 전 중간 빈타석 한도 및 마감시간 사전 점검 (SSOT)]
       const now = TimeMaster.getSyncedDate();
       const diffMin = TimeMaster.getMinutesUntilClose(storeCloseTime, now);
 
       // [P0-07 & P2-2] 대기 타석 잔여시간(waitMin) 및 종료 시각 계산: TimeMaster SSOT 파서 사용
       const selectedBay = bays.find(b => b.bay_no === selectedBayNo);
+      const prodDuration =
+        prod.duration_min ??
+        prod.time_min ??
+        prod.access_rules?.duration_min ??
+        prod.rules_detail?.duration_min ??
+        DEFAULT_SESSION_MIN;
+
+      // 1) 중간 빈타석(또는 뒤 예약)으로 인한 최대 가용 시간(max_assignable_min) 초과 사전 차단 (일일권 초과 결제 원천 방어)
+      if (
+        selectedBay &&
+        typeof selectedBay.max_assignable_min === 'number' &&
+        selectedBay.max_assignable_min > 0 &&
+        prodDuration > selectedBay.max_assignable_min
+      ) {
+        const limitMin = selectedBay.max_assignable_min;
+        const nextStartStr = selectedBay.next_limit_res_start_time || '예정';
+        showErrorModal(
+          `선택하신 타석은 다음 예약(${nextStartStr})으로 인해 최대 [${limitMin}분]까지만 이용 가능합니다.\n\n${limitMin}분 이하 일일권을 선택하시거나, 다른 타석을 선택해 주세요.`,
+          '이용 가능 시간 초과 안내'
+        );
+        return;
+      }
+
       let waitMin = 0;
       let currentEndTime = '';
       if (selectedBay && (selectedBay.status === 'OCCUPIED' || selectedBay.status === 'PREPARE')) {
-        waitMin = TimeMaster.getRemainingMinutes(selectedBay.end_time, now, selectedBay.end_epoch_ms);
-        currentEndTime = TimeMaster.formatEndTime(selectedBay.end_time, selectedBay.end_epoch_ms);
+        waitMin = TimeMaster.getTotalWaitMinutes(selectedBay, now);
+        currentEndTime = TimeMaster.formatAvailableFromTime(selectedBay);
       }
 
       // 결제 소요 버퍼: 카드 투입 및 통신에 약 1~2분 소요되므로 백엔드 409 및 망취소 방어를 위해 2분 버퍼 확보
@@ -1208,7 +1406,6 @@ export default function KioskApp() {
       const prepareMin = 3;
       const totalOffsetMin = waitMin + prepareMin + PAYMENT_BUFFER_MIN;
       const maxUserMin = Math.max(0, diffMin - totalOffsetMin);
-      const prodDuration = prod.duration_min ?? prod.time_min ?? DEFAULT_SESSION_MIN;
 
       if (diffMin < prodDuration + waitMin + prepareMin) {
         if (maxUserMin < 10) {
@@ -1220,6 +1417,8 @@ export default function KioskApp() {
           isVisible: true,
           maxMin: maxUserMin,
           closeTime: storeCloseTime,
+          reason: 'STORE_CLOSING_LIMIT',
+          title: '⏰ 영업 마감 이용시간 안내',
           message: `영업 마감시각(${storeCloseTime})${waitNotice}까지 이용 가능한 시간은 [${maxUserMin}분]입니다.\n\n${maxUserMin}분으로 단축하여 결제 및 배정을 진행하시겠습니까?`,
           noticeText: '※ 결제 금액은 정상 요금으로 결제되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다.',
           onConfirm: () => {
@@ -1292,69 +1491,13 @@ export default function KioskApp() {
     payAmount: number,
     reason: string
   ): Promise<{ success: boolean; message: string }> => {
-    const apprStr = String((cardApproval as any)?.apprNo || cardApproval?.auth_code || '');
-    if (
-      !cardApproval ||
-      !apprStr ||
-      apprStr.startsWith('FREE-') ||
-      apprStr.startsWith('POINT-') ||
-      apprStr === 'MEMBERSHIP' ||
-      (cardApproval.amount !== undefined && cardApproval.amount <= 0) ||
-      payAmount <= 0
-    ) {
-      return { success: false, message: '0원 결제 또는 카드 승인 정보가 없어 자동 취소를 생략합니다.' };
-    }
-    try {
-      const orgDate =
-        (cardApproval.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) ||
-        TimeMaster.getKstYmd(new Date()).replace(/-/g, '');
-      const isTaxFree = selectedProduct?.vat_yn === 'N';
-      const cancelRes = await kioskVanClient.cancelCardPayment({
-        amount: payAmount || cardApproval.amount,
-        orgAuthCode: cardApproval.auth_code,
-        orgApprovedDate: orgDate,
-        terminalId: cardApproval.terminal_id,
-        vanTrNo: cardApproval.van_tr_no,
-        installmentMonths: cardApproval.installment_months || 0,
-        isTaxFree,
-        reason: `무인 키오스크 장애: ${reason}`
-      });
-      if (cancelRes.success) {
-        return { success: true, message: '전산 처리 오류로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 챙겨주세요.' };
-      } else {
-        // 🚨 [고아 결제(Ghost Charge) 긴급 DLQ 보고]
-        api.reportGhostCharge({
-          terminalId: cardApproval.terminal_id || 'KIOSK-01',
-          deviceType: 'KIOSK',
-          authNo: cardApproval.auth_code,
-          amount: payAmount || cardApproval.amount,
-          cardName: cardApproval.issuer_name || '',
-          cardNoMasked: cardApproval.card_no_masked || '',
-          vanTrNo: cardApproval.van_tr_no,
-          approvedAt: cardApproval.approved_at,
-          backendErrorReason: reason,
-          reversalErrorReason: cancelRes.error_message || '단말기 미응답/거절',
-        }).catch(err => console.error('[DLQ] report error:', err));
-
-        return { success: false, message: `카드 자동 취소 실패 (${cancelRes.error_message || '단말기 미응답'}). 관제 시스템에 긴급 접수되었습니다. 영수증을 지참하여 직원에게 문의하세요.` };
-      }
-    } catch (err: any) {
-      // 🚨 [고아 결제(Ghost Charge) 긴급 DLQ 보고]
-      api.reportGhostCharge({
-        terminalId: cardApproval.terminal_id || 'KIOSK-01',
-        deviceType: 'KIOSK',
-        authNo: cardApproval.auth_code,
-        amount: payAmount || cardApproval.amount,
-        cardName: cardApproval.issuer_name || '',
-        cardNoMasked: cardApproval.card_no_masked || '',
-        vanTrNo: cardApproval.van_tr_no,
-        approvedAt: cardApproval.approved_at,
-        backendErrorReason: reason,
-        reversalErrorReason: `망취소 통신 오류: ${err?.message || '단말기 연결 실패'}`,
-      }).catch(dlqErr => console.error('[DLQ] report error:', dlqErr));
-
-      return { success: false, message: `망취소 통신 오류: ${err?.message || '단말기 연결 실패'}. 관제 시스템에 긴급 접수되었습니다.` };
-    }
+    return executeKioskAutoReversal({
+      cardApproval,
+      payAmount,
+      reason,
+      isTaxFree: selectedProduct?.vat_yn === 'N',
+      terminalId: settings.terminalId,
+    });
   };
 
   const handlePaymentCompleted = async (payResult?: { 
@@ -1365,6 +1508,7 @@ export default function KioskApp() {
     discountAmount?: number;
     couponNo?: string;
     couponDiscount?: number;
+    installmentMonths?: number;
     cardApproval?: CardApprovalResult 
   }) => {
     if (isAllocatingRef.current) return;
@@ -1456,6 +1600,7 @@ export default function KioskApp() {
                 cardNoMasked: payResult?.cardApproval?.card_no_masked,
                 terminalId: payResult?.cardApproval?.terminal_id,
                 authNo: payResult?.apprNo || payResult?.cardApproval?.auth_code,
+                installmentMonths: payResult?.installmentMonths ?? payResult?.cardApproval?.installment_months ?? 0,
                 vatYn: selectedProduct.vat_yn || 'Y',
               });
             }
@@ -1541,6 +1686,7 @@ export default function KioskApp() {
             cardNoMasked: payResult?.cardApproval?.card_no_masked,
             terminalId: payResult?.cardApproval?.terminal_id,
             authNo: payResult?.apprNo || payResult?.cardApproval?.auth_code,
+            installmentMonths: payResult?.installmentMonths ?? payResult?.cardApproval?.installment_months ?? 0,
             vatYn: selectedProduct?.vat_yn || 'Y',
           });
         } catch (err: any) {
@@ -1621,6 +1767,7 @@ export default function KioskApp() {
             cardIssuer: payResult?.cardApproval?.issuer_name,
             cardNoMasked: payResult?.cardApproval?.card_no_masked,
             terminalId: payResult?.cardApproval?.terminal_id,
+            installmentMonths: payResult?.installmentMonths ?? payResult?.cardApproval?.installment_months ?? 0,
             vatYn: selectedProduct.vat_yn || 'Y',
           } as any);
           setAuthMember(null);
@@ -1697,6 +1844,7 @@ export default function KioskApp() {
             cardIssuer: payResult?.cardApproval?.issuer_name,
             cardNoMasked: payResult?.cardApproval?.card_no_masked,
             terminalId: payResult?.cardApproval?.terminal_id,
+            installmentMonths: payResult?.installmentMonths ?? payResult?.cardApproval?.installment_months ?? 0,
             vatYn: selectedProduct.vat_yn || 'Y',
           } as any);
           setAuthMember(null);
@@ -1852,7 +2000,7 @@ export default function KioskApp() {
             className="kiosk-terminal-area-luxury" 
             style={{ 
               height: step === 'MAIN_DASHBOARD' ? '1560px' : '1920px', 
-              padding: step === 'MAIN_DASHBOARD' ? '30px' : '30px 30px 130px 30px',
+              padding: (step === 'MAIN_DASHBOARD' || step === 'PAYMENT') ? '30px' : '30px 30px 130px 30px',
               transition: 'height 0.3s cubic-bezier(0.25, 1, 0.5, 1)'
             }}
           >
@@ -2302,7 +2450,7 @@ export default function KioskApp() {
               (completedAllocationInfo !== null && step !== 'TEEBOX_MAP') || 
               (feedbackCountdown !== null && step !== 'TEEBOX_MAP') ||
               (((purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY') && 
-               (step === 'MEMBER_AUTH' || step === 'MEMBER_REGISTER' || step === 'ASSET_SELECT' || step === 'PRODUCT_SHOP' || step === 'PAYMENT'))) && (
+               (step === 'MEMBER_AUTH' || step === 'MEMBER_REGISTER' || step === 'ASSET_SELECT' || step === 'PRODUCT_SHOP'))) && (
               <PracticeSelect
                 bays={bays}
                 lang={lang}
@@ -2380,23 +2528,31 @@ export default function KioskApp() {
                       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                         <button
                           type="button"
+                          data-testid="product-shop-member-auth-btn"
                           onClick={() => {
+                            authReturnStepRef.current = 'PRODUCT_SHOP';
                             setInitialAuthMode('SMART_TAG');
                             setStep('MEMBER_AUTH');
                           }}
                           style={{
-                            padding: '10px 18px',
-                            borderRadius: '12px',
-                            background: 'rgba(16, 185, 129, 0.95)',
+                            height: '48px',
+                            padding: '0 22px',
+                            borderRadius: '999px',
+                            background: '#1d1d1f',
                             color: '#ffffff',
-                            border: '1px solid rgba(255,255,255,0.4)',
+                            border: 'none',
                             fontSize: '15px',
                             fontWeight: 800,
                             cursor: 'pointer',
-                            boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.16)',
+                            transition: 'all 0.15s ease'
                           }}
                         >
-                          👤 회원 인증하고 등급할인·포인트 혜택 받기
+                          <UserCheck size={18} />
+                          <span>회원 인증 / 로그인</span>
                         </button>
                       </div>
                     )}
@@ -2407,6 +2563,8 @@ export default function KioskApp() {
                       discountRate={authMember?.discount_rate}
                       gradeName={authMember?.member_grade || authMember?.grade_cd}
                       purposeType={purpose as 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT'}
+                      maxAssignableMin={bays.find(b => b.bay_no === selectedBayNo)?.max_assignable_min}
+                      nextLimitResStartTime={bays.find(b => b.bay_no === selectedBayNo)?.next_limit_res_start_time}
                       onProductSelected={handleProductSelected}
                       onCancel={() => {
                         const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
@@ -2428,6 +2586,8 @@ export default function KioskApp() {
                   discountRate={authMember?.discount_rate}
                   gradeName={authMember?.member_grade || authMember?.grade_cd}
                   purposeType={purpose as 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT'}
+                  maxAssignableMin={bays.find(b => b.bay_no === selectedBayNo)?.max_assignable_min}
+                  nextLimitResStartTime={bays.find(b => b.bay_no === selectedBayNo)?.next_limit_res_start_time}
                   onProductSelected={handleProductSelected}
                   onCancel={handleGoHome}
                 />
@@ -2471,114 +2631,61 @@ export default function KioskApp() {
             )}
 
             {/* ----------------------------------------------------------------
-                📥 STEP 6: 가상 결제 단말기 & 영수증 인출 (타석 배정 시 모달 오버레이로 렌더링)
+                📥 STEP 6: 가상 결제 단말기 & 영수증 인출 (풀스크린 Bento Grid 레이아웃)
                 ---------------------------------------------------------------- */}
             {step === 'PAYMENT' && (
-              ((purpose as string) === 'ALLOCATE_DAILY' || (purpose as string) === 'ALLOCATE_MEMBERSHIP') ? (
-                <div style={{
-                  position: 'fixed',
-                  top: 0, left: 0, right: 0, bottom: 0,
-                  backgroundColor: 'rgba(15, 23, 42, 0.75)',
-                  backdropFilter: 'blur(10px)',
-                  zIndex: 9000,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '24px'
-                }}>
-                  <div style={{ maxWidth: '720px', width: '100%' }}>
-                    <PaymentTerminal
-                      productName={
-                        selectedProduct
-                          ? (selectedProduct.meta_data?.display_nm || selectedProduct.prod_nm)
-                          : ((purpose as string) === 'ALLOCATE_MEMBERSHIP'
-                            ? '회원권 타석 배정'
-                            : ((purpose as string) === 'CHECKIN_RESERVATION'
-                              ? '사전 예약 타석 체크인'
-                              : '라카 연장 대여'))
+              <PaymentTerminal
+                productName={
+                  selectedProduct
+                    ? (selectedProduct.meta_data?.display_nm || selectedProduct.prod_nm)
+                    : ((purpose as string) === 'ALLOCATE_MEMBERSHIP'
+                      ? '회원권 타석 배정'
+                      : ((purpose as string) === 'CHECKIN_RESERVATION'
+                        ? '사전 예약 타석 체크인'
+                        : '라카 연장 대여'))
+                }
+                amount={
+                  selectedProduct
+                    ? (selectedProduct.sale_price !== undefined && selectedProduct.sale_price !== null && selectedProduct.sale_price > 0
+                        ? selectedProduct.sale_price
+                        : selectedProduct.standard_price)
+                    : 0
+                }
+                assignedBayNo={selectedBayNo}
+                assignedBayNos={selectedBayNos}
+                assignedLockerNo={selectedLockerDisplayNo || selectedLockerNo}
+                resId={purpose === 'EXTEND_LOCKER' ? null : (currentHoldResId || checkinResId)}
+                memberName={authMember?.member_name}
+                memberNo={authMember?.member_no}
+                memberPoint={authMember?.total_point || 0}
+                discountRate={authMember?.discount_rate || 0}
+                discountableAmount={
+                  companionTargets.length > 0
+                    ? companionTargets
+                        .filter(t => Boolean(t.memberNo && authMember?.member_no && t.memberNo === authMember.member_no))
+                        .reduce((sum, t) => sum + (t.price || 0), 0)
+                    : undefined
+                }
+                productCategory={selectedProduct?.logic_type || (selectedProduct as any)?.category}
+                gradeName={authMember?.member_grade || authMember?.grade_cd}
+                proId={(selectedProduct as any)?.pro_id || null}
+                onVanBusyChange={(busy) => { isVanBusyRef.current = busy; }}
+                {...({
+                  vatYn: selectedProduct?.vat_yn,
+                  businessUnitType: selectedProduct?.business_unit_type,
+                  businessMerchantId: selectedProduct?.business_merchant_id,
+                } as any)}
+                onPaymentSuccess={handlePaymentCompleted}
+                onCancel={handlePaymentCancel}
+                onRequestMemberAuth={
+                  purpose === 'ALLOCATE_DAILY' && !authMember
+                    ? () => {
+                        authReturnStepRef.current = 'PAYMENT';
+                        setStep('MEMBER_AUTH');
                       }
-                      amount={
-                        selectedProduct
-                          ? (selectedProduct.sale_price !== undefined && selectedProduct.sale_price !== null && selectedProduct.sale_price > 0
-                              ? selectedProduct.sale_price
-                              : selectedProduct.standard_price)
-                          : 0
-                      }
-                      assignedBayNo={selectedBayNo}
-                      assignedBayNos={selectedBayNos}
-                      assignedLockerNo={selectedLockerDisplayNo || selectedLockerNo}
-                      resId={purpose === 'EXTEND_LOCKER' ? null : (currentHoldResId || checkinResId)}
-                      memberName={authMember?.member_name}
-                      memberNo={authMember?.member_no}
-                      memberPoint={authMember?.total_point || 0}
-                      discountRate={authMember?.discount_rate || 0}
-                      discountableAmount={
-                        companionTargets.length > 0
-                          ? companionTargets
-                              .filter(t => Boolean(t.memberNo && authMember?.member_no && t.memberNo === authMember.member_no))
-                              .reduce((sum, t) => sum + (t.price || 0), 0)
-                          : undefined
-                      }
-                      productCategory={selectedProduct?.logic_type || (selectedProduct as any)?.category}
-                      gradeName={authMember?.member_grade || authMember?.grade_cd}
-                      proId={(selectedProduct as any)?.pro_id || null}
-                      onVanBusyChange={(busy) => { isVanBusyRef.current = busy; }}
-                      {...({
-                        vatYn: selectedProduct?.vat_yn,
-                        businessUnitType: selectedProduct?.business_unit_type,
-                        businessMerchantId: selectedProduct?.business_merchant_id,
-                      } as any)}
-                      onPaymentSuccess={handlePaymentCompleted}
-                      onCancel={handlePaymentCancel}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <PaymentTerminal
-                  productName={
-                    selectedProduct
-                      ? (selectedProduct.meta_data?.display_nm || selectedProduct.prod_nm)
-                      : ((purpose as string) === 'ALLOCATE_MEMBERSHIP'
-                        ? '회원권 타석 배정'
-                        : ((purpose as string) === 'CHECKIN_RESERVATION'
-                          ? '사전 예약 타석 체크인'
-                          : '라카 연장 대여'))
-                  }
-                  amount={
-                    selectedProduct
-                      ? (selectedProduct.sale_price !== undefined && selectedProduct.sale_price !== null && selectedProduct.sale_price > 0
-                          ? selectedProduct.sale_price
-                          : selectedProduct.standard_price)
-                      : 0
-                  }
-                  assignedBayNo={selectedBayNo}
-                  assignedBayNos={selectedBayNos}
-                  assignedLockerNo={selectedLockerDisplayNo || selectedLockerNo}
-                  resId={purpose === 'EXTEND_LOCKER' ? null : (currentHoldResId || checkinResId)}
-                  memberName={authMember?.member_name}
-                  memberNo={authMember?.member_no}
-                  memberPoint={authMember?.total_point || 0}
-                  discountRate={authMember?.discount_rate || 0}
-                  discountableAmount={
-                    companionTargets.length > 0
-                      ? companionTargets
-                          .filter(t => Boolean(t.memberNo && authMember?.member_no && t.memberNo === authMember.member_no))
-                          .reduce((sum, t) => sum + (t.price || 0), 0)
-                      : undefined
-                  }
-                  productCategory={selectedProduct?.logic_type || (selectedProduct as any)?.category}
-                  gradeName={authMember?.member_grade || authMember?.grade_cd}
-                  proId={(selectedProduct as any)?.pro_id || null}
-                  onVanBusyChange={(busy) => { isVanBusyRef.current = busy; }}
-                  {...({
-                    vatYn: selectedProduct?.vat_yn,
-                    businessUnitType: selectedProduct?.business_unit_type,
-                    businessMerchantId: selectedProduct?.business_merchant_id,
-                  } as any)}
-                  onPaymentSuccess={handlePaymentCompleted}
-                  onCancel={handlePaymentCancel}
-                />
-              )
+                    : undefined
+                }
+              />
             )}
 
             {/* ----------------------------------------------------------------
@@ -2654,6 +2761,56 @@ export default function KioskApp() {
                         ? `배정에 사용할 유효 이용권을 터치해 주세요.`
                         : `Please select the pass to allocate.`}
                     </p>
+
+                    {(() => {
+                      const currentBayObj = bays.find(b => b.bay_no === selectedBayNo);
+                      if (currentBayObj && typeof currentBayObj.max_assignable_min === 'number' && currentBayObj.max_assignable_min > 0) {
+                        return (
+                          <div style={{
+                            background: '#fffbeb',
+                            border: '1.5px solid #fcd34d',
+                            borderRadius: '14px',
+                            padding: '12px 16px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '12px'
+                          }}>
+                            <span style={{ fontSize: '14px', fontWeight: 800, color: '#b45309', lineHeight: 1.4 }}>
+                              ⚠️ 선택하신 {currentBayObj.bay_no}번 타석은 다음 예약({currentBayObj.next_limit_res_start_time || '예정'}) 전까지 최대 [{currentBayObj.max_assignable_min}분] 이용 가능합니다.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedAssetId(null);
+                                const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
+                                if (bayToRelease !== null) {
+                                  api.releaseBay(bayToRelease).catch(console.error);
+                                  setSelectedBayNo(null);
+                                  selectedBayNoRef.current = null;
+                                }
+                                keepAuthAfterPurchaseRef.current = true;
+                                setStep('PRACTICE_SELECT');
+                              }}
+                              style={{
+                                padding: '8px 14px',
+                                borderRadius: '10px',
+                                background: '#d97706',
+                                color: '#ffffff',
+                                border: 'none',
+                                fontSize: '13px',
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              다른 타석 선택
+                            </button>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
 
                   {/* Asset List Grid */}
@@ -2676,6 +2833,9 @@ export default function KioskApp() {
                         if (logicType === 'COUNT' || logicType === 'COUPON') {
                           const cnt = asset.remain_cnt ?? asset.rem_count ?? 0;
                           if (cnt <= 0) return false;
+                        } else if (logicType === 'TIME') {
+                          const remMin = asset.remain_min ?? asset.remain_cnt ?? asset.rem_count ?? 0;
+                          if (remMin <= 0) return false;
                         } else if (asset.remain_days !== undefined && asset.remain_days !== null && asset.remain_days < 0) {
                           return false;
                         }
@@ -2760,14 +2920,28 @@ export default function KioskApp() {
                             : `Remaining: ${count} count(s) | Exp: ${expDateText}`;
                         }
 
-                        // 3. 기타(일일권 등)
+                        // 3. 분 단위 시간권 (백엔드 마스터 플래그 TIME 의존)
+                        if (logicType === 'TIME') {
+                          const remMin = asset.remain_min ?? asset.remain_cnt ?? asset.rem_count ?? 0;
+                          return lang === 'KO'
+                            ? `남은 시간: ${remMin}분 | 유효기간: ${expDateText}`
+                            : `Remaining: ${remMin} min(s) | Exp: ${expDateText}`;
+                        }
+
+                        // 4. 기타(일일권 등)
                         return lang === 'KO' 
                           ? `유효기간: ${expDateText}` 
                           : `Valid until: ${expDateText}`;
                       };
 
+                      const currentBayObj = bays.find(b => b.bay_no === selectedBayNo);
+                      const bayMaxMin = currentBayObj?.max_assignable_min;
+                      const nextResStartStr = currentBayObj?.next_limit_res_start_time || '예정';
+
                       return validAssets.map((asset) => {
                         const isAssetSelected = selectedAssetId === parseInt(asset.member_item_id);
+                        const assetDurationMin = asset.duration_min ?? DEFAULT_SESSION_MIN;
+                        const isExceedingBayLimit = typeof bayMaxMin === 'number' && bayMaxMin > 0 && assetDurationMin > bayMaxMin;
                         return (
                           <div
                             key={asset.member_item_id}
@@ -2825,6 +2999,22 @@ export default function KioskApp() {
                                 }}>
                                   {getAssetSubtext(asset)}
                                 </span>
+                                {isExceedingBayLimit && (
+                                  <span style={{
+                                    display: 'inline-block',
+                                    marginTop: '2px',
+                                    fontSize: '13px',
+                                    fontWeight: 800,
+                                    color: '#b45309',
+                                    background: '#fef3c7',
+                                    border: '1px solid #fcd34d',
+                                    padding: '3px 10px',
+                                    borderRadius: '8px',
+                                    width: 'fit-content'
+                                  }}>
+                                    ⚠️ 현재 타석 최대 {bayMaxMin}분만 가능 (다음예약 {nextResStartStr} · {assetDurationMin - bayMaxMin}분 단축 소멸)
+                                  </span>
+                                )}
                               </div>
                             </div>
 
@@ -2888,6 +3078,88 @@ export default function KioskApp() {
         data={errorModal}
         onClose={() => setErrorModal((prev) => ({ ...prev, isVisible: false }))}
       />
+
+      {/* 🛑 네트워크(인터넷/서버) 단절 대형 차단 모달 (Fail-Safe) */}
+      {isNetworkOffline && (
+        <div
+          data-testid="network-offline-modal"
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(10, 12, 16, 0.95)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            zIndex: 100000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '40px',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#1e293b',
+              borderRadius: '32px',
+              border: '2px solid #ef4444',
+              padding: '48px',
+              maxWidth: '640px',
+              textAlign: 'center',
+              boxShadow: '0 24px 60px rgba(239, 68, 68, 0.3)',
+              color: '#ffffff',
+            }}
+          >
+            <div style={{ fontSize: '64px', marginBottom: '16px' }}>📡</div>
+            <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#f87171', marginBottom: '12px' }}>
+              {lang === 'KO' ? '⚠️ 네트워크 연결 장애 - 카운터 문의' : '⚠️ Network Connection Error - Please Contact Counter'}
+            </h2>
+            <p style={{ fontSize: '18px', color: '#cbd5e1', lineHeight: '1.6', marginBottom: '32px' }}>
+              {lang === 'KO' ? (
+                <>
+                  서버 및 인터넷 통신 연결이 일시적으로 원활하지 않습니다.<br />
+                  이중 결제 및 예약 오류를 방지하기 위해 키오스크 운영을 일시 중단합니다.<br />
+                  <strong>카운터(안내 데스크) 직원에게 문의해 주세요.</strong>
+                </>
+              ) : (
+                <>
+                  Temporary network disconnection to the server.<br />
+                  Kiosk operations are paused to prevent double-billing.<br />
+                  <strong>Please contact the front desk staff.</strong>
+                </>
+              )}
+            </p>
+            <div style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
+              <button
+                data-testid="network-retry-button"
+                onClick={async () => {
+                  const conn = await api.checkConnection();
+                  setIsNetworkOffline(!conn);
+                  if (conn) {
+                    showToast(lang === 'KO' ? '네트워크 연결이 복구되었습니다.' : 'Connection restored.');
+                    recordKioskBlackBox('HW_STATUS', '[NETWORK_RETRY_SUCCESS] 연결 재시도 성공 - 정상 복귀');
+                    loadBays();
+                  } else {
+                    showToast(lang === 'KO' ? '아직 네트워크 연결이 복구되지 않았습니다.' : 'Network still unreachable.', false);
+                    recordKioskBlackBox('API_ERROR', '[NETWORK_RETRY_FAIL] 연결 재시도 실패');
+                  }
+                }}
+                style={{
+                  padding: '16px 36px',
+                  borderRadius: '20px',
+                  backgroundColor: '#3b82f6',
+                  color: '#ffffff',
+                  fontWeight: 900,
+                  fontSize: '18px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 8px 24px rgba(59, 130, 246, 0.4)',
+                }}
+              >
+                {lang === 'KO' ? '연결 재시도' : 'Retry'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 🛑 미들웨어 장애 점검 대형 차단 모달 (POS 표준) */}
       {isMiddlewareOffline && (
@@ -3058,7 +3330,7 @@ export default function KioskApp() {
               <Clock style={{ width: '40px', height: '40px' }} />
             </div>
             <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#111827', marginBottom: '16px', letterSpacing: '-0.5px' }}>
-              ⏰ 영업 마감 이용시간 안내
+              {closingPromptModal.title || (closingPromptModal.reason === 'NEXT_RESERVATION_LIMIT' ? '⚠️ 다음 예약 이용시간 안내' : '⏰ 영업 마감 이용시간 안내')}
             </h3>
             <p style={{ fontSize: '19px', color: '#374151', lineHeight: 1.6, marginBottom: '20px', fontWeight: 600, whiteSpace: 'pre-line' }}>
               {closingPromptModal.message || `영업 마감시각(${closingPromptModal.closeTime})까지 이용 가능한 시간은 [${closingPromptModal.maxMin}분]입니다.\n\n${closingPromptModal.maxMin}분으로 단축하여 배정을 진행하시겠습니까?`}
@@ -3080,7 +3352,7 @@ export default function KioskApp() {
                   fontSize: '18px', fontWeight: 800, border: 'none', cursor: 'pointer'
                 }}
               >
-                취소
+                {closingPromptModal.reason === 'NEXT_RESERVATION_LIMIT' ? '취소 (다른 타석 선택)' : '취소'}
               </button>
               <button
                 onClick={closingPromptModal.onConfirm}
@@ -3093,6 +3365,92 @@ export default function KioskApp() {
                 {closingPromptModal.maxMin}분으로 배정 진행
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ⏳ 무조작 초기화 10초 전 사전 카운트다운 알림창 (화면 어디든 터치 시 즉시 연장) */}
+      {inactivityCountdown !== null && step !== 'INTRO' && (
+        <div
+          data-testid="inactivity-warning-modal"
+          onClick={() => setInactivityCountdown(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99998,
+            background: 'rgba(0, 0, 0, 0.55)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            cursor: 'pointer'
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '36px',
+              padding: '44px 40px',
+              maxWidth: '480px',
+              width: '100%',
+              textAlign: 'center',
+              boxShadow: '0 32px 80px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.06)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '18px'
+            }}
+          >
+            <div
+              style={{
+                width: '84px',
+                height: '84px',
+                borderRadius: '50%',
+                background: '#f5f5f7',
+                border: '1px solid #e5e5ea',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '36px',
+                fontWeight: 950,
+                color: '#1d1d1f',
+                letterSpacing: '-1px'
+              }}
+            >
+              {inactivityCountdown}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <h3 style={{ fontSize: '26px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.6px' }}>
+                {lang === 'KO' ? `${inactivityCountdown}초 후 처음 화면으로 돌아갑니다` : `Returning to home in ${inactivityCountdown}s`}
+              </h3>
+              <p style={{ fontSize: '16px', color: '#86868b', fontWeight: 600, margin: 0, lineHeight: 1.5 }}>
+                {lang === 'KO'
+                  ? '계속 이용하시려면 화면을 터치해 주세요.'
+                  : 'Touch anywhere on the screen to continue.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="inactivity-continue-btn"
+              onClick={() => setInactivityCountdown(null)}
+              style={{
+                width: '100%',
+                height: '64px',
+                marginTop: '6px',
+                borderRadius: '999px',
+                background: '#1d1d1f',
+                color: '#ffffff',
+                fontSize: '19px',
+                fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)'
+              }}
+            >
+              {lang === 'KO' ? '계속 이용하기' : 'Continue Session'}
+            </button>
           </div>
         </div>
       )}

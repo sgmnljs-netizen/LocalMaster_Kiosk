@@ -25,6 +25,7 @@ export interface CompletedPurchaseInfo {
   cardIssuer?: string;
   cardNoMasked?: string;
   terminalId?: string;
+  installmentMonths?: number;
   vatYn?: string;
 }
 
@@ -122,7 +123,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
           issuer_name: purchaseInfo?.cardIssuer || '신용카드',
           card_no_masked: purchaseInfo?.cardNoMasked || '신용카드',
           approval_no: safeApprNo,
-          installment_months: 0,
+          installment_months: purchaseInfo?.installmentMonths ?? 0,
           terminal_id: purchaseInfo?.terminalId || settings.terminalId || api.getTerminalId(),
         } : undefined,
         barcode_text: `PUR-${safeApprNo}`,

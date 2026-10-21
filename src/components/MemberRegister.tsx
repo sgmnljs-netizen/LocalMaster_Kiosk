@@ -65,12 +65,57 @@ const DEFAULT_TERMS = {
 };
 
 // 🌐 Pure Utility Helper (컴포넌트 외부 배치하여 불필요한 재생성 방지)
-const formatPhoneNumber = (num: string) => {
+export const formatPhoneNumber = (num: string) => {
   const cleaned = num.replace(/[^0-9]/g, '');
   if (cleaned.length <= 3) return cleaned;
   if (cleaned.length <= 7) return `${cleaned.slice(0, 3)}-${cleaned.slice(3)}`;
   return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7, 11)}`;
 };
+
+export interface MemberRegisterFormInputs {
+  name: string;
+  hp: string;
+  privacyAgree: boolean;
+  lang?: 'KO' | 'EN' | 'ko' | 'en';
+}
+
+export interface MemberRegisterValidationResult {
+  isValid: boolean;
+  errorMsg?: string;
+  cleanName?: string;
+  cleanHp?: string;
+}
+
+export function validateMemberRegisterForm(inputs: MemberRegisterFormInputs): MemberRegisterValidationResult {
+  const lang = (inputs.lang || 'KO').toUpperCase();
+  const trimmedName = (inputs.name || '').trim();
+  if (!trimmedName) {
+    return { isValid: false, errorMsg: lang === 'EN' ? 'Please enter your name.' : '이름을 입력해 주세요.' };
+  }
+  if (trimmedName.length < 2) {
+    return { isValid: false, errorMsg: lang === 'EN' ? 'Please enter at least 2 characters for your name.' : '이름을 2글자 이상 정확히 입력해 주세요.' };
+  }
+  if (trimmedName.length > 50) {
+    return { isValid: false, errorMsg: lang === 'EN' ? 'Name must be 50 characters or less.' : '이름은 50자 이내로 입력해 주세요.' };
+  }
+  if (/[ㄱ-ㅎㅏ-ㅣ]/.test(trimmedName)) {
+    return { isValid: false, errorMsg: lang === 'EN' ? 'Please complete all Korean characters in your name.' : '이름에 완성되지 않은 자음/모음이 포함되어 있습니다. 정확히 입력해 주세요.' };
+  }
+  if (!/^[가-힣a-zA-Z\s]+$/.test(trimmedName)) {
+    return { isValid: false, errorMsg: lang === 'EN' ? 'Name can only contain Korean or English letters.' : '이름은 한글 또는 영문으로만 입력해 주세요.' };
+  }
+
+  const cleanHp = (inputs.hp || '').replace(/[^0-9]/g, '');
+  if (!/^01[016789]\d{7,8}$/.test(cleanHp)) {
+    return { isValid: false, errorMsg: lang === 'EN' ? 'Please enter a valid 10-11 digit mobile number.' : '올바른 휴대폰 번호(010 등 10~11자리)를 입력해 주세요.' };
+  }
+
+  if (!inputs.privacyAgree) {
+    return { isValid: false, errorMsg: lang === 'EN' ? 'Please agree to the required privacy policy.' : '필수 개인정보 수집 및 키오스크 이용약관에 동의해 주세요.' };
+  }
+
+  return { isValid: true, cleanName: trimmedName, cleanHp };
+}
 
 export const MemberRegister: React.FC<MemberRegisterProps> = ({ 
   onRegisterSuccess, 
@@ -229,7 +274,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
       const formattedHp = formatPhoneNumber(hp);
       const faceVectorId = faceReg ? `FACE_${hp.replace(/[^0-9]/g, '')}` : null;
       
-      const res = await api.registerMember(cleanName, formattedHp, '', faceReg, faceVectorId, gender, marketingAgree);
+      const res = await api.registerMember(cleanName, formattedHp, '', faceReg, faceVectorId, gender, marketingAgree, null, privacyAgree);
       if (res.success && res.member) {
         if (faceReg) {
           // 프런트포스 표준: 실물 안면 단말기 푸시 동기화 등록 (실제 카메라 캡처 이미지 전달)
@@ -278,38 +323,12 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
     setErrorMsg('');
     setActiveField(null);
 
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      setErrorMsg(lang === 'EN' ? 'Please enter your name.' : '이름을 입력해 주세요.');
+    const validation = validateMemberRegisterForm({ name, hp, privacyAgree, lang });
+    if (!validation.isValid) {
+      setErrorMsg(validation.errorMsg || '');
       return;
     }
-    if (trimmedName.length < 2) {
-      setErrorMsg(lang === 'EN' ? 'Please enter at least 2 characters for your name.' : '이름을 2글자 이상 정확히 입력해 주세요.');
-      return;
-    }
-    if (trimmedName.length > 50) {
-      setErrorMsg(lang === 'EN' ? 'Name must be 50 characters or less.' : '이름은 50자 이내로 입력해 주세요.');
-      return;
-    }
-    if (/[ㄱ-ㅎㅏ-ㅣ]/.test(trimmedName)) {
-      setErrorMsg(lang === 'EN' ? 'Please complete all Korean characters in your name.' : '이름에 완성되지 않은 자음/모음이 포함되어 있습니다. 정확히 입력해 주세요.');
-      return;
-    }
-    if (!/^[가-힣a-zA-Z\s]+$/.test(trimmedName)) {
-      setErrorMsg(lang === 'EN' ? 'Name can only contain Korean or English letters.' : '이름은 한글 또는 영문으로만 입력해 주세요.');
-      return;
-    }
-
-    const cleanHp = hp.replace(/[^0-9]/g, '');
-    if (!/^01[016789]\d{7,8}$/.test(cleanHp)) {
-      setErrorMsg(lang === 'EN' ? 'Please enter a valid 10-11 digit mobile number.' : '올바른 휴대폰 번호(010 등 10~11자리)를 입력해 주세요.');
-      return;
-    }
-
-    if (!privacyAgree) {
-      setErrorMsg(lang === 'EN' ? 'Please agree to the required privacy policy.' : '필수 개인정보 수집 및 키오스크 이용약관에 동의해 주세요.');
-      return;
-    }
+    const cleanHp = validation.cleanHp!;
 
     // 🛡️ BUG-M08 & BUG-R01: 휴대폰 번호 중복/휴면 가입 여부를 1단계에서 선제 검증
     isSubmittingRef.current = true;

@@ -22,6 +22,7 @@ interface AllocationCompleteModalProps {
   cardNoMasked?: string;
   terminalId?: string;
   authNo?: string;
+  installmentMonths?: number;
   checkinMode?: string;
   noticeMessage?: string;
   lang?: 'KO' | 'EN';
@@ -45,6 +46,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   cardNoMasked,
   terminalId,
   authNo,
+  installmentMonths = 0,
   checkinMode,
   noticeMessage,
   lang = 'KO',
@@ -146,7 +148,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
           issuer_name: cardIssuer || '신용카드',
           card_no_masked: cardNoMasked || '신용카드',
           approval_no: authNo || resId || '00000000',
-          installment_months: 0,
+          installment_months: installmentMonths ?? 0,
           terminal_id: terminalId || settings.terminalId || api.getTerminalId(),
         } : undefined,
         barcode_text: `BAY-${bayNo}-${startStr.replace(':', '')}`,
@@ -158,7 +160,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
     } finally {
       setIsPrinting(false);
     }
-  }, [bayNo, oldBayNo, durationMin, startTime, endTime, resId, memberName, payAmount, originalAmount, discountAmount, usedPoints, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, checkinMode, lang, storeName, storeInfo, settings.terminalId]);
+  }, [bayNo, oldBayNo, durationMin, startTime, endTime, resId, memberName, payAmount, originalAmount, discountAmount, usedPoints, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, installmentMonths, checkinMode, lang, storeName, storeInfo, settings.terminalId]);
 
   // 마운트 시 자동 인쇄 (단 1회 보장)
   useEffect(() => {

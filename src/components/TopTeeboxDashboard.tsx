@@ -108,7 +108,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
       subTextColor = bay.is_paused ? '#d97706' : '#1d1d1f';
       glow = 'inset 0 1.5px 3px rgba(0, 0, 0, 0.06)';
       
-      const remMin = TimeMaster.getRemainingMinutes(bay);
+      const remMin = TimeMaster.getTotalWaitMinutes(bay);
       label = bay.is_paused ? `⏸${remMin}m` : `${remMin}m`;
     } else if (isUnderMaintenance) {
       // 🔴 애플 브릭 레드

@@ -21,6 +21,9 @@ interface Par3AllocationProps {
 type PaymentState = 'IDLE' | 'INSERT_WAIT' | 'READING' | 'DISPATCHING' | 'DONE';
 type ModalState = 'NONE' | 'MEMBER_AUTH_MODAL' | 'ADD_MEMBER_PHONE' | 'ADD_GUEST_PHONE' | 'TICKET_SELECT';
 
+const MIN_INSTALLMENT_AMOUNT = 50000;
+const INSTALLMENT_MONTH_OPTIONS = [0, 2, 3, 4, 5, 6, 12] as const;
+
 interface PlayerSlot {
   id: string; // unique key
   member_no?: string;
@@ -65,6 +68,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   const [paymentState, setPaymentState] = useState<PaymentState>('IDLE');
   const [createdReceipt, setCreatedReceipt] = useState<ReceiptData | null>(null);
   const [authProgress, setAuthProgress] = useState(0);
+  const [installmentMonths, setInstallmentMonths] = useState<number>(0);
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -540,6 +544,14 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     return discSum;
   };
 
+  const currentTotalAmount = calculateTotalAmount();
+
+  useEffect(() => {
+    if (currentTotalAmount < MIN_INSTALLMENT_AMOUNT && installmentMonths !== 0) {
+      setInstallmentMonths(0);
+    }
+  }, [currentTotalAmount, installmentMonths]);
+
   // 파3 예약 최종 확정 및 결제창 전환
   const handleConfirmBooking = async () => {
     if (isSubmittingRef.current || loading) return;
@@ -653,11 +665,14 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         routedTerminalId = routeRes?.terminal_id || undefined;
       }
 
+      const effectiveInstallmentMonths = amount >= MIN_INSTALLMENT_AMOUNT ? installmentMonths : 0;
+
       const approval = await kioskVanClient.requestCardPayment(
         {
           amount,
           vat,
           isTaxFree,
+          installmentMonths: effectiveInstallmentMonths,
           terminalId: routedTerminalId,
           timeoutSeconds: 30,
         } as any,
@@ -819,6 +834,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           tradeDate: formattedDate,
           apprNo: validApprNo,
           cardNo: cardMasked,
+          cardIssuer: vanResult?.issuer_name,
+          terminalId: vanResult?.terminal_id,
+          installmentMonths: vanResult?.installment_months ?? 0,
           prodNm: `Par3 ${selectedZoneName} 코스 [${selectedSlot?.time}]`,
           partySize: players.length,
           totalAmount: amount,
@@ -1304,72 +1322,126 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       {/* 최종 요금 및 결제 패널 */}
       <div 
         style={{
-          padding: '24px 40px',
+          padding: '20px 36px',
           borderRadius: '24px',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
+          flexDirection: 'column',
+          gap: '14px',
           background: '#ffffff',
           border: '1px solid #d2d2d7',
           boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
-          height: '130px',
+          minHeight: '130px',
           flexShrink: 0,
           boxSizing: 'border-box'
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: '0' }}>
-          <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 800, letterSpacing: '0.5px' }}>최종 선택 내역</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', whiteSpace: 'nowrap' }}>
-              {selectedSlot ? `${selectedSlot.time} 티오프` : '시간대 미선택'} <span style={{ color: '#d2d2d7', margin: '0 6px' }}>|</span> 총 {players.length}명
-            </span>
-            {selectedSlot && players.length === 0 && (
-              <span style={{ fontSize: '14px', color: '#ff3b30', background: '#fff2f2', padding: '4px 10px', borderRadius: '8px', fontWeight: 800, whiteSpace: 'nowrap' }}>
-                안내: 이용자 추가 필요
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-            <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>
-              총 결제 금액{calculateTotalGradeDiscount() > 0 ? ` (회원할인 -₩${calculateTotalGradeDiscount().toLocaleString()})` : ''}
-            </span>
-            <span style={{ 
-              fontSize: '32px', 
-              fontWeight: 900, 
-              color: '#2e7559',
-              letterSpacing: '-0.5px'
-            }}>
-              ₩{calculateTotalAmount().toLocaleString()}
-            </span>
-          </div>
-
-          <button
-            onClick={handleConfirmBooking}
-            disabled={loading || !selectedSlot || players.length === 0}
+        {currentTotalAmount >= MIN_INSTALLMENT_AMOUNT && (
+          <div
+            data-testid="par3-installment-selector-panel"
             style={{
-              height: '68px',
-              fontSize: '20px',
-              fontWeight: 900,
-              padding: '0 48px',
-              borderRadius: '16px',
               display: 'flex',
               alignItems: 'center',
-              gap: '10px',
-              background: loading || !selectedSlot || players.length === 0 ? '#d2d2d7' : '#2e7559',
-              color: '#ffffff',
-              border: 'none',
-              cursor: loading || !selectedSlot || players.length === 0 ? 'not-allowed' : 'pointer',
-              boxShadow: loading || !selectedSlot || players.length === 0 ? 'none' : '0 8px 24px rgba(46, 117, 89, 0.18)',
-              transition: 'all 0.15s ease',
-              flexShrink: 0
+              justifyContent: 'space-between',
+              gap: '12px',
+              padding: '10px 16px',
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
+              borderRadius: '14px',
+              flexWrap: 'wrap'
             }}
           >
-            <CreditCard size={24} />
-            {loading ? '예약 중...' : '선점 및 결제'}
-          </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '14px', fontWeight: 900, color: '#1e293b' }}>
+                💳 할부 개월 선택
+              </span>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#2e7559', background: '#ecfdf5', padding: '2px 8px', borderRadius: '999px' }}>
+                5만원 이상 할부 가능
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              {INSTALLMENT_MONTH_OPTIONS.map((months) => {
+                const isSelected = installmentMonths === months;
+                return (
+                  <button
+                    key={months}
+                    type="button"
+                    data-testid={`par3-installment-option-${months}`}
+                    onClick={() => setInstallmentMonths(months)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '10px',
+                      border: isSelected ? '2px solid #2e7559' : '1px solid #cbd5e1',
+                      background: isSelected ? '#2e7559' : '#ffffff',
+                      color: isSelected ? '#ffffff' : '#334155',
+                      fontSize: '13px',
+                      fontWeight: isSelected ? 900 : 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {months === 0 ? '일시불' : `${months}개월`}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: '0' }}>
+            <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 800, letterSpacing: '0.5px' }}>최종 선택 내역</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', whiteSpace: 'nowrap' }}>
+                {selectedSlot ? `${selectedSlot.time} 티오프` : '시간대 미선택'} <span style={{ color: '#d2d2d7', margin: '0 6px' }}>|</span> 총 {players.length}명
+              </span>
+              {selectedSlot && players.length === 0 && (
+                <span style={{ fontSize: '14px', color: '#ff3b30', background: '#fff2f2', padding: '4px 10px', borderRadius: '8px', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                  안내: 이용자 추가 필요
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+              <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>
+                총 결제 금액{calculateTotalGradeDiscount() > 0 ? ` (회원할인 -₩${calculateTotalGradeDiscount().toLocaleString()})` : ''}
+                {currentTotalAmount >= MIN_INSTALLMENT_AMOUNT ? ` · ${installmentMonths === 0 ? '일시불' : `${installmentMonths}개월 할부`}` : ''}
+              </span>
+              <span style={{ 
+                fontSize: '32px', 
+                fontWeight: 900, 
+                color: '#2e7559',
+                letterSpacing: '-0.5px'
+              }}>
+                ₩{currentTotalAmount.toLocaleString()}
+              </span>
+            </div>
+
+            <button
+              onClick={handleConfirmBooking}
+              disabled={loading || !selectedSlot || players.length === 0}
+              style={{
+                height: '68px',
+                fontSize: '20px',
+                fontWeight: 900,
+                padding: '0 48px',
+                borderRadius: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                background: loading || !selectedSlot || players.length === 0 ? '#d2d2d7' : '#2e7559',
+                color: '#ffffff',
+                border: 'none',
+                cursor: loading || !selectedSlot || players.length === 0 ? 'not-allowed' : 'pointer',
+                boxShadow: loading || !selectedSlot || players.length === 0 ? 'none' : '0 8px 24px rgba(46, 117, 89, 0.18)',
+                transition: 'all 0.15s ease',
+                flexShrink: 0
+              }}
+            >
+              <CreditCard size={24} />
+              {loading ? '예약 중...' : '선점 및 결제'}
+            </button>
+          </div>
         </div>
       </div>
 

@@ -29,6 +29,8 @@ export interface KioskSettings {
   authMethods?: KioskAuthMethodsConfig;
   /** 기기별 회원인증 진입 시 기본 시작 탭 */
   defaultAuthMode?: KioskAuthModeKey;
+  /** 중간 빈타석 표시 기준 시간(분): 대기시간 제외 순수 이용 가능 시간 기준 (표준 기본값: 60분) */
+  minGapMinutes?: number;
 }
 
 export const DEFAULT_AUTH_METHODS: KioskAuthMethodsConfig = {
@@ -127,6 +129,7 @@ export const DEFAULT_KIOSK_SETTINGS: KioskSettings = {
   menuOverrides: {},
   authMethods: { ...DEFAULT_AUTH_METHODS },
   defaultAuthMode: 'SMART_TAG',
+  minGapMinutes: 60,
 };
 
 const STORAGE_KEY = 'lm-kiosk-settings';
@@ -165,6 +168,9 @@ export function getKioskSettings(): KioskSettings {
         ...(parsed.authMethods && typeof parsed.authMethods === 'object' ? parsed.authMethods : {}),
       },
       defaultAuthMode: parsed.defaultAuthMode || DEFAULT_KIOSK_SETTINGS.defaultAuthMode,
+      minGapMinutes: typeof parsed.minGapMinutes === 'number' && parsed.minGapMinutes >= 10
+        ? parsed.minGapMinutes
+        : 60,
     };
   } catch {
     return DEFAULT_KIOSK_SETTINGS;

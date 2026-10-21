@@ -2,7 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import KioskApp from './KioskApp'
 import './styles/kiosk_design_system.css'
-import { generateDefault50Bays, DEFAULT_50_ZONES } from './services/api'
+import { generateDefault50Bays, DEFAULT_50_ZONES, api } from './services/api'
 
 // [Demo Showcase Environment Init]
 function initDemoEnvironment() {
@@ -52,6 +52,29 @@ window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '-' || e.key === '+' || e.key === '0')) {
     e.preventDefault();
   }
+});
+
+// [전역 크래시 블랙박스 가드] 미처리 런타임 예외 발생 시 직전 동선과 함께 백엔드로 즉시 보고
+window.addEventListener('error', (event) => {
+  const errMsg = event.message || 'Unhandled window error';
+  const stack = event.error instanceof Error ? event.error.stack : `${event.filename || ''}:${event.lineno || 0}`;
+  api.reportKioskErrorToServer({
+    action: 'RUNTIME_CRASH',
+    detail: errMsg,
+    errorType: 'KIOSK_CLIENT_ERROR',
+    stack,
+  });
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason instanceof Error ? event.reason.message : String(event.reason || 'Unhandled Promise Rejection');
+  const stack = event.reason instanceof Error ? event.reason.stack : undefined;
+  api.reportKioskErrorToServer({
+    action: 'RUNTIME_CRASH',
+    detail: `Promise Rejection: ${reason}`,
+    errorType: 'KIOSK_CLIENT_ERROR',
+    stack,
+  });
 });
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

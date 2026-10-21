@@ -16,12 +16,35 @@ if (process.platform === 'win32') {
 const userDataDir = process.platform === 'win32'
   ? 'C:\\GolfOS\\kiosk_electron_profile'
   : path.join(os.homedir(), '.golfos', 'kiosk_electron_profile');
+const kioskLogDir = process.platform === 'win32'
+  ? 'C:\\GolfOS\\logs'
+  : path.join(os.homedir(), '.golfos', 'logs');
+const kioskLogFile = path.join(kioskLogDir, 'kiosk_runtime.log');
+const MAX_LOG_FILE_BYTES = 5 * 1024 * 1024; // 5MB 자동 로테이션
+
 try {
   fs.mkdirSync(userDataDir, { recursive: true });
+  fs.mkdirSync(kioskLogDir, { recursive: true });
   app.setPath('userData', userDataDir);
 } catch (_) {
   // 기본 경로 폴백
 }
+
+function appendKioskRuntimeLog(levelTag, message) {
+  const line = `[${new Date().toISOString()}] [${levelTag}] ${String(message || '').replace(/\r?\n/g, ' ')}\n`;
+  fs.promises
+    .stat(kioskLogFile)
+    .then((st) => {
+      if (st.size > MAX_LOG_FILE_BYTES) {
+        return fs.promises.rename(kioskLogFile, `${kioskLogFile}.1`).catch(() => {});
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      fs.promises.appendFile(kioskLogFile, line, 'utf8').catch(() => {});
+    });
+}
+
 
 // 3. 무인 터치스크린 오작동 방지: 스와이프 뒤로가기, 핀치 줌, 자동 번역, 음성 안내 차단 해제
 app.commandLine.appendSwitch('overscroll-history-navigation', '0');
@@ -256,6 +279,21 @@ function createKioskWindow() {
     if (isDevMode) {
       mainWindow.webContents.openDevTools();
     }
+  });
+
+  // 키오스크 감사 로그([LM_KIOSK_AUDIT_LOG]) 및 렌더러 경고/에러(level >= 2)를 비동기로 디스크(C:\GolfOS\logs\kiosk_runtime.log)에 보존
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const msgStr = String(message || '');
+    if (msgStr.includes('[LM_KIOSK_AUDIT_LOG]')) {
+      appendKioskRuntimeLog('AUDIT', msgStr);
+    } else if (level >= 2) {
+      const tag = level === 2 ? 'WARN' : 'ERROR';
+      appendKioskRuntimeLog(tag, `${msgStr} (${sourceId || 'renderer'}:${line || 0})`);
+    }
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    appendKioskRuntimeLog('CRASH', `Renderer process gone: reason=${details?.reason}, exitCode=${details?.exitCode}`);
   });
 
   mainWindow.on('closed', () => {

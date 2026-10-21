@@ -9,6 +9,11 @@
 import { TimeMaster } from '../utils/timeMaster';
 import type { CardApprovalResult } from './van/van_types';
 import { getKioskSettings, normalizeApiUrl } from '../stores/kioskSettings';
+import {
+  recordKioskBlackBox,
+  getFormattedKioskBlackBoxText,
+  type KioskBlackBoxCategory,
+} from '../utils/kioskBlackBox';
 
 // 기본 백엔드 주소 및 가맹점 코드 (동적 헬퍼 폴백용)
 const BASE_URL = normalizeApiUrl(import.meta.env.VITE_BASE_URL || 'http://localhost:8000/api');
@@ -27,6 +32,7 @@ export interface MemberAsset {
   item_name: string;
   rem_count?: number;
   remain_cnt?: number;
+  remain_min?: number;
   expiry_date?: string;
   end_date?: string;
   end_dt?: string;
@@ -77,6 +83,8 @@ export interface Member {
   discount_rate?: number;
   point_rate?: number;
   grade_cd?: string;
+  use_yn?: string;
+  deleted_at?: number;
 }
 
 export interface KioskZone {
@@ -129,7 +137,17 @@ export interface Bay {
   next_res_name?: string | null;
   next_res_checkin_status?: string | null;
   is_paused?: boolean;
+  is_global_paused?: boolean;
+  pause_type?: string;
   waiting_count?: number;
+  waiting_res_count?: number;
+  waiting_res_total_min?: number;
+  total_wait_minutes?: number;
+  available_from_time?: string | null;
+  available_from_epoch_ms?: number | null;
+  max_assignable_min?: number | null;
+  next_limit_res_start_time?: string | null;
+  prepare_time_min?: number;
 }
 
 export interface Locker {
@@ -779,11 +797,15 @@ class HybridAPIClient {
               const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
               let changed = false;
               for (let i = 0; i < bays.length; i++) {
-                if (['OCCUPIED', 'PREPARE', 'USE'].includes(bays[i].status) || !pausedFlag) {
-                  bays[i] = { ...bays[i], is_paused: pausedFlag };
-                  this.bayUpdateListeners.forEach(listener => listener(bays[i]));
-                  changed = true;
-                }
+                const isActive = ['OCCUPIED', 'PREPARE', 'USE'].includes(bays[i].status);
+                bays[i] = {
+                  ...bays[i],
+                  is_paused: pausedFlag ? (isActive ? true : Boolean(bays[i].is_paused)) : false,
+                  is_global_paused: pausedFlag,
+                  pause_type: pausedFlag ? 'GLOBAL' : undefined,
+                };
+                this.bayUpdateListeners.forEach(listener => listener(bays[i]));
+                changed = true;
               }
               if (changed) localStorage.setItem('LM_BAYS', JSON.stringify(bays));
             }
@@ -923,6 +945,7 @@ class HybridAPIClient {
       'x-terminal-id': this.getTerminalId(),
       'x-device-id': settings?.deviceId || 'dev-3',
       ...(settings?.deviceKey ? { 'x-device-key': settings.deviceKey } : {}),
+      'x-kiosk-min-gap': String(settings?.minGapMinutes ?? 60),
       'x-timestamp': timestamp,
       ...additionalHeaders
     };
@@ -1152,6 +1175,11 @@ class HybridAPIClient {
         });
       }
       if (exactHpMatches.length === 1) {
+        const m = exactHpMatches[0];
+        if ((m.status_cd && m.status_cd !== '10' && m.status_cd !== 'ACTIVE') || m.use_yn === 'N' || (m as any).deleted_at) {
+          const msg = '현재 휴면 또는 이용 제한(일시정지/탈퇴) 상태인 회원입니다. 프런트 데스크에 문의해 주세요.';
+          throw Object.assign(new Error(msg), { inactive: true, status: 403, message: msg });
+        }
         return exactHpMatches[0];
       }
     }
@@ -1269,7 +1297,8 @@ class HybridAPIClient {
           headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             bay_nos: bayNos,
-            terminal_id: this.getTerminalId()
+            terminal_id: this.getTerminalId(),
+            ttl_minutes: 3
           })
         });
         if (res.ok) return true;
@@ -1285,9 +1314,17 @@ class HybridAPIClient {
     // Edge DB 모드
     const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
     let allAvailable = true;
+    const now = new Date();
     for (const bayNo of bayNos) {
       const b = bays.find(item => item.bay_no === bayNo);
-      if (!b || (b.status !== 'AVAILABLE' && b.status !== 'PRE_OCCUPIED')) {
+      if (!b) {
+        allAvailable = false;
+        break;
+      }
+      const isMine = b.lock_terminal_id === this.getTerminalId();
+      const isExpired = Boolean(b.lock_expired_at && new Date(b.lock_expired_at) < now);
+      const isAvailable = b.status === 'AVAILABLE' || (b.status === 'PRE_OCCUPIED' && (isMine || isExpired));
+      if (!isAvailable) {
         allAvailable = false;
         break;
       }
@@ -1295,7 +1332,7 @@ class HybridAPIClient {
 
     if (allAvailable) {
       const expires = new Date();
-      expires.setMinutes(expires.getMinutes() + 2);
+      expires.setMinutes(expires.getMinutes() + 3);
       
       bayNos.forEach(bayNo => {
         const idx = bays.findIndex(b => b.bay_no === bayNo);
@@ -1452,6 +1489,54 @@ class HybridAPIClient {
     localStorage.setItem('LM_BAYS', JSON.stringify(bays));
   }
 
+  /**
+   * [F05 좀비 선점 락 자동 정리]
+   * 키오스크 비정상 종료(Crash/Reboot) 후 재기동 시 이전 세션에서 본인 터미널이 점유했던
+   * 고아 선점 락(Orphaned Lock)을 감지하여 안전하게 해제합니다.
+   */
+  async releaseOrphanedLocks(targetTerminalId?: string): Promise<number[]> {
+    const terminalId = targetTerminalId || this.getTerminalId();
+    const isConnected = await this.checkConnection();
+    const releasedNos: number[] = [];
+
+    // 1. Edge DB (localStorage) 모드 검사 및 정리
+    try {
+      const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
+      bays.forEach((b) => {
+        if (b.status === 'PRE_OCCUPIED' && b.lock_terminal_id === terminalId) {
+          b.status = 'AVAILABLE';
+          b.lock_terminal_id = null;
+          b.lock_expired_at = null;
+          releasedNos.push(b.bay_no);
+        }
+      });
+      if (releasedNos.length > 0) {
+        localStorage.setItem('LM_BAYS', JSON.stringify(bays));
+      }
+    } catch {
+      // safe fallback
+    }
+
+    // 2. 서버 연결 상태인 경우 서버 선점 해제 API 호출
+    if (isConnected && releasedNos.length > 0) {
+      try {
+        await fetch(`${this.getBaseUrl()}/bays/release`, {
+          method: 'POST',
+          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            bay_nos: releasedNos,
+            terminal_id: terminalId,
+            force: true,
+          }),
+        });
+      } catch (err) {
+        console.warn('[Auto-Heal] Failed to release orphaned locks to server:', err);
+      }
+    }
+
+    return releasedNos;
+  }
+
   // 쿠폰 실시간 검증 API
   async verifyCoupon(couponNo: string): Promise<{
     coupon_no: string;
@@ -1550,6 +1635,7 @@ class HybridAPIClient {
     is_chained?: boolean;
     closingPrompt?: {
       code: string;
+      reason?: string;
       max_available_min: number;
       total_gap_min?: number;
       prepare_min?: number;
@@ -1701,6 +1787,20 @@ class HybridAPIClient {
     const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
     
     if (targetIdx !== -1) {
+      // 선점 락 소유권 검증 (타 단말기 선점 타석 직접 배정 차단)
+      const targetBay = bays[targetIdx];
+      const now = new Date();
+      if (
+        targetBay.status === 'PRE_OCCUPIED' &&
+        targetBay.lock_terminal_id &&
+        targetBay.lock_terminal_id !== this.getTerminalId() &&
+        (!targetBay.lock_expired_at || new Date(targetBay.lock_expired_at) >= now)
+      ) {
+        return {
+          success: false,
+          message: '다른 키오스크 단말기에서 선점하여 결제 진행 중인 타석입니다.',
+        };
+      }
       const end = new Date();
       end.setMinutes(end.getMinutes() + durationMin);
       const end_time = `${String(end.getHours()).padStart(2, '0')}${String(end.getMinutes()).padStart(2, '0')}`;
@@ -1778,6 +1878,7 @@ class HybridAPIClient {
     allocatedBayNos?: number[];
     closingPrompt?: {
       code: string;
+      reason?: string;
       max_available_min: number;
       total_gap_min?: number;
       prepare_min?: number;
@@ -2275,23 +2376,32 @@ class HybridAPIClient {
     amount: number,
     prodCd: string,
     memberNo?: string,
-    lockerNo?: number | string
+    lockerNo?: number | string,
+    terminalId?: string
   ): Promise<{ success: boolean; res_id: string; resId: string; message: string }> {
     const isConnected = await this.checkConnection();
     const numericLockerId = Number(lockerId);
     const payloadLockerId = !Number.isNaN(numericLockerId) && numericLockerId > 0 ? numericLockerId : 0;
     if (isConnected || !isDemoEnvironment()) {
       try {
+        const payloadBody: any = {
+          locker_id: payloadLockerId,
+          locker_no: lockerNo ?? lockerId,
+          member_no: memberNo || undefined,
+          amount,
+          prod_cd: prodCd,
+        };
+        if (terminalId) {
+          payloadBody.terminal_id = terminalId;
+        }
+        const effTerminal = terminalId || this.getTerminalId();
         const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/lockers/extend/hold?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
           method: 'POST',
-          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            locker_id: payloadLockerId,
-            locker_no: lockerNo ?? lockerId,
-            member_no: memberNo || undefined,
-            amount,
-            prod_cd: prodCd
-          })
+          headers: this.getSecureHeaders({
+            'Content-Type': 'application/json',
+            'x-terminal-id': effTerminal,
+          }),
+          body: JSON.stringify(payloadBody)
         });
         if (res.ok) {
           const data = await res.json();
@@ -2504,11 +2614,98 @@ class HybridAPIClient {
     return { success: false, message: '사용 중이 아니거나 연장 가능한 라카가 아닙니다.' };
   }
 
+  private _lastErrorReportMap: Map<string, number> = new Map();
+
+  private _resolveBlackBoxCategory(action: string): KioskBlackBoxCategory {
+    if (action.startsWith('STEP_')) return 'STEP';
+    if (action.startsWith('AUTH_') || action.startsWith('FACE_') || action.includes('REGISTER')) return 'AUTH';
+    if (action.startsWith('BAY_MOVE')) return 'MOVE';
+    if (action.startsWith('BAY_ALLOCATE') || action.startsWith('PAR3_')) return 'ALLOCATION';
+    if (action.startsWith('CHECKIN_')) return 'CHECKIN';
+    if (action.startsWith('LOCKER_')) return 'LOCKER';
+    if (action.startsWith('PRODUCT_')) return 'PURCHASE';
+    if (action.startsWith('PAYMENT_') || action === 'VAN_ERROR') return 'PAYMENT';
+    if (action.startsWith('HW_')) return 'HW_STATUS';
+    if (action === 'STAFF_CALL') return 'STAFF_CALL';
+    if (action === 'UI_ERROR_MODAL' || action === 'RUNTIME_CRASH') return 'UI_ERROR';
+    if (action.endsWith('_ERROR') || action.endsWith('_FAIL')) return 'API_ERROR';
+    return 'AUDIT';
+  }
+
+  /**
+   * 키오스크 에러·하드웨어 단절·직원 호출 시에만 직전 15건의 블랙박스 동선과 함께
+   * 백엔드 `POST /api/system-logs/client-error`로 비동기(Fire-and-Forget) 보고합니다.
+   * (평시 네트워크/CPU 부하 0%, 3초 중복 쿨다운 및 3초 타임아웃 적용)
+   */
+  reportKioskErrorToServer(params: {
+    action: string;
+    detail: string;
+    memberNo?: string;
+    traceId?: string;
+    errorType?: 'KIOSK_CLIENT_ERROR' | 'KIOSK_HW_ERROR' | 'KIOSK_STAFF_CALL' | 'NETWORK_OFFLINE';
+    stack?: string;
+  }): void {
+    try {
+      const dedupeKey = `${params.action}:${params.detail.slice(0, 120)}`;
+      const nowMs = Date.now();
+      const prevMs = this._lastErrorReportMap.get(dedupeKey) || 0;
+      if (nowMs - prevMs < 3000) {
+        return;
+      }
+      if (this._lastErrorReportMap.size > 100) {
+        this._lastErrorReportMap.clear();
+      }
+      this._lastErrorReportMap.set(dedupeKey, nowMs);
+
+      const storeCd = this.getStoreCd();
+      const terminalId = this.getTerminalId() || 'KIOSK-01';
+      const blackboxText = getFormattedKioskBlackBoxText(15);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+
+      fetch(`${this.getBaseUrl()}/system-logs/client-error`, {
+        method: 'POST',
+        headers: this.getSecureHeaders({
+          'Content-Type': 'application/json',
+          'x-store-cd': storeCd,
+        }),
+        body: JSON.stringify({
+          store_cd: storeCd.slice(0, 20),
+          terminal_id: terminalId.slice(0, 100),
+          error_type: params.errorType || 'KIOSK_CLIENT_ERROR',
+          action_type: params.action.slice(0, 100),
+          trace_id: (params.traceId || '').slice(0, 64) || undefined,
+          message: `[KIOSK:${terminalId}] [${params.action}] ${params.detail}`.slice(0, 950),
+          stack: params.stack ? params.stack.slice(0, 4500) : undefined,
+          url: typeof window !== 'undefined' ? window.location.pathname || '/kiosk' : '/kiosk',
+          user_agent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 450) : 'GOLFOS-KIOSK',
+          timestamp: new Date().toISOString(),
+          blackbox_logs: blackboxText.slice(0, 14000),
+          extra_context: {
+            member_no: params.memberNo || 'GUEST',
+            device_name: getKioskSettings().deviceName || terminalId,
+          },
+        }),
+        signal: controller.signal,
+      })
+        .catch(() => {
+          // 백엔드 오프라인 시 키오스크 UI에 일절 영향을 주지 않도록 무소음 처리
+        })
+        .finally(() => {
+          clearTimeout(timer);
+        });
+    } catch {
+      // 무소음 방어
+    }
+  }
+
   // 11. 무인 기기 시스템 감사 로그 (Kiosk System Audit Log) 기록
   async writeKioskLog(action: string, detail: string, memberNo?: string): Promise<void> {
     const logs = JSON.parse(localStorage.getItem('LM_KIOSK_AUDIT_LOGS') || '[]') as unknown[];
     const logId = `L-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const traceId = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
     const now = new Date();
+    const terminalId = this.getTerminalId();
     
     logs.push({
       log_id: logId,
@@ -2516,8 +2713,8 @@ class HybridAPIClient {
       action_type: action,
       detail: detail,
       member_no: memberNo || 'GUEST',
-      terminal_id: this.getTerminalId(),
-      trace_id: `TR-${Math.floor(100000 + Math.random() * 900000)}`
+      terminal_id: terminalId,
+      trace_id: traceId
     });
 
     // 최근 500개만 관리 (오버헤드 방지)
@@ -2527,6 +2724,44 @@ class HybridAPIClient {
 
     localStorage.setItem('LM_KIOSK_AUDIT_LOGS', JSON.stringify(logs));
     console.log(`[LM_KIOSK_AUDIT_LOG] [${action}] ${detail} (Trace ID: ${logId})`);
+
+    const category = this._resolveBlackBoxCategory(action);
+    const isHwOffline = action.startsWith('HW_HEARTBEAT_') && detail.includes('-> OFFLINE');
+    const isHwAction = isHwOffline || action === 'HW_START_ERROR' || action === 'VAN_ERROR' || action === 'KIOSK_HW_ERROR';
+    const isStaffCall = action === 'STAFF_CALL';
+    const isNetworkOffline = action === 'NETWORK_OFFLINE' || action.startsWith('NETWORK_OFFLINE');
+    const isErrorAction =
+      isHwAction ||
+      isStaffCall ||
+      isNetworkOffline ||
+      action.endsWith('_ERROR') ||
+      action.endsWith('_FAIL') ||
+      action === 'UI_ERROR_MODAL' ||
+      action === 'RUNTIME_CRASH';
+
+    recordKioskBlackBox(
+      category,
+      `[${action}] ${detail}`,
+      memberNo ? { memberNo, terminalId } : { terminalId },
+      isErrorAction ? { appCode: action, appMessage: detail, traceId } : undefined
+    );
+
+    if (isErrorAction) {
+      const errorType = isStaffCall
+        ? 'KIOSK_STAFF_CALL'
+        : isHwAction
+        ? 'KIOSK_HW_ERROR'
+        : isNetworkOffline
+        ? 'NETWORK_OFFLINE'
+        : 'KIOSK_CLIENT_ERROR';
+      this.reportKioskErrorToServer({
+        action,
+        detail,
+        memberNo,
+        traceId,
+        errorType,
+      });
+    }
   }
 
   // 감사 로그 전체 조회
@@ -2543,7 +2778,8 @@ class HybridAPIClient {
     faceVectorId: string | null = null,
     gender: 'M' | 'F' = 'M',
     marketingAgree: boolean = false,
-    referrerHp: string | null = null
+    referrerHp: string | null = null,
+    privacyAgree: boolean = true
   ): Promise<{ success: boolean; member?: Member; message: string }> {
     const isConnected = await this.checkConnection();
     const storeCd = this.getStoreCd();
@@ -2561,6 +2797,7 @@ class HybridAPIClient {
             store_cd: storeCd,
             gender: gender,
             face_auth_yn: faceRegistered ? 'Y' : 'N',
+            privacy_agree_yn: privacyAgree ? 'Y' : 'N',
             marketing_agree_yn: marketingAgree ? 'Y' : 'N',
             referrer_hp: referrerHp || undefined
           })
@@ -2593,10 +2830,16 @@ class HybridAPIClient {
 
     // EdgeDB 오프라인/데모 모드 폴백
     try {
+      if (!privacyAgree) {
+        return { success: false, message: '필수 개인정보 수집 및 키오스크 이용약관에 동의해 주세요.' };
+      }
       const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
       const cleanHp = hp.replace(/[^0-9]/g, '');
       const dup = members.find(m => m.hp && m.hp.replace(/[^0-9]/g, '') === cleanHp);
       if (dup) {
+        if ((dup.status_cd && dup.status_cd !== '10' && dup.status_cd !== 'ACTIVE') || dup.use_yn === 'N' || (dup as any).deleted_at) {
+          return { success: false, message: '이미 등록된 휴대폰 번호(휴면/탈퇴/이용제한 상태)입니다. 프런트 데스크에 문의해 주세요.' };
+        }
         return { success: false, message: '이미 등록된 휴대폰 번호입니다.' };
       }
       const newMember: Member = {

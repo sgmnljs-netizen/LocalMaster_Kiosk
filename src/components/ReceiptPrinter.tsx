@@ -14,6 +14,7 @@ export interface ReceiptData {
   cardNo?: string;
   cardIssuer?: string;
   terminalId?: string;
+  installmentMonths?: number;
   prodNm: string;
   partySize: number;
   totalAmount: number;
@@ -68,7 +69,7 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
             issuer_name: receiptData.cardIssuer || '신용카드',
             card_no_masked: receiptData.cardNo || '****-****-****-****',
             approval_no: receiptData.apprNo || '-',
-            installment_months: 0,
+            installment_months: receiptData.installmentMonths ?? 0,
             approval_dt: receiptData.tradeDate || new Date().toLocaleString('ko-KR'),
             terminal_id: receiptData.terminalId || localStorage.getItem('LM_KIOSK_TERMINAL_ID') || 'KIOSK-01'
           } : undefined,

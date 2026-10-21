@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, User, X, Sparkles, Smartphone, Radio, QrCode, Delete } from 'lucide-react';
+import { Camera, User, X, Sparkles, Smartphone, QrCode, Delete } from 'lucide-react';
 import { api, Member } from '../services/api';
 import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
 import {
@@ -726,101 +726,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               </div>
             </div>
           </div>
-
-          {/* 테스트 및 시뮬레이션용 빠른 태그 도구 (개발 환경 전용 격리) */}
-          {import.meta.env.DEV && (
-            <div 
-              style={{ 
-                width: isSubModal ? '480px' : '680px', 
-                padding: '16px 20px', 
-                borderRadius: '20px',
-                background: 'rgba(241, 245, 249, 0.9)',
-                border: '1px solid #CBD5E1',
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.03)'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
-                  DEBUG SIMULATOR
-                </span>
-                <span style={{ fontSize: '12px', color: '#059669', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 10px', borderRadius: '12px', fontWeight: 800 }}>
-                  DEV ONLY
-                </span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
-                <button 
-                  onClick={() => handleSmartTagDetected('M260501', {
-                    member_no: 'M260501',
-                    member_name: '김골프',
-                    masked_name: '김*프',
-                    hp: '010-1234-5678',
-                    email: 'golf@example.com',
-                    member_grade: 'REGULAR',
-                    status_cd: 'ACTIVE',
-                    expiry_date: '2029-12-31',
-                    remain_days: 999,
-                    assets: [
-                      {
-                        member_item_id: '1',
-                        item_name: '정기 타석 60분 회원권',
-                        duration_min: 60,
-                        expiry_date: '2029-12-31',
-                        logic_type: 'PERIOD',
-                        is_assignable: true
-                      }
-                    ]
-                  })}
-                  style={{ 
-                    fontSize: '15px', 
-                    fontWeight: 800,
-                    padding: '12px', 
-                    background: '#ffffff', 
-                    border: '1.5px solid #CBD5E1',
-                    borderRadius: '12px',
-                    color: '#0F172A',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <Smartphone size={18} color="#059669" /> 안드로이드 NFC (김골프)
-                </button>
-                <button 
-                  onClick={() => handleSmartTagDetected('M260502', {
-                    member_no: 'M260502',
-                    member_name: '이프로',
-                    masked_name: '이*로',
-                    hp: '010-9876-5432',
-                    email: 'pro@example.com',
-                    member_grade: 'VIP',
-                    status_cd: 'ACTIVE'
-                  })}
-                  style={{ 
-                    fontSize: '15px', 
-                    fontWeight: 800,
-                    padding: '12px', 
-                    background: '#ffffff', 
-                    border: '1.5px solid #CBD5E1',
-                    borderRadius: '12px',
-                    color: '#0F172A',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <Radio size={18} color="#059669" /> 아이폰 BLE (이프로)
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -924,20 +829,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               {isSearching ? '조회 중...' : '회원 조회하기'}
             </button>
           </div>
-
-          {/* 테스트 및 시뮬레이션용 빠른 태그 도구 (개발 환경) */}
-          {import.meta.env.DEV && (
-            <div style={{ width: isSubModal ? '480px' : '560px', padding: '14px 18px', borderRadius: '18px', background: 'rgba(241, 245, 249, 0.9)', border: '1px solid #cbd5e1' }}>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#64748b' }}>SIMULATOR: </span>
-              <button
-                type="button"
-                onClick={() => { setPhoneDigits('01012345678'); handleSmartTagDetected('010-1234-5678'); }}
-                style={{ marginLeft: '8px', padding: '6px 14px', borderRadius: '8px', background: '#fff', border: '1px solid #cbd5e1', fontWeight: 800, cursor: 'pointer', fontSize: '13px' }}
-              >
-                010-1234-5678 즉시 입력 및 조회 (김골프)
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -996,21 +887,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               </p>
             </div>
           </div>
-
-          {/* 테스트 및 시뮬레이션용 빠른 태그 도구 (개발 환경) */}
-          {import.meta.env.DEV && (
-            <div style={{ width: isSubModal ? '480px' : '560px', padding: '14px 18px', borderRadius: '18px', background: 'rgba(241, 245, 249, 0.9)', border: '1px solid #cbd5e1' }}>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: '#64748b' }}>SIMULATOR: </span>
-              <button
-                type="button"
-                onClick={() => handleSmartTagDetected('QR-M260501')}
-                style={{ marginLeft: '8px', padding: '6px 14px', borderRadius: '8px', background: '#fff', border: '1px solid #cbd5e1', fontWeight: 800, cursor: 'pointer', fontSize: '13px' }}
-              >
-                <QrCode size={14} style={{ display: 'inline', marginRight: '4px', verticalAlign: 'middle' }} />
-                출입 QR 스캔 시뮬레이션 (김골프)
-              </button>
-            </div>
-          )}
         </div>
       )}
       </div>

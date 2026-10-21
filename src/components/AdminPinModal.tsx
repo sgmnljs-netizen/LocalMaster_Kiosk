@@ -89,10 +89,11 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
 
   return (
     <div
+      data-testid="admin-pin-overlay"
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.85)',
+        backgroundColor: 'rgba(15, 23, 42, 0.55)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
         zIndex: 99999,
@@ -103,19 +104,20 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
       }}
     >
       <div
+        data-testid="admin-pin-modal-card"
         style={{
           width: '420px',
           maxWidth: '92vw',
-          background: 'linear-gradient(145deg, #1e222d 0%, #12151c 100%)',
+          background: '#ffffff',
           borderRadius: '32px',
-          border: '1.5px solid rgba(255, 255, 255, 0.12)',
-          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.7), 0 0 30px rgba(16, 185, 129, 0.1)',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 24px 60px rgba(15, 23, 42, 0.18), 0 4px 16px rgba(15, 23, 42, 0.06)',
           padding: '36px 32px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           position: 'relative',
-          color: '#ffffff',
+          color: '#0f172a',
           fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
           boxSizing: 'border-box',
         }}
@@ -130,15 +132,15 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
             position: 'absolute',
             top: '20px',
             right: '20px',
-            background: 'rgba(255, 255, 255, 0.08)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
+            background: '#f8fafc',
+            border: '1px solid #cbd5e1',
             borderRadius: '50%',
             width: '40px',
             height: '40px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#a1a1aa',
+            color: '#475569',
             cursor: 'pointer',
             transition: 'all 0.2s ease',
           }}
@@ -151,10 +153,10 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
           <div
             style={{
               padding: '10px',
-              background: 'rgba(16, 185, 129, 0.15)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
+              background: '#ecfdf5',
+              border: '1px solid #a7f3d0',
               borderRadius: '16px',
-              color: '#34d399',
+              color: '#059669',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -162,12 +164,12 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
           >
             <Lock size={24} />
           </div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800, margin: 0, letterSpacing: '-0.5px' }}>
+          <h2 style={{ fontSize: '22px', fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
             키오스크 관리자 인증
           </h2>
         </div>
 
-        <p style={{ fontSize: '14px', color: '#9ca3af', margin: '0 0 28px 0', textAlign: 'center' }}>
+        <p style={{ fontSize: '14px', color: '#64748b', fontWeight: 500, margin: '0 0 28px 0', textAlign: 'center' }}>
           관리자 마스터 PIN 4자리를 입력하세요
         </p>
 
@@ -180,9 +182,9 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
                 width: '20px',
                 height: '20px',
                 borderRadius: '50%',
-                border: pin.length > idx ? '2px solid #34d399' : '2px solid #4b5563',
-                backgroundColor: pin.length > idx ? '#34d399' : '#1f2937',
-                boxShadow: pin.length > idx ? '0 0 12px rgba(52, 211, 153, 0.8)' : 'none',
+                border: pin.length > idx ? '2px solid #059669' : '2px solid #cbd5e1',
+                backgroundColor: pin.length > idx ? '#10b981' : '#f1f5f9',
+                boxShadow: pin.length > idx ? '0 0 12px rgba(16, 185, 129, 0.45)' : 'none',
                 transition: 'all 0.15s ease',
                 transform: pin.length > idx ? 'scale(1.15)' : 'scale(1)',
               }}
@@ -193,7 +195,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
         {errorMsg && (
           <div
             style={{
-              color: '#f87171',
+              color: '#dc2626',
               fontSize: '13px',
               fontWeight: 700,
               marginBottom: '16px',
@@ -219,14 +221,14 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
               onClick={() => handleNumClick(num)}
               style={{
                 height: '68px',
-                background: '#262a36',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
+                background: '#f8fafc',
+                border: '1px solid #cbd5e1',
                 borderRadius: '20px',
-                color: '#ffffff',
+                color: '#0f172a',
                 fontSize: '26px',
                 fontWeight: 800,
                 cursor: 'pointer',
-                boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
+                boxShadow: '0 2px 6px rgba(15, 23, 42, 0.04)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -240,12 +242,12 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
             onClick={handleClear}
             style={{
               height: '68px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: '#f1f5f9',
+              border: '1px solid #cbd5e1',
               borderRadius: '20px',
-              color: '#9ca3af',
+              color: '#475569',
               fontSize: '15px',
-              fontWeight: 700,
+              fontWeight: 800,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -259,14 +261,14 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
             onClick={() => handleNumClick('0')}
             style={{
               height: '68px',
-              background: '#262a36',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
               borderRadius: '20px',
-              color: '#ffffff',
+              color: '#0f172a',
               fontSize: '26px',
               fontWeight: 800,
               cursor: 'pointer',
-              boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
+              boxShadow: '0 2px 6px rgba(15, 23, 42, 0.04)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -279,10 +281,10 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
             onClick={handleDelete}
             style={{
               height: '68px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: '#f1f5f9',
+              border: '1px solid #cbd5e1',
               borderRadius: '20px',
-              color: '#9ca3af',
+              color: '#475569',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',

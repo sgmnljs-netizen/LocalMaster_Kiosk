@@ -172,6 +172,87 @@ export class TimeMaster {
     return trimmed;
   }
 
+  /**
+   * [SSOT] 타석이 실제로 빈 타석이 되기까지 남은 총 대기 분(minute) 산출
+   * - 백엔드 Smart Gap Merge 결과(available_from_epoch_ms / total_wait_minutes)를 최우선 적용
+   * - 로컬 폴백 시 현재 세션 잔여시간 + 병합 대기예약 합산시간(waiting_res_total_min) 반환
+   */
+  static getTotalWaitMinutes(
+    bay?: {
+      total_wait_minutes?: number | null;
+      available_from_epoch_ms?: number | null;
+      available_from_time?: string | null;
+      waiting_res_total_min?: number | null;
+      minutes_left?: number;
+      end_time?: string | null;
+      end_epoch_ms?: number | null;
+      is_paused?: boolean;
+      duration_min?: number | null;
+      status_info?: Record<string, any> | null;
+    } | null,
+    now?: Date | number
+  ): number {
+    if (!bay) return 0;
+    const refNowMs =
+      now !== undefined
+        ? typeof now === 'number'
+          ? now
+          : now.getTime()
+        : TimeMaster.getSyncedNowMs();
+
+    if (!bay.is_paused && typeof bay.available_from_epoch_ms === 'number' && bay.available_from_epoch_ms > 0) {
+      const diffMs = bay.available_from_epoch_ms - refNowMs;
+      return Math.max(0, Math.ceil(diffMs / (60 * 1000)));
+    }
+
+    if (typeof bay.total_wait_minutes === 'number' && bay.total_wait_minutes >= 0) {
+      return Math.max(0, bay.total_wait_minutes);
+    }
+
+    const baseRem =
+      typeof bay.status_info?.minutes_left === 'number'
+        ? Math.max(0, bay.status_info.minutes_left)
+        : TimeMaster.getRemainingMinutes(bay, now);
+    const waitingTotal = Number(bay.waiting_res_total_min) || 0;
+    return Math.max(0, baseRem + waitingTotal);
+  }
+
+  /**
+   * [SSOT] 타석이 실제로 빈 타석이 되는 예정 시각 (HH:mm) 포맷팅
+   * - 백엔드 Smart Gap Merge 결과(available_from_time / available_from_epoch_ms) 최우선 적용
+   * - 로컬 폴백 시 end_epoch_ms + waiting_res_total_min 계산
+   */
+  static formatAvailableFromTime(
+    bay?: {
+      available_from_time?: string | null;
+      available_from_epoch_ms?: number | null;
+      waiting_res_total_min?: number | null;
+      end_time?: string | null;
+      end_epoch_ms?: number | null;
+    } | null
+  ): string {
+    if (!bay) return '종료';
+    if (bay.available_from_time && String(bay.available_from_time).trim()) {
+      return TimeMaster.formatEndTime(bay.available_from_time, bay.available_from_epoch_ms);
+    }
+    if (typeof bay.available_from_epoch_ms === 'number' && bay.available_from_epoch_ms > 0) {
+      return TimeMaster.formatEndTime(null, bay.available_from_epoch_ms);
+    }
+    const waitingTotal = Number(bay.waiting_res_total_min) || 0;
+    if (waitingTotal > 0) {
+      if (typeof bay.end_epoch_ms === 'number' && bay.end_epoch_ms > 0) {
+        return TimeMaster.formatEndTime(null, bay.end_epoch_ms + waitingTotal * 60 * 1000);
+      }
+      if (bay.end_time) {
+        const parsed = TimeMaster.parseSessionEnd(bay.end_time, TimeMaster.getSyncedDate());
+        if (parsed) {
+          return TimeMaster.formatEndTime(null, parsed.getTime() + waitingTotal * 60 * 1000);
+        }
+      }
+    }
+    return TimeMaster.formatEndTime(bay);
+  }
+
   /** 날짜 및 시각 포맷팅 (YYYY.MM.DD HH:mm:ss) */
   static formatKstDateTime(d: Date = new Date(), includeSeconds: boolean = true): string {
     const ymd = TimeMaster.getKstYmd(d).replace(/-/g, '.');

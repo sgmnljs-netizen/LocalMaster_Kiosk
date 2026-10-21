@@ -21,8 +21,8 @@ export const KioskBottomBar: React.FC<KioskBottomBarProps> = ({
     setIsMounted(true);
   }, []);
 
-  // 인트로 화면 및 메인 대시보드(홈)에서는 하단 내비게이션 바 숨김
-  if (step === 'INTRO' || step === 'MAIN_DASHBOARD') return null;
+  // 인트로 화면, 메인 대시보드, 결제 화면에서는 하단 내비게이션 바 숨김 (결제 도중 오작동 방지 및 결제 전용 독 중첩 방지)
+  if (step === 'INTRO' || step === 'MAIN_DASHBOARD' || step === 'PAYMENT') return null;
   if (!isMounted || typeof document === 'undefined') return null;
 
   const showBackButton = Boolean(onGoBack);
