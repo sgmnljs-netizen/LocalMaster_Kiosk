@@ -2,6 +2,7 @@ import React from 'react';
 import { api, Bay } from '../services/api';
 import { Lock, Wrench, Clock } from 'lucide-react';
 import { TimeMaster } from '../utils/timeMaster';
+import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
 
 interface TeeboxTileCardProps {
   bay: Bay;
@@ -21,13 +22,12 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   isJustAllocated = false,
 }) => {
   // 🧮 5대 시간 변수 누적 합산 정밀 계산 함수 (Master Total Availability Calculation)
+  const hwState = evaluateBayHardwareState(bay);
   const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
   const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
   const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
   const isPrepare = canonicalStatus === 'PREPARE';
-  const isMaintenance =
-    (bay as any).is_active === false ||
-    ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
+  const isMaintenance = hwState.isBlocked;
   const isLessonOnly = Boolean(bay.is_lesson_only);
   const isAvailable = canonicalStatus === 'AVAILABLE' && !isOccupied && !isPreOccupied && !isPrepare && !isMaintenance && !isLessonOnly;
   const isSelfLocked = isPreOccupied && (isSelected || (!!bay.lock_terminal_id && bay.lock_terminal_id === api.getTerminalId()));
@@ -244,6 +244,24 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
               레슨
             </span>
           )}
+
+          {/* 점검 / 볼부족 상태 배지 */}
+          {isMaintenance && (
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 800,
+                padding: '2px 7px',
+                borderRadius: '6px',
+                backgroundColor: hwState.isBallEmpty ? '#fef3c7' : '#fee2e2',
+                color: hwState.isBallEmpty ? '#b45309' : '#dc2626',
+                border: hwState.isBallEmpty ? '1px solid #fde68a' : '1px solid #fecaca',
+                letterSpacing: '-0.2px',
+              }}
+            >
+              {hwState.isBallEmpty ? '공부족' : hwState.shortLabel || '점검중'}
+            </span>
+          )}
         </div>
 
         {/* 🟢 이용 가능 도트 뱃지 */}
@@ -348,9 +366,18 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         )}
 
         {isMaintenance && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isSelected ? '#ffffff' : '#ef4444', fontSize: '13px', fontWeight: 700 }}>
-            <Wrench size={13} />
-            <span>점검 중</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isSelected ? '#ffffff' : (hwState.isBallEmpty ? '#d97706' : '#ef4444'), fontSize: '13px', fontWeight: 700 }}>
+            {hwState.isBallEmpty ? (
+              <>
+                <span style={{ fontSize: '13px' }}>⚠️</span>
+                <span>공부족 (점검중)</span>
+              </>
+            ) : (
+              <>
+                <Wrench size={13} />
+                <span>{hwState.shortLabel || '점검 중'}</span>
+              </>
+            )}
           </div>
         )}
       </div>

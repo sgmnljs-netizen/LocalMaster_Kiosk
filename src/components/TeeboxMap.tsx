@@ -3,6 +3,7 @@ import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer } from 'luci
 import { api, Bay, Member } from '../services/api';
 import { TeeboxTileCard } from './TeeboxTileCard';
 import { TimeMaster } from '../utils/timeMaster';
+import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
 
 interface TeeboxMapProps {
   member?: Member | null;
@@ -276,6 +277,16 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     // [BUG-V04] 레슨 전용 타석 일반 선택 차단
     if (isLessonOnlyBay(bay)) {
       setErrorMsg(lang === 'KO' ? '레슨 전용 타석으로는 일반 셀프 이동 및 배정을 할 수 없습니다.' : 'Lesson-only teebox cannot be selected.');
+      return;
+    }
+
+    const hwState = evaluateBayHardwareState(bay);
+    if (hwState.isBlocked) {
+      setErrorMsg(
+        hwState.isBallEmpty
+          ? (lang === 'KO' ? `${bay.bay_no}번 타석은 볼 공급 부족(볼박스 비었음) 상태로 이동 및 배정할 수 없습니다.` : 'Cannot select teebox due to ball shortage.')
+          : (lang === 'KO' ? `${bay.bay_no}번 타석은 기기 점검/오류 상태로 이동 및 배정할 수 없습니다.` : 'Cannot select teebox under maintenance.')
+      );
       return;
     }
 
@@ -794,7 +805,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               const maxBay = Math.max(...floorBays.map((b) => b.bay_no));
               const availCnt = floorBays.filter((b) => {
                 const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-                return st === 'AVAILABLE' && (b as any).is_active !== false && !isLessonOnlyBay(b);
+                return st === 'AVAILABLE' && (b as any).is_active !== false && !isLessonOnlyBay(b) && !evaluateBayHardwareState(b).isBlocked;
               }).length;
               const sims = Array.from(
                 new Set(
@@ -852,16 +863,14 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         }}
       >
         {floorBays.map((bay) => {
+          const hwState = evaluateBayHardwareState(bay);
           const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
           const isSelected = selectedBayNo === bay.bay_no;
           const isCurrentMyBay = Boolean(isMoveMode && currentBay && Number(currentBay.bay_no) === Number(bay.bay_no));
           const isLessonOnly = isLessonOnlyBay(bay);
           const isPreOccupiedByOther = canonicalStatus === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId();
           const isOccupied = ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus) && !isCurrentMyBay;
-          const isUnderMaintenance =
-            !isCurrentMyBay &&
-            ((bay as any).is_active === false ||
-            ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus));
+          const isUnderMaintenance = !isCurrentMyBay && hwState.isBlocked;
           const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance && !isCurrentMyBay && !isLessonOnly;
 
           // 1. 헤더 영역 스타일 (30% 높이)
@@ -887,7 +896,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             headerBg = '#e5e5ea';
             headerTextColor = '#86868b';
           } else if (isUnderMaintenance) {
-            headerBg = '#ff453a';
+            headerBg = hwState.isBallEmpty ? '#d97706' : '#ff453a';
             headerTextColor = '#ffffff';
           }
 
@@ -947,12 +956,12 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             opacity = '0.35';
             pointerEvents = 'none';
           } else if (isUnderMaintenance) {
-            containerBorder = '1.5px solid #ff453a';
-            containerBg = '#fff5f5';
-            statusText = '점검중';
-            statusColor = '#ff453a';
+            containerBorder = hwState.isBallEmpty ? '1.5px solid #d97706' : '1.5px solid #ff453a';
+            containerBg = hwState.isBallEmpty ? '#fffbeb' : '#fff5f5';
+            statusText = hwState.isBallEmpty ? '공부족' : (hwState.shortLabel || '점검중');
+            statusColor = hwState.isBallEmpty ? '#d97706' : '#ff453a';
             cursorStyle = 'not-allowed';
-            opacity = '0.5';
+            opacity = '0.55';
             pointerEvents = 'none';
           }
 

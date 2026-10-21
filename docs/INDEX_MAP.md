@@ -25,7 +25,7 @@
 - **`components/MemberAuth.tsx`**: 휴대폰 뒷번호(하이픈 정규화 매칭 및 4자리 중복 시 409 안내) / 전체번호 / QR·바코드 / 스마트태그(`authenticateSmartTag`, 본인 확인 모달 레이스 컨디션 방어 `detectedMemberRef`) 회원 인증, 디버그 시뮬레이터 더미 칩 완전 제거 및 실물 기기/실제 DB 인증 일원화
 - **`components/MemberRegister.tsx` & `VirtualKeyboard.tsx`**: 30초 즉석 신규 회원가입 (한글 두벌식 오토마타 복모음 역분해 지원 `VirtualKeyboard.tsx`, 약관 동의, 안면인식 캡처 연동, 가입 직후 세션 즉시 파기)
 - **`components/CheckinSelect.tsx`**: 당일 예약 내역 조회 및 당일 상시 체크인(시작 시각 전 얼리 체크인 `CHK` 확정 & 정시 자동 기동 예약, 시작 시각 도래 시 즉시 `CoreEngine.check_in_and_start` 물리 타석 기동)
-- **`components/PracticeSelect.tsx` & `TeeboxMap.tsx` & `TeeboxTileCard.tsx`**: 층별/구역별(`selectedZoneIds`) 타석 맵, 타석 타일 2줄 일원화(`N분 남음` + `HH:mm 빈타석 예정`), 중간 빈타석 대기시간 양방향 이격 및 스마트 갭 병합, 배정방식 선택 모달 가용시간(`max_assignable_min`) 표출, 점검/비활성/버퍼 타석 터치 원천 차단, 단일/그룹 배정 및 셀프 타석 이동(`POST /api/v1/kiosk/bays/move`)
+- **`components/PracticeSelect.tsx` & `TeeboxMap.tsx` & `TeeboxTileCard.tsx` & `utils/bayStatusGuard.ts`**: 층별/구역별 타석 맵, 하드웨어 오류/볼 부족(`bayStatusGuard`) 및 점검/비활성 타석 터치 원천 차단, 타석 타일 2줄 일원화, 중간 빈타석 이격, 단일/그룹 배정 및 셀프 이동(`POST /api/v1/kiosk/bays/move`)
 - **`components/CompanionSetupModal.tsx` & `ChainedBookingModal.tsx`**: 그룹 동반자(대표자 횟수권 잔여 횟수 초과 중복 배정 차단 vs 일일권 결제) 설정 및 연속 예약(Chained Booking)
 - **`components/Par3Allocation.tsx`**: 파3 코스/티타임 선택, 보유 이용권 실시간 차감, 5만원 이상 카드 할부 선택 및 웹훅 실패 시 VAN 자동 망취소/DLQ 연동
 - **`components/ProductShop.tsx`**: 일일 타석권 및 회원 전용 이용권 매대 (중간 빈타석 가용시간 초과 일일권 상품 비활성화 및 비회원 회원권 구매 선제 차단)

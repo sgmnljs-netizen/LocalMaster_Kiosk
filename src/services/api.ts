@@ -148,6 +148,13 @@ export interface Bay {
   max_assignable_min?: number | null;
   next_limit_res_start_time?: string | null;
   prepare_time_min?: number;
+  hardware_status?: string;
+  error_code?: string | number | null;
+  error_msg?: string | null;
+  error_short_label?: string | null;
+  error_action_hint?: string | null;
+  ball_box_detected?: boolean | null;
+  ball_box_status?: string | null;
 }
 
 export interface Locker {
@@ -784,6 +791,14 @@ class HybridAPIClient {
                     minutes_left: (bayObj.minutes_left as number) ?? (newStatus === 'AVAILABLE' ? 0 : (nextDur ?? bays[idx].minutes_left)),
                     is_paused: nextPaused,
                     lock_terminal_id: (data.terminal_id as string) || (bayObj.lock_terminal_id as string) || (newStatus === 'AVAILABLE' ? null : bays[idx].lock_terminal_id),
+                    hardware_status: (bayObj.hardware_status as string) ?? (data.hardware_status as string) ?? bays[idx].hardware_status,
+                    config_json: (bayObj.config_json as string) ?? (data.config_json as string) ?? bays[idx].config_json,
+                    ball_box_detected: (bayObj.ball_box_detected as boolean) ?? (data.ball_box_detected as boolean) ?? bays[idx].ball_box_detected,
+                    ball_box_status: (bayObj.ball_box_status as string) ?? (data.ball_box_status as string) ?? bays[idx].ball_box_status,
+                    error_code: (bayObj.error_code as any) ?? (data.error_code as any) ?? bays[idx].error_code,
+                    error_msg: (bayObj.error_msg as string) ?? (data.error_msg as string) ?? bays[idx].error_msg,
+                    error_short_label: (bayObj.error_short_label as string) ?? (data.error_short_label as string) ?? bays[idx].error_short_label,
+                    error_action_hint: (bayObj.error_action_hint as string) ?? (data.error_action_hint as string) ?? bays[idx].error_action_hint,
                   };
                 }
                 localStorage.setItem('LM_BAYS', JSON.stringify(bays));

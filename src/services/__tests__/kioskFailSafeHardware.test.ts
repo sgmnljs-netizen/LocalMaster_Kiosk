@@ -629,4 +629,74 @@ describe('Kiosk Fail-Safe & Hardware Device Error Handling QA (F03, F04, F06, F0
       expect(selectedBayNos).toEqual([]);
     });
   });
+
+  // =========================================================================
+  // F08: 타석기 하드웨어 에러/볼부족(E01/빈박스) 시 키오스크 타일 표시 및 선택 차단
+  // =========================================================================
+  describe('F08 [타석기 하드웨어 에러/볼부족(E01/빈박스) 시 키오스크 타일 표시 및 선택 차단]', () => {
+    it('F08-1: 하드웨어 에러(hardware_status = ERROR 또는 has_error = true) 타석은 점검중으로 표기되고 선택이 원천 차단된다', async () => {
+      const { evaluateBayHardwareState } = await import('../../utils/bayStatusGuard');
+      const errBay: Bay = {
+        bay_id: 31,
+        bay_no: 31,
+        floor_no: 1,
+        type: 'RIGHT',
+        status: 'AVAILABLE',
+        hardware_status: 'ERROR',
+        config_json: JSON.stringify({ has_error: true, error_code: 'E02', error_text: '타석 모터 과부하' }),
+      };
+
+      const state = evaluateBayHardwareState(errBay);
+      expect(state.isBlocked).toBe(true);
+      expect(state.isHwError).toBe(true);
+      expect(state.isBallEmpty).toBe(false);
+      expect(state.shortLabel).toBe('점검중');
+    });
+
+    it('F08-2: 볼박스 감지 실패(ball_box_detected = false 또는 EMPTY 또는 E01) 타석은 공부족으로 표기되고 선택이 원천 차단된다', async () => {
+      const { evaluateBayHardwareState } = await import('../../utils/bayStatusGuard');
+      const emptyBay: Bay = {
+        bay_id: 32,
+        bay_no: 32,
+        floor_no: 1,
+        type: 'RIGHT',
+        status: 'AVAILABLE',
+        hardware_status: 'ONLINE',
+        config_json: JSON.stringify({ has_error: true, error_code: 'E01', error_short_label: '볼부족', ball_box_detected: false, ball_box_status: 'EMPTY' }),
+      };
+
+      const state = evaluateBayHardwareState(emptyBay);
+      expect(state.isBlocked).toBe(true);
+      expect(state.isBallEmpty).toBe(true);
+      expect(state.shortLabel).toBe('공부족');
+    });
+
+    it('F08-3: 백엔드에서 409 Conflict (볼 공급 부족/점검) 응답 시 키오스크 배정 시도가 즉시 거부된다', async () => {
+      vi.spyOn(global, 'fetch').mockImplementationOnce(async (url: any) => {
+        if (typeof url === 'string' && url.includes('/api/v1/kiosk/allocate-bay')) {
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({ detail: '32번 타석은 현재 볼 공급 부족(볼박스 비었음) 상태로 배정할 수 없습니다. 관리자에게 문의해 주세요.' }),
+            text: async () => '볼 공급 부족',
+          } as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({}) } as Response;
+      });
+
+      const allocRes = await api.allocateBay(
+        32,
+        60,
+        'M001',
+        undefined,
+        undefined,
+        1,
+        'CARD',
+        20000
+      );
+
+      expect(allocRes.success).toBe(false);
+      expect(allocRes.message).toContain('볼 공급 부족');
+    });
+  });
 });

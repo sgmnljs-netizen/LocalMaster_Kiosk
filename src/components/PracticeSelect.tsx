@@ -4,6 +4,7 @@ import { api, Bay } from '../services/api';
 import { TopTeeboxDashboard } from './TopTeeboxDashboard';
 import { TeeboxTileCard } from './TeeboxTileCard';
 import { TimeMaster } from '../utils/timeMaster';
+import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
 
 interface PracticeSelectProps {
   bays: Bay[];
@@ -198,6 +199,17 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     if (isLockingRef.current || preoccupyLoading) return;
     const bay = practiceBays.find(b => b.bay_no === bayNo) || bays.find(b => b.bay_no === bayNo);
     if (!bay) return;
+
+    // 🛡️ 하드웨어 오류 / 볼 공급 부족 실시간 배정 차단 가드
+    const hwState = evaluateBayHardwareState(bay);
+    if (hwState.isBlocked) {
+      setErrorMsg(
+        hwState.isBallEmpty
+          ? (lang === 'KO' ? `${bayNo}번 타석은 현재 볼 공급 부족(볼박스 비었음) 상태로 배정할 수 없습니다. 관리자에게 문의해 주세요.` : 'Cannot allocate teebox due to ball shortage.')
+          : (lang === 'KO' ? `${bayNo}번 타석은 기기 점검/오류 상태로 배정할 수 없습니다. 다른 타석을 선택해 주세요.` : 'Cannot allocate teebox under maintenance.')
+      );
+      return;
+    }
 
     const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
     const isBlockedStatus =
@@ -396,7 +408,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   const handleQuickAutoSelect = async () => {
     const isQuickAssignable = (b: Bay) => {
       const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-      return st === 'AVAILABLE' && (b as any).is_active !== false && !b.is_lesson_only;
+      return st === 'AVAILABLE' && (b as any).is_active !== false && !b.is_lesson_only && !evaluateBayHardwareState(b).isBlocked;
     };
     const candidate = filteredBays.find(isQuickAssignable) || practiceBays.find(isQuickAssignable);
     if (!candidate) {

@@ -2,6 +2,7 @@ import React from 'react';
 import { Layers } from 'lucide-react';
 import { Bay } from '../services/api';
 import { TimeMaster } from '../utils/timeMaster';
+import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
 
 interface MiniTeeboxMonitorProps {
   bays: Bay[];
@@ -42,11 +43,7 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
   });
 
   const isBayBlocked = (b: Bay) => {
-    const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-    return (
-      (b as any).is_active === false ||
-      ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(st)
-    );
+    return evaluateBayHardwareState(b).isBlocked;
   };
 
   const totalAvailable = practiceBays.filter(b => {
@@ -87,14 +84,22 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
       borderCol = 'rgba(79, 70, 229, 0.2)';
       textColor = 'rgba(255, 255, 255, 0.25)';
     } else if (isUnderMaintenance) {
-      bgCol = 'rgba(239, 68, 68, 0.15)';
-      borderCol = 'rgba(239, 68, 68, 0.5)';
-      textColor = 'var(--neon-red)';
+      const hwState = evaluateBayHardwareState(bay);
+      if (hwState.isBallEmpty) {
+        bgCol = 'rgba(245, 158, 11, 0.18)';
+        borderCol = 'rgba(245, 158, 11, 0.6)';
+        textColor = '#f59e0b';
+      } else {
+        bgCol = 'rgba(239, 68, 68, 0.15)';
+        borderCol = 'rgba(239, 68, 68, 0.5)';
+        textColor = 'var(--neon-red)';
+      }
     }
 
+    const hwState = evaluateBayHardwareState(bay);
     const remMin = TimeMaster.getRemainingMinutes(bay);
     const titleText = `${bay.bay_no}번 타석: ${
-      isAvailable ? '이용가능' : isPrepare ? '대기중' : isOccupied ? `이용중(${remMin}분)` : isPreOccupied ? '선점중' : '점검중'
+      isAvailable ? '이용가능' : isPrepare ? '대기중' : isOccupied ? `이용중(${remMin}분)` : isPreOccupied ? '선점중' : (hwState.isBallEmpty ? '공부족' : (hwState.shortLabel || '점검중'))
     }`;
 
     return (

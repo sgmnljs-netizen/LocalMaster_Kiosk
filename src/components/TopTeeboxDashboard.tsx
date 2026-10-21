@@ -2,6 +2,7 @@ import React from 'react';
 import { Layers } from 'lucide-react';
 import { Bay } from '../services/api';
 import { TimeMaster } from '../utils/timeMaster';
+import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
 
 interface TopTeeboxDashboardProps {
   bays: Bay[];
@@ -44,11 +45,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   });
 
   const isBayBlocked = (b: Bay) => {
-    const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-    return (
-      (b as any).is_active === false ||
-      ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(st)
-    );
+    return evaluateBayHardwareState(b).isBlocked;
   };
 
   // 전체 이용 가능 타석 계산 (일반 셀프 배정 불가한 레슨 전용 타석 제외)
@@ -111,13 +108,22 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
       const remMin = TimeMaster.getTotalWaitMinutes(bay);
       label = bay.is_paused ? `⏸${remMin}m` : `${remMin}m`;
     } else if (isUnderMaintenance) {
-      // 🔴 애플 브릭 레드
-      bgCol = 'linear-gradient(145deg, #ef4444 0%, #dc2626 100%)';
-      borderCol = 'transparent';
-      textColor = '#ffffff';
-      subTextColor = '#ffffff';
-      glow = '0 1.5px 3px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.4)';
-      label = lang === 'KO' ? '점검' : 'Maint';
+      const hwState = evaluateBayHardwareState(bay);
+      if (hwState.isBallEmpty) {
+        bgCol = 'linear-gradient(145deg, #f59e0b 0%, #d97706 100%)';
+        borderCol = 'transparent';
+        textColor = '#ffffff';
+        subTextColor = '#ffffff';
+        glow = '0 1.5px 3px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.4)';
+        label = lang === 'KO' ? '공부족' : 'Empty';
+      } else {
+        bgCol = 'linear-gradient(145deg, #ef4444 0%, #dc2626 100%)';
+        borderCol = 'transparent';
+        textColor = '#ffffff';
+        subTextColor = '#ffffff';
+        glow = '0 1.5px 3px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.4)';
+        label = lang === 'KO' ? (hwState.shortLabel || '점검') : 'Maint';
+      }
     }
 
     return (
