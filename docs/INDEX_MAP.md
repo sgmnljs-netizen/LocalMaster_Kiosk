@@ -18,7 +18,7 @@
 
 ## 2. 🎨 키오스크 화면 및 핵심 모듈 라우팅 맵 (`src/`)
 
-- **`KioskApp.tsx`**: 최상위 상태 머신 오케스트레이터 (세션 타임아웃/잠금 해제, VAN 결제 실패 시 자동 망취소 `executeAutoReversal` 및 DLQ 보고 `reportGhostCharge`, 타석 배정/구매/라카연장 원자적 제어, 중간 빈타석 초과 일일권 차단 및 보유 이용권 `ASSET_SELECT` 사전 경고/재인증 없는 다른 타석 선택 복귀, 동반자 유료 결제 시 중간 빈타석 가용시간 사전 점검, 마감 임박 단축 배정 모달 `closingPromptModal`)
+- **`KioskApp.tsx`**: 최상위 상태 머신 오케스트레이터 (세션 타임아웃/잠금 해제, VAN 실패 시 자동 망취소 `executeAutoReversal` 및 DLQ 보고 `reportGhostCharge`, 타석 배정/구매/라카연장 제어, 중간 빈타석 가용시간 사전 점검, 마감 단축 모달 `closingPromptModal`)
 - **`components/IntroScreen.tsx`**: 메인 대기 화면 (실시간 층별 타석 현황 위젯 및 터치 진입)
 - **`components/MainPage/KioskMainDashboard.tsx`**: 7대 표준 기능(`예약 타석 체크인`, `연습타석 배정`, `파3 코스 배정`, `회원권/상품 구매`, `라카 대여/연장`, `타석 이동`, `신규 회원가입`) 및 동적 커스텀 메뉴 메인 허브
 - **`components/TopTeeboxDashboard.tsx` & `MiniTeeboxMonitor.tsx`**: 실제 매장 `floor_no`/`zone_code` 기반 동적 층별 타석 현황판 및 `PREPARE`/`PRE_OCCUPIED`/`MAINTENANCE` 상태 실시간 미니 모니터
@@ -32,5 +32,5 @@
 - **`components/LockerExtend.tsx`**: 본인 보유 라카(`locker_id` 매핑) 기간 연장 상품 선택(`days > 0` 필터링) 및 선점(`holdLockerExtension`)
 - **`components/PaymentTerminal.tsx`**: 애플 미니멀 중앙 플로팅 시트(27인치 세로형), 2-Step 결제 확인, 비회원➔회원 인증 전환, 5만원 이상 할부 선택, 다중 사업자 TID 라우팅 및 쿠폰/포인트 정산
 - **`components/AllocationCompleteModal.tsx` & `PurchaseCompleteModal.tsx` & `ReceiptPrinter.tsx`**: 실제 매장 사업자 정보(`biz_no`, `ceo_name`) 및 카드 승인정보 기반 ESC/POS 실물 영수증/배정표 출력 (`hasAutoPrintedRef` 중복 인쇄 방지 가드 탑재)
-- **`components/AdminPinModal.tsx` & `KioskSettingsModal.tsx` & `MaintenanceOverlay.tsx`**: 관리자 PIN(동적 `admin_pin` 검증 및 5회 오입력 30초 잠금), 상단 고정(Top-Anchored) 레이아웃(`alignItems: 'flex-start'`, `paddingTop: '9vh'`, `flexShrink: 0`) 및 프리미엄 라이트 테마(`#ffffff`/`#f8fafc`/`#10b981`) 리뉴얼, 7대 메뉴 2열 고밀도 그리드, 중간 빈타석 표시 기준 시간(`minGapMinutes`), 동적 매장코드(`storeCode`)/단말기(`deviceId`)/5대 멀티 VAN/VCAT 포트 실시간 설정(`kiosk-settings-changed` 이벤트 발행)
+- **`components/AdminPinModal.tsx` & `KioskSettingsModal.tsx` & `MaintenanceOverlay.tsx`**: 관리자 PIN(동적 `admin_pin` 검증, 5회 오입력 30초 잠금), 상단 고정 레이아웃 및 라이트 테마 리뉴얼, 7대 메뉴 2열 그리드, 중간 빈타석 기준 시간(`minGapMinutes`), 매장/단말기/5대 멀티 VAN/VCAT 실시간 설정(`kiosk-settings-changed`)
 - **`hooks/useKioskHardwareHeartbeat.ts` & `services/hardware/hooks/useHardwareScanner.ts`**: 단말기 하드웨어 헬스 하트비트 보고 및 USB HID/브릿지 바코드·QR 스캐너 통합 훅
