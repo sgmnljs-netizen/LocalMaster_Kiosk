@@ -4,6 +4,7 @@ import {
   useKioskSettings,
   KioskSettings,
   KioskAuthModeKey,
+  KioskTopDashboardMode,
   KioskAuthMethodsConfig,
   KioskMenuVisibilityMap,
   DEFAULT_AUTH_METHODS,
@@ -41,7 +42,7 @@ const STANDARD_KIOSK_MENUS = [
 ];
 
 const AUTH_METHOD_ITEMS: { key: KioskAuthModeKey; label: string; desc: string; emoji: string }[] = [
-  { key: 'SMART_TAG', label: '스마트폰 태그 (NFC/BLE)', desc: '안드로이드 NFC 및 아이폰 스마트 체크인', emoji: '📱' },
+  { key: 'SMART_TAG', label: '앱 스마트 체크인', desc: '골포스 모바일 앱 스마트 체크인 무선 연동', emoji: '📱' },
   { key: 'PHONE_KEYPAD', label: '전화번호 입력 (키패드)', desc: '휴대폰 뒷 4자리 / 전체 번호 키패드 조회', emoji: '🔢' },
   { key: 'QR_SCAN', label: '출입 QR / 바코드 스캔', desc: '하드웨어 리더기로 모바일/알림톡 QR 인식', emoji: '📷' },
   { key: 'FACE', label: 'AI 안면 인식 (카메라)', desc: '전면 카메라 비접촉 안면 인증 및 등록', emoji: '🙂' },
@@ -87,6 +88,9 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   );
   const [formMinGapMinutes, setFormMinGapMinutes] = useState<number>(
     settings.minGapMinutes ?? 60
+  );
+  const [formTopDashboardMode, setFormTopDashboardMode] = useState<KioskTopDashboardMode>(
+    settings.topDashboardMode || 'AUTO'
   );
   const [policyGuardMsg, setPolicyGuardMsg] = useState<string | null>(null);
 
@@ -142,6 +146,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       });
       setFormDefaultAuthMode(settings.defaultAuthMode || 'SMART_TAG');
       setFormMinGapMinutes(settings.minGapMinutes ?? 60);
+      setFormTopDashboardMode(settings.topDashboardMode || 'AUTO');
       setPolicyGuardMsg(null);
       setPingStatus(null);
       setSaveSuccess(false);
@@ -278,6 +283,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       authMethods: formAuthMethods,
       defaultAuthMode: formDefaultAuthMode,
       minGapMinutes: formMinGapMinutes,
+      topDashboardMode: formTopDashboardMode,
     };
 
     try {
@@ -295,7 +301,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       terminalId: cleanTerminalId,
     });
 
-    updateSettings(updated);
+    updateSettings(updated, { syncRemote: true });
     setSaveSuccess(true);
     setTimeout(() => {
       onClose();
@@ -311,7 +317,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
         backgroundColor: 'rgba(15, 23, 42, 0.55)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        zIndex: 99999,
+        zIndex: 100005,
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'center',
@@ -917,6 +923,59 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                         }}
                       >
                         {minOpt}분{minOpt === 60 ? ' (표준)' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section D: Top Teebox Dashboard Display Mode */}
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '16px',
+                }}
+              >
+                <div style={{ marginBottom: '10px' }}>
+                  <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                    📊 메인 화면 상단 실시간 타석 현황판 배열 모드
+                  </h4>
+                  <p style={{ fontSize: '11.5px', color: '#64748b', margin: '2px 0 0 0', fontWeight: 500 }}>
+                    매장 층별 타석 수에 따라 상단 현황판 타일 크기와 줄 수를 자동 최적화하거나 가맹점 요청에 맞춰 고정할 수 있습니다.
+                  </p>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                  {([
+                    { mode: 'AUTO' as KioskTopDashboardMode, label: '✨ 자동 맞춤 (추천)', desc: '12개 이하 1줄 / 13개 이상 2줄 대형 타일' },
+                    { mode: 'COMPACT_1ROW' as KioskTopDashboardMode, label: '📏 1줄 컴팩트 고정', desc: '타석 수와 무관하게 무조건 1줄 배열' },
+                    { mode: 'HIDDEN' as KioskTopDashboardMode, label: '🙈 현황판 숨김', desc: '상단 현황판 없이 메인 메뉴만 확대 표시' },
+                  ]).map((opt) => {
+                    const isSelected = formTopDashboardMode === opt.mode;
+                    return (
+                      <button
+                        key={opt.mode}
+                        type="button"
+                        data-testid={`top-dashboard-mode-${opt.mode}`}
+                        onClick={() => setFormTopDashboardMode(opt.mode)}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '12px',
+                          textAlign: 'left',
+                          background: isSelected ? '#ecfdf5' : '#ffffff',
+                          border: isSelected ? '2px solid #059669' : '1px solid #cbd5e1',
+                          color: '#0f172a',
+                          boxShadow: isSelected ? '0 3px 8px rgba(16, 185, 129, 0.15)' : 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div style={{ fontSize: '12.5px', fontWeight: 800, color: isSelected ? '#047857' : '#1e293b' }}>
+                          {opt.label}
+                        </div>
+                        <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px', fontWeight: 500 }}>
+                          {opt.desc}
+                        </div>
                       </button>
                     );
                   })}

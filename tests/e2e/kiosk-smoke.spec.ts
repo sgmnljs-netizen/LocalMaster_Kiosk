@@ -65,7 +65,7 @@ test.describe('Layer 1: 키오스크 스모크 크롤러 (Smoke Crawler)', () =>
 
     // 1) 회원가입 메뉴 진입
     await page.locator('text=회원가입').first().click();
-    await expect(page.getByRole('heading', { name: '무인 스튜디오 30초 즉석 회원가입' })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('heading', { name: /신규 회원가입/ })).toBeVisible({ timeout: 5000 });
 
     // 취소/돌아가기
     const cancelBtn = page.locator('button:has-text("취소")').first();

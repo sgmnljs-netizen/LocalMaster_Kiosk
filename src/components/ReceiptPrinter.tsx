@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Printer, CheckCircle, XCircle } from 'lucide-react';
 import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
+import { printKioskBayAllocationSlip } from '../utils/kioskSlipPrinter';
 import { api } from '../services/api';
 
 export interface ReceiptData {
@@ -36,8 +37,8 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
     const triggerHardwarePrint = async () => {
       try {
         const storeInfo = await api.getStoreInfo().catch(() => null);
-        const resolvedOwner = receiptData.ownerNm || storeInfo?.owner_nm || storeInfo?.ceo_nm || '대표자';
-        if (mounted) {
+        const resolvedOwner = receiptData.ownerNm || storeInfo?.owner_nm || storeInfo?.ceo_nm || (storeInfo as any)?.ceo_name || '';
+        if (mounted && resolvedOwner) {
           setOwnerNm(resolvedOwner);
         }
         const isTaxFree = receiptData.vatYn === 'N';
@@ -45,43 +46,63 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
         const vatAmt = isTaxFree ? 0 : receiptData.totalAmount - supplyAmt;
         const taxFreeAmt = isTaxFree ? receiptData.totalAmount : 0;
 
-        await kioskHardwareBridge.printReceipt({
-          sale_id: receiptData.resId || `SALE-${Date.now()}`,
-          receipt_no: receiptData.resId || `REC-${Date.now()}`,
-          trade_dt: receiptData.tradeDate || new Date().toLocaleString('ko-KR'),
-          pay_method: receiptData.totalAmount > 0 ? 'CARD' : 'PASS',
-          store_info: {
-            store_name: receiptData.branchNm || storeInfo?.store_nm || 'GOLFOS',
-            biz_no: receiptData.bizNo || storeInfo?.biz_no || '000-00-00000',
-            ceo_name: resolvedOwner,
-            tel: receiptData.tel || storeInfo?.tel || storeInfo?.tel_no || '',
-            address: receiptData.address || storeInfo?.address || ''
-          },
-          tax_summary: {
-            supply_amt: supplyAmt,
-            tax_amt: vatAmt,
-            tax_free_amt: taxFreeAmt,
-            total_amt: receiptData.totalAmount,
-            discount_amt: 0,
-            pay_amt: receiptData.totalAmount
-          },
-          card_info: receiptData.totalAmount > 0 ? {
-            issuer_name: receiptData.cardIssuer || '신용카드',
-            card_no_masked: receiptData.cardNo || '****-****-****-****',
-            approval_no: receiptData.apprNo || '-',
-            installment_months: receiptData.installmentMonths ?? 0,
-            approval_dt: receiptData.tradeDate || new Date().toLocaleString('ko-KR'),
-            terminal_id: receiptData.terminalId || localStorage.getItem('LM_KIOSK_TERMINAL_ID') || 'KIOSK-01'
-          } : undefined,
-          items: [
-            {
-              name: receiptData.prodNm,
-              qty: receiptData.partySize || 1,
-              unit_price: receiptData.totalAmount,
-              amount: receiptData.totalAmount,
-              is_tax_free: isTaxFree
-            }
-          ]
+        const resolvedStoreInfo = {
+          store_name: receiptData.branchNm || storeInfo?.store_nm || 'GOLFOS',
+          biz_no: receiptData.bizNo || storeInfo?.biz_no || (storeInfo as any)?.biz_reg_no || '',
+          ceo_name: resolvedOwner,
+          tel: receiptData.tel || storeInfo?.tel || storeInfo?.tel_no || '',
+          address: receiptData.address || storeInfo?.address || '',
+        };
+
+        const tradeDtStr = receiptData.tradeDate || new Date().toLocaleString('ko-KR');
+
+        if (receiptData.totalAmount > 0) {
+          await kioskHardwareBridge.printReceipt({
+            sale_id: receiptData.resId || `SALE-${Date.now()}`,
+            receipt_no: receiptData.resId || `REC-${Date.now()}`,
+            trade_dt: tradeDtStr,
+            client_type: 'KIOSK',
+            pay_method: 'CARD',
+            store_info: resolvedStoreInfo,
+            tax_summary: {
+              supply_amt: supplyAmt,
+              tax_amt: vatAmt,
+              tax_free_amt: taxFreeAmt,
+              total_amt: receiptData.totalAmount,
+              discount_amt: 0,
+              pay_amt: receiptData.totalAmount,
+            },
+            card_info: {
+              issuer_name: receiptData.cardIssuer || '신용카드',
+              card_no_masked: receiptData.cardNo || '신용카드',
+              approval_no: receiptData.apprNo || '-',
+              installment_months: receiptData.installmentMonths ?? 0,
+              approval_dt: tradeDtStr,
+              terminal_id: receiptData.terminalId || localStorage.getItem('LM_KIOSK_TERMINAL_ID') || api.getTerminalId(),
+            },
+            items: [
+              {
+                name: receiptData.prodNm,
+                qty: receiptData.partySize || 1,
+                unit_price: receiptData.totalAmount,
+                amount: receiptData.totalAmount,
+                is_tax_free: isTaxFree,
+              },
+            ],
+            header_message: '[ 신용카드 매출전표 ]',
+            footer_message: '파3 라운딩 결제가 완료되었습니다. 이어서 라운딩 배정표가 출력됩니다.',
+          });
+        }
+
+        await printKioskBayAllocationSlip({
+          bayNo: receiptData.prodNm || '파3 라운딩',
+          resId: receiptData.resId,
+          memberName: `파3 고객 (${receiptData.partySize || 1}명)`,
+          productName: receiptData.prodNm,
+          actionLabel: '파3 라운딩 접수',
+          extraNote: `인원: ${receiptData.partySize || 1}명 / 코스 입장 시 바코드를 스캔해 주세요.`,
+          storeInfo: resolvedStoreInfo,
+          tradeDt: tradeDtStr,
         });
       } catch (err) {
         console.warn('[ReceiptPrinter] Hardware print fallback:', err);

@@ -129,11 +129,104 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     onPaymentSuccess(payload);
   }, [onPaymentSuccess]);
 
-  // 🎟️ 쿠폰 관련 상태
+  // 🎟️ 쿠폰 관련 상태 (보유 쿠폰 목록 자동 조회 + 수기 번호 입력)
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [couponError, setCouponError] = useState('');
   const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
+  const [memberCoupons, setMemberCoupons] = useState<any[]>([]);
+  const [isLoadingMemberCoupons, setIsLoadingMemberCoupons] = useState(false);
+
+  // 회원 인증 시 보유 할인쿠폰 목록 실시간 로드
+  useEffect(() => {
+    let cancelled = false;
+    if (!memberNo) {
+      setMemberCoupons([]);
+      return;
+    }
+    setIsLoadingMemberCoupons(true);
+    api.getMemberCoupons(memberNo)
+      .then((list) => {
+        if (!cancelled) {
+          setMemberCoupons(Array.isArray(list) ? list : []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMemberCoupons([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingMemberCoupons(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [memberNo]);
+
+  // 쿠폰 사용 가능 여부(최소 주문 금액 & 대상 카테고리) 판별 헬퍼
+  const checkCouponEligibility = useCallback((coupon: any): { eligible: boolean; reason: string } => {
+    if (!coupon) return { eligible: false, reason: '유효하지 않은 쿠폰입니다.' };
+    if (coupon.min_order_amt && amount < coupon.min_order_amt) {
+      return {
+        eligible: false,
+        reason: `최소 주문 금액(${Number(coupon.min_order_amt).toLocaleString()}원) 이상일 때만 사용 가능합니다.`
+      };
+    }
+    if (coupon.target_categories && Array.isArray(coupon.target_categories) && coupon.target_categories.length > 0) {
+      const isBayAllocation = Boolean(assignedBayNo) || Boolean(assignedBayNos && assignedBayNos.length > 0);
+      const normProdCat = String(productCategory || '').toUpperCase();
+      const allowedCategories = assignedLockerNo 
+        ? ['LOCKER', 'RENTAL', 'ALL'] 
+        : (isBayAllocation || normProdCat === 'DAILY' || normProdCat === 'DAY'
+            ? ['DAILY', 'BAY', 'PASS', 'ALL'] 
+            : (normProdCat === 'PERIOD' || normProdCat === 'MEMBERSHIP')
+              ? ['PERIOD', 'MEMBERSHIP', 'PASS', 'BAY', 'ALL']
+              : (normProdCat === 'COUNT' || normProdCat === 'COUPON')
+                ? ['COUNT', 'COUPON', 'TICKET', 'PASS', 'BAY', 'ALL']
+                : normProdCat === 'LESSON'
+                  ? ['LESSON', 'ALL']
+                  : (normProdCat === 'GOODS' || normProdCat === 'FNB' || normProdCat === 'RETAIL')
+                    ? ['GOODS', 'FNB', 'RETAIL', 'ALL']
+                    : ['PERIOD', 'COUNT', 'PASS', 'BAY', 'LESSON', 'GOODS', 'ALL']);
+      
+      const isMatched = coupon.target_categories.some((cat: string) => allowedCategories.includes(String(cat).toUpperCase()));
+      if (!isMatched) {
+        const catLabels: Record<string, string> = {
+          PERIOD: '정액(회원)권',
+          COUNT: '쿠폰(횟수)권',
+          DAILY: '일일권',
+          LESSON: '레슨',
+          LOCKER: '라카',
+          GOODS: '매장상품',
+          BAY: '타석전체',
+        };
+        const targetLabels = coupon.target_categories.map((c: string) => catLabels[c] || c).join(', ');
+        return {
+          eligible: false,
+          reason: `해당 쿠폰은 [${targetLabels}] 전용 쿠폰입니다.`
+        };
+      }
+    }
+    return { eligible: true, reason: '' };
+  }, [amount, assignedBayNo, assignedBayNos, assignedLockerNo, productCategory]);
+
+  // 보유 쿠폰 목록에서 원터치 선택 핸들러
+  const handleSelectMemberCoupon = (coupon: any) => {
+    const check = checkCouponEligibility(coupon);
+    if (!check.eligible) {
+      setCouponError(check.reason);
+      return;
+    }
+    setAppliedCoupon(coupon);
+    setCouponCode('');
+    setCouponError('');
+    if (isPayRequested.current) {
+      isSilentCancelRef.current = true;
+      cancelPayment();
+      isPayRequested.current = false;
+    }
+    setErrorMsg('');
+    setIsReadyToPay(false);
+  };
 
   // 등급 할인 및 쿠폰 할인 실시간 산출 (BUG-02: 동반자 그룹배정 시 회원 본인 슬롯 금액 기준 할인)
   const baseForGradeDiscount = discountableAmount !== undefined ? discountableAmount : amount;
@@ -151,21 +244,23 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       : Math.min(couponBenefitVal, amount)
   ) : 0;
 
+  const POINT_USE_UNIT = 1000;
   const targetPayAmt = Math.max(0, amount - gradeDiscountAmt - couponDiscountAmt);
-  const clampedUsedPoints = Math.min(usedPoints, targetPayAmt);
+  const maxUsablePoints = Math.floor(Math.min(memberPoint, targetPayAmt) / POINT_USE_UNIT) * POINT_USE_UNIT;
+  const clampedUsedPoints = Math.floor(Math.min(usedPoints, maxUsablePoints) / POINT_USE_UNIT) * POINT_USE_UNIT;
   const finalCardAmt = Math.max(0, targetPayAmt - clampedUsedPoints);
   const canSelectInstallment = finalCardAmt >= MIN_INSTALLMENT_AMOUNT;
   const effectiveInstallmentMonths = canSelectInstallment ? installmentMonths : 0;
 
-  // [BUG-04 FIX] 쿠폰 적용 등으로 결제 대상 금액(targetPayAmt)이 줄어든 경우 기선택 포인트 및 할부 개월수가 초과/유지되지 않도록 즉시 보정
+  // [BUG-04 FIX] 쿠폰 적용 등으로 결제 대상 금액(targetPayAmt)이 줄어든 경우 기선택 포인트(1,000P 단위) 및 할부 개월수가 초과/유지되지 않도록 즉시 보정
   useEffect(() => {
-    if (usedPoints > targetPayAmt) {
-      setUsedPoints(targetPayAmt);
+    if (usedPoints > maxUsablePoints) {
+      setUsedPoints(maxUsablePoints);
     }
     if (installmentMonths !== 0 && !canSelectInstallment) {
       setInstallmentMonths(0);
     }
-  }, [targetPayAmt, usedPoints, installmentMonths, canSelectInstallment]);
+  }, [maxUsablePoints, usedPoints, installmentMonths, canSelectInstallment]);
 
   // 🎟️ 쿠폰 검증 핸들러
   const handleVerifyCoupon = async (codeToVerify?: string) => {
@@ -187,6 +282,11 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             const serialRes = await api.registerSerialCoupon(targetCode, memberNo);
             if (serialRes.success || serialRes.coupon_no) {
               coupon = serialRes;
+              if ((api as any).getMemberCoupons) {
+                api.getMemberCoupons(memberNo).then((list) => {
+                  if (Array.isArray(list)) setMemberCoupons(list);
+                }).catch(() => {});
+              }
             }
           } catch (serialErr: any) {
             throw new Error(serialErr.message || verifyErr.message);
@@ -279,35 +379,15 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     enabled: payStep === 'INSERT_CARD',
   });
 
-  // 포인트 전액 사용 퀵 핸들러 (가맹점 최대 한도 적용 & 1~99원 카드 자투리 방지)
+  // 포인트 전액 사용 퀵 핸들러 (1,000P 단위 고정 절사)
   const handleUseAllPoints = () => {
-    if (memberPoint >= targetPayAmt) {
-      // 보유 포인트가 결제 대상 금액 이상인 경우 1원 단위 자투리까지 전액 포인트 결제로 처리하여 1~9원 카드 결제 데드락 방지
-      setUsedPoints(targetPayAmt);
-      return;
-    }
-    const maxUsable = Math.min(memberPoint, targetPayAmt);
-    let rounded = Math.floor(maxUsable / 10) * 10;
-    const remainderCard = targetPayAmt - rounded;
-    if (remainderCard > 0 && remainderCard < 100) {
-      // 카드 잔여 결제액이 100원 미만이 되지 않도록 포인트 사용량 조정
-      rounded = Math.max(0, Math.floor((targetPayAmt - 100) / 10) * 10);
-    }
-    setUsedPoints(rounded);
+    setUsedPoints(maxUsablePoints);
   };
 
-  // 포인트 퀵 칩 가산 핸들러
+  // 포인트 퀵 칩 가산 핸들러 (1,000P 단위 고정 절사)
   const handleAddPoints = (addAmt: number) => {
-    const rawNext = Math.min(usedPoints + addAmt, memberPoint, targetPayAmt);
-    if (rawNext >= targetPayAmt && memberPoint >= targetPayAmt) {
-      setUsedPoints(targetPayAmt);
-      return;
-    }
-    let rounded = Math.floor(rawNext / 10) * 10;
-    const remainderCard = targetPayAmt - rounded;
-    if (remainderCard > 0 && remainderCard < 100) {
-      rounded = Math.max(0, Math.floor((targetPayAmt - 100) / 10) * 10);
-    }
+    const rawNext = Math.min(usedPoints + addAmt, maxUsablePoints);
+    const rounded = Math.floor(rawNext / POINT_USE_UNIT) * POINT_USE_UNIT;
     setUsedPoints(rounded);
   };
 
@@ -572,15 +652,15 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       }}
     >
       {/* =========================================================================
-          [1단계] 결제 옵션 확인 (애플 미니멀 중앙 플로팅 시트 - 940px 확장 뷰)
+          [1단계] 결제 옵션 확인 (애플 미니멀 중앙 플로팅 시트 - 960px 확장 & 1.25x 스케일업 뷰)
          ========================================================================= */}
       {payStep === 'INSERT_CARD' && !isReadyToPay && (
         <div
           style={{
             width: '100%',
-            maxWidth: '940px',
+            maxWidth: '960px',
             background: '#ffffff',
-            borderRadius: '36px',
+            borderRadius: '40px',
             border: '1px solid #e5e5ea',
             boxShadow: '0 28px 70px rgba(0, 0, 0, 0.09), 0 4px 18px rgba(0, 0, 0, 0.04)',
             padding: '44px 48px',
@@ -600,11 +680,11 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               flexShrink: 0
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
               <div
                 style={{
-                  width: '52px',
-                  height: '52px',
+                  width: '58px',
+                  height: '58px',
                   borderRadius: '50%',
                   background: '#f5f5f7',
                   border: '1px solid #e5e5ea',
@@ -614,26 +694,26 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                   flexShrink: 0
                 }}
               >
-                <CreditCard size={26} color="#1d1d1f" />
+                <CreditCard size={28} color="#1d1d1f" />
               </div>
               <div>
                 <h1
                   style={{
-                    fontSize: '28px',
+                    fontSize: '34px',
                     fontWeight: 900,
                     color: '#1d1d1f',
                     margin: 0,
-                    letterSpacing: '-0.5px'
+                    letterSpacing: '-0.6px'
                   }}
                 >
                   결제 금액 확인
                 </h1>
                 <p
                   style={{
-                    fontSize: '15px',
+                    fontSize: '17px',
                     color: '#86868b',
                     fontWeight: 600,
-                    margin: '3px 0 0 0'
+                    margin: '4px 0 0 0'
                   }}
                 >
                   주문 내역과 결제 옵션을 확인해 주세요.
@@ -642,50 +722,48 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             </div>
 
             {!isProcessing && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
                 <button
                   type="button"
                   onClick={handleUserCancel}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
-                    height: '50px',
-                    padding: '0 22px',
+                    gap: '8px',
+                    height: '56px',
+                    padding: '0 26px',
                     borderRadius: '999px',
-                    border: '1px solid #e5e5ea',
+                    border: '1.5px solid #e5e5ea',
                     background: '#f5f5f7',
                     color: '#1d1d1f',
-                    fontSize: '16px',
+                    fontSize: '18px',
                     fontWeight: 800,
                     cursor: 'pointer',
                     transition: 'all 0.15s ease'
                   }}
                 >
-                  <ArrowLeft size={17} />
+                  <ArrowLeft size={20} strokeWidth={2.4} />
                   이전 단계
                 </button>
                 <button
                   type="button"
+                  aria-label="취소"
                   onClick={handleUserCancel}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '4px',
-                    height: '50px',
-                    padding: '0 20px',
-                    borderRadius: '999px',
-                    border: '1px solid #e5e5ea',
+                    justifyContent: 'center',
+                    width: '56px',
+                    height: '56px',
+                    borderRadius: '50%',
+                    border: '1.5px solid #e5e5ea',
                     background: '#f5f5f7',
-                    color: '#86868b',
-                    fontSize: '16px',
-                    fontWeight: 700,
+                    color: '#1d1d1f',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease'
                   }}
                 >
-                  <X size={17} />
-                  취소
+                  <X size={26} strokeWidth={2.4} />
                 </button>
               </div>
             )}
@@ -698,16 +776,16 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 background: '#fef2f2',
                 border: '1px solid #fecaca',
                 borderRadius: '18px',
-                padding: '14px 20px',
+                padding: '16px 22px',
                 color: '#b91c1c',
-                fontSize: '15px',
+                fontSize: '17px',
                 fontWeight: 800,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '12px'
               }}
             >
-              <ShieldAlert size={20} color="#b91c1c" />
+              <ShieldAlert size={22} color="#b91c1c" />
               <span>{errorMsg}</span>
             </div>
           )}
@@ -716,24 +794,24 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           <div
             style={{
               background: '#f5f5f7',
-              borderRadius: '22px',
+              borderRadius: '24px',
               border: '1px solid #e5e5ea',
-              padding: '22px 28px',
+              padding: '24px 30px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               boxSizing: 'border-box'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
               <span
                 style={{
                   background: '#1d1d1f',
                   color: '#ffffff',
-                  fontSize: '15px',
+                  fontSize: '17px',
                   fontWeight: 800,
-                  padding: '8px 14px',
-                  borderRadius: '12px',
+                  padding: '10px 18px',
+                  borderRadius: '14px',
                   letterSpacing: '-0.3px',
                   flexShrink: 0
                 }}
@@ -747,10 +825,10 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                       : '이용권'}
               </span>
               <div>
-                <div style={{ fontSize: '24px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
+                <div style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.6px' }}>
                   {productName}
                 </div>
-                <div style={{ fontSize: '14px', color: '#86868b', fontWeight: 600, marginTop: '3px' }}>
+                <div style={{ fontSize: '16px', color: '#86868b', fontWeight: 600, marginTop: '4px' }}>
                   {(assignedBayNos && assignedBayNos.length > 0)
                     ? `동반자 그룹 (${assignedBayNos.length}석)`
                     : (assignedBayNo !== undefined && assignedBayNo !== null)
@@ -761,11 +839,11 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             </div>
 
             <div style={{ textAlign: 'right', flexShrink: 0 }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#86868b' }}>
+              <div style={{ fontSize: '15px', fontWeight: 700, color: '#86868b' }}>
                 기준 금액
               </div>
-              <div style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', marginTop: '2px', letterSpacing: '-0.5px' }}>
-                {amount.toLocaleString()} <span style={{ fontSize: '19px', fontWeight: 700 }}>원</span>
+              <div style={{ fontSize: '36px', fontWeight: 900, color: '#1d1d1f', marginTop: '2px', letterSpacing: '-0.8px' }}>
+                {amount.toLocaleString()} <span style={{ fontSize: '22px', fontWeight: 700 }}>원</span>
               </div>
             </div>
           </div>
@@ -774,22 +852,22 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           <div
             style={{
               background: '#f5f5f7',
-              borderRadius: '22px',
+              borderRadius: '24px',
               border: '1px solid #e5e5ea',
-              padding: '20px 24px',
+              padding: '22px 26px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '14px',
+              gap: '16px',
               boxSizing: 'border-box'
             }}
           >
             {!memberNo ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                   <div
                     style={{
-                      width: '44px',
-                      height: '44px',
+                      width: '50px',
+                      height: '50px',
                       borderRadius: '50%',
                       background: '#ffffff',
                       border: '1px solid #e5e5ea',
@@ -800,13 +878,13 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                       flexShrink: 0
                     }}
                   >
-                    <UserCheck size={22} />
+                    <UserCheck size={24} />
                   </div>
                   <div>
-                    <div style={{ fontSize: '17px', fontWeight: 800, color: '#1d1d1f' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 800, color: '#1d1d1f' }}>
                       회원 정보 및 혜택 조회
                     </div>
-                    <div style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>
+                    <div style={{ fontSize: '16px', color: '#86868b', fontWeight: 600 }}>
                       회원으로 이용하시려면 인증을 진행해 주세요.
                     </div>
                   </div>
@@ -825,13 +903,13 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                       onRequestMemberAuth();
                     }}
                     style={{
-                      height: '52px',
-                      padding: '0 26px',
+                      height: '56px',
+                      padding: '0 28px',
                       borderRadius: '999px',
                       background: '#1d1d1f',
                       border: 'none',
                       color: '#ffffff',
-                      fontSize: '16px',
+                      fontSize: '18px',
                       fontWeight: 800,
                       cursor: 'pointer',
                       display: 'flex',
@@ -842,36 +920,37 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                       transition: 'all 0.15s ease'
                     }}
                   >
-                    <UserCheck size={20} />
+                    <UserCheck size={22} />
                     <span>회원 인증 / 로그인</span>
                   </button>
                 )}
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '18px', fontWeight: 900, color: '#1d1d1f' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f' }}>
                       {memberName || '회원'} 님
                     </span>
-                    <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>
+                    <span style={{ fontSize: '16px', color: '#86868b', fontWeight: 600 }}>
                       ({memberNo})
                     </span>
                     <span
                       style={{
-                        fontSize: '13px',
+                        fontSize: '14px',
                         fontWeight: 800,
-                        color: '#0071e3',
-                        background: 'rgba(0, 113, 227, 0.08)',
-                        padding: '3px 10px',
-                        borderRadius: '6px'
+                        color: '#059669',
+                        background: '#ecfdf5',
+                        border: '1px solid #a7f3d0',
+                        padding: '4px 12px',
+                        borderRadius: '999px'
                       }}
                     >
                       인증 완료
                     </span>
                   </div>
                   {discountRate > 0 && (
-                    <span style={{ fontSize: '14px', fontWeight: 800, color: '#047857' }}>
+                    <span style={{ fontSize: '16px', fontWeight: 800, color: '#047857' }}>
                       ✨ 등급할인 {discountRate}% (-{gradeDiscountAmt.toLocaleString()}원)
                     </span>
                   )}
@@ -881,44 +960,44 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 <div
                   style={{
                     background: '#ffffff',
-                    borderRadius: '16px',
+                    borderRadius: '18px',
                     border: '1px solid #e5e5ea',
-                    padding: '14px 18px',
+                    padding: '16px 22px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    gap: '16px'
+                    gap: '18px'
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
                     <div>
-                      <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 600 }}>보유 포인트</span>
-                      <div style={{ fontSize: '18px', fontWeight: 900, color: '#1d1d1f' }}>
+                      <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>보유 포인트</span>
+                      <div style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', marginTop: '2px' }}>
                         {memberPoint.toLocaleString()} P
                       </div>
                     </div>
-                    <div style={{ width: '1px', height: '24px', background: '#e5e5ea' }} />
+                    <div style={{ width: '1px', height: '30px', background: '#e5e5ea' }} />
                     <div>
-                      <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 600 }}>사용 포인트</span>
-                      <div style={{ fontSize: '18px', fontWeight: 900, color: clampedUsedPoints > 0 ? '#0071e3' : '#86868b' }}>
+                      <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>사용 포인트 (1,000P 단위)</span>
+                      <div style={{ fontSize: '22px', fontWeight: 900, color: clampedUsedPoints > 0 ? '#059669' : '#86868b', marginTop: '2px' }}>
                         -{clampedUsedPoints.toLocaleString()} P
                       </div>
                     </div>
                   </div>
 
-                  {memberPoint > 0 && (
+                  {memberPoint >= POINT_USE_UNIT && targetPayAmt >= POINT_USE_UNIT ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <button
                         type="button"
                         data-testid="use-all-points-btn"
                         onClick={handleUseAllPoints}
                         style={{
-                          height: '42px',
-                          padding: '0 16px',
+                          height: '48px',
+                          padding: '0 20px',
                           borderRadius: '999px',
                           background: '#1d1d1f',
                           color: '#ffffff',
-                          fontSize: '14px',
+                          fontSize: '16px',
                           fontWeight: 800,
                           border: 'none',
                           cursor: 'pointer'
@@ -929,26 +1008,40 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleAddPoints(1000)}
-                        style={{ height: '42px', padding: '0 12px', borderRadius: '999px', background: '#f5f5f7', border: '1px solid #d2d2d7', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+                        style={{ height: '48px', padding: '0 14px', borderRadius: '999px', background: '#f5f5f7', border: '1px solid #d2d2d7', fontWeight: 700, fontSize: '15px', cursor: 'pointer' }}
                       >
                         +1천
                       </button>
                       <button
                         type="button"
                         onClick={() => handleAddPoints(5000)}
-                        style={{ height: '42px', padding: '0 12px', borderRadius: '999px', background: '#f5f5f7', border: '1px solid #d2d2d7', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+                        style={{ height: '48px', padding: '0 14px', borderRadius: '999px', background: '#f5f5f7', border: '1px solid #d2d2d7', fontWeight: 700, fontSize: '15px', cursor: 'pointer' }}
                       >
                         +5천
                       </button>
                       <button
                         type="button"
                         onClick={() => setUsedPoints(0)}
-                        style={{ height: '42px', padding: '0 12px', borderRadius: '999px', background: '#ffffff', border: '1px solid #fecaca', color: '#ff3b30', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+                        style={{ height: '48px', padding: '0 14px', borderRadius: '999px', background: '#ffffff', border: '1px solid #fecaca', color: '#ff3b30', fontWeight: 700, fontSize: '15px', cursor: 'pointer' }}
                       >
                         초기화
                       </button>
                     </div>
-                  )}
+                  ) : memberPoint > 0 ? (
+                    <span
+                      style={{
+                        fontSize: '14px',
+                        fontWeight: 700,
+                        color: '#86868b',
+                        background: '#f5f5f7',
+                        border: '1px solid #e5e5ea',
+                        padding: '6px 14px',
+                        borderRadius: '999px'
+                      }}
+                    >
+                      1,000 P 이상부터 1,000 P 단위로 사용 가능
+                    </span>
+                  ) : null}
                 </div>
               </div>
             )}
@@ -960,24 +1053,41 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             <div
               style={{
                 background: '#f5f5f7',
-                borderRadius: '22px',
+                borderRadius: '24px',
                 border: '1px solid #e5e5ea',
-                padding: '20px 22px',
+                padding: '22px 24px',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                gap: '12px',
+                gap: '14px',
                 boxSizing: 'border-box'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: '17px', fontWeight: 800, color: '#1d1d1f', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Ticket size={19} color="#1d1d1f" />
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#1d1d1f', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Ticket size={22} color="#1d1d1f" />
                   <span>할인 쿠폰</span>
                 </div>
-                <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 600 }}>
-                  바코드 스캔 / 입력
-                </span>
+                {memberNo ? (
+                  <span
+                    data-testid="member-coupon-count-badge"
+                    style={{
+                      fontSize: '14px',
+                      fontWeight: 800,
+                      color: memberCoupons.length > 0 ? '#059669' : '#86868b',
+                      background: memberCoupons.length > 0 ? '#ecfdf5' : '#ffffff',
+                      border: `1px solid ${memberCoupons.length > 0 ? '#a7f3d0' : '#e5e5ea'}`,
+                      padding: '4px 12px',
+                      borderRadius: '999px'
+                    }}
+                  >
+                    {isLoadingMemberCoupons ? '쿠폰 조회 중...' : `보유 쿠폰 ${memberCoupons.length}장`}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>
+                    바코드 스캔 / 입력
+                  </span>
+                )}
               </div>
 
               {appliedCoupon ? (
@@ -987,17 +1097,17 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     background: '#ffffff',
-                    padding: '12px 18px',
-                    borderRadius: '14px',
-                    border: '1px solid #0071e3'
+                    padding: '16px 20px',
+                    borderRadius: '16px',
+                    border: '2px solid #059669'
                   }}
                 >
-                  <div>
-                    <div style={{ fontSize: '15px', fontWeight: 800, color: '#1d1d1f' }}>
+                  <div style={{ minWidth: 0, flex: 1, paddingRight: '12px' }}>
+                    <div style={{ fontSize: '17px', fontWeight: 800, color: '#1d1d1f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {appliedCoupon.coupon_nm || appliedCoupon.coupon_name || '할인 쿠폰'}
                     </div>
-                    <div style={{ fontSize: '13px', color: '#0071e3', fontWeight: 700, marginTop: '2px' }}>
-                      -{couponDiscountAmt.toLocaleString()}원 적용
+                    <div style={{ fontSize: '15px', color: '#059669', fontWeight: 800, marginTop: '3px' }}>
+                      -{couponDiscountAmt.toLocaleString()}원 할인 적용됨
                     </div>
                   </div>
                   <button
@@ -1009,83 +1119,159 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                       border: '1px solid #e5e5ea',
                       color: '#ff3b30',
                       borderRadius: '999px',
-                      height: '38px',
-                      padding: '0 14px',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      cursor: 'pointer'
+                      height: '44px',
+                      padding: '0 18px',
+                      fontSize: '15px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0
                     }}
                   >
                     취소 ✕
                   </button>
                 </div>
               ) : (
-                <div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="text"
-                      data-testid="coupon-code-input"
-                      value={couponCode}
-                      onFocus={() => {
-                        if (isPayRequested.current && (vanState === 'WAITING_CARD' || vanState === 'READY')) {
-                          isSilentCancelRef.current = true;
-                          cancelPayment();
-                          isPayRequested.current = false;
-                          setIsReadyToPay(false);
-                          setErrorMsg('');
-                        }
-                      }}
-                      onChange={(e) => {
-                        setCouponCode(e.target.value.toUpperCase());
-                        if (isPayRequested.current && (vanState === 'WAITING_CARD' || vanState === 'READY')) {
-                          isSilentCancelRef.current = true;
-                          cancelPayment();
-                          isPayRequested.current = false;
-                          setIsReadyToPay(false);
-                          setErrorMsg('');
-                        }
-                      }}
-                      onKeyDown={(e) => e.key === 'Enter' && handleVerifyCoupon()}
-                      placeholder="쿠폰 번호 입력"
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* 🎟️ 회원 보유 쿠폰 1-Touch 선택 리스트 */}
+                  {memberNo && memberCoupons.length > 0 && (
+                    <div
+                      data-testid="member-coupon-list"
                       style={{
-                        flex: 1,
-                        height: '52px',
-                        padding: '0 16px',
-                        borderRadius: '14px',
-                        border: '1px solid #d2d2d7',
-                        fontSize: '15px',
-                        fontWeight: 700,
-                        outline: 'none',
-                        background: '#ffffff',
-                        color: '#1d1d1f'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      data-testid="apply-coupon-btn"
-                      onClick={() => handleVerifyCoupon()}
-                      disabled={isVerifyingCoupon || !couponCode.trim()}
-                      style={{
-                        padding: '0 22px',
-                        height: '52px',
-                        borderRadius: '14px',
-                        background: couponCode.trim() ? '#1d1d1f' : '#e5e5ea',
-                        color: couponCode.trim() ? '#ffffff' : '#8e8e93',
-                        fontSize: '15px',
-                        fontWeight: 800,
-                        border: 'none',
-                        cursor: couponCode.trim() ? 'pointer' : 'default',
-                        flexShrink: 0
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        maxHeight: '148px',
+                        overflowY: 'auto',
+                        paddingRight: '2px'
                       }}
                     >
-                      {isVerifyingCoupon ? '확인 중' : '적용'}
-                    </button>
-                  </div>
-                  {couponError && (
-                    <div style={{ fontSize: '12px', color: '#ff3b30', fontWeight: 700, marginTop: '6px' }}>
-                      ⚠️ {couponError}
+                      {memberCoupons.map((cpn: any) => {
+                        const cpnNo = cpn.coupon_no || cpn.code || '';
+                        const cpnName = cpn.coupon_nm || cpn.coupon_name || '할인 쿠폰';
+                        const isRate = cpn.benefit_type === 'RATE' || cpn.coupon_type === 'PERCENT';
+                        const val = Number(cpn.benefit_val ?? (isRate ? cpn.discount_rate : cpn.discount_amount) ?? 0);
+                        const benefitText = isRate ? `${val}% 할인` : `${val.toLocaleString()}원 할인`;
+                        const elig = checkCouponEligibility(cpn);
+                        return (
+                          <button
+                            key={cpnNo}
+                            type="button"
+                            data-testid={`select-member-coupon-${cpnNo}`}
+                            disabled={!elig.eligible}
+                            onClick={() => handleSelectMemberCoupon(cpn)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '12px 16px',
+                              borderRadius: '14px',
+                              background: '#ffffff',
+                              border: elig.eligible ? '1.5px solid #d2d2d7' : '1px solid #e5e5ea',
+                              opacity: elig.eligible ? 1 : 0.55,
+                              cursor: elig.eligible ? 'pointer' : 'not-allowed',
+                              textAlign: 'left',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <div style={{ minWidth: 0, flex: 1, paddingRight: '10px' }}>
+                              <div style={{ fontSize: '16px', fontWeight: 800, color: '#1d1d1f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {cpnName}
+                              </div>
+                              <div style={{ fontSize: '14px', fontWeight: 700, color: elig.eligible ? '#059669' : '#86868b', marginTop: '2px' }}>
+                                {elig.eligible ? benefitText : `${benefitText} · ${elig.reason}`}
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                height: '36px',
+                                padding: '0 14px',
+                                borderRadius: '999px',
+                                background: elig.eligible ? '#1d1d1f' : '#e5e5ea',
+                                color: elig.eligible ? '#ffffff' : '#86868b',
+                                fontSize: '14px',
+                                fontWeight: 800,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0
+                              }}
+                            >
+                              {elig.eligible ? '선택' : '불가'}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
+
+                  <div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="text"
+                        data-testid="coupon-code-input"
+                        value={couponCode}
+                        onFocus={() => {
+                          if (isPayRequested.current && (vanState === 'WAITING_CARD' || vanState === 'READY')) {
+                            isSilentCancelRef.current = true;
+                            cancelPayment();
+                            isPayRequested.current = false;
+                            setIsReadyToPay(false);
+                            setErrorMsg('');
+                          }
+                        }}
+                        onChange={(e) => {
+                          setCouponCode(e.target.value.toUpperCase());
+                          if (isPayRequested.current && (vanState === 'WAITING_CARD' || vanState === 'READY')) {
+                            isSilentCancelRef.current = true;
+                            cancelPayment();
+                            isPayRequested.current = false;
+                            setIsReadyToPay(false);
+                            setErrorMsg('');
+                          }
+                        }}
+                        onKeyDown={(e) => e.key === 'Enter' && handleVerifyCoupon()}
+                        placeholder="쿠폰 번호 입력 또는 바코드 스캔"
+                        style={{
+                          flex: 1,
+                          height: '56px',
+                          padding: '0 18px',
+                          borderRadius: '14px',
+                          border: '1px solid #d2d2d7',
+                          fontSize: '17px',
+                          fontWeight: 700,
+                          outline: 'none',
+                          background: '#ffffff',
+                          color: '#1d1d1f'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        data-testid="apply-coupon-btn"
+                        onClick={() => handleVerifyCoupon()}
+                        disabled={isVerifyingCoupon || !couponCode.trim()}
+                        style={{
+                          padding: '0 24px',
+                          height: '56px',
+                          borderRadius: '14px',
+                          background: couponCode.trim() ? '#1d1d1f' : '#e5e5ea',
+                          color: couponCode.trim() ? '#ffffff' : '#8e8e93',
+                          fontSize: '17px',
+                          fontWeight: 800,
+                          border: 'none',
+                          cursor: couponCode.trim() ? 'pointer' : 'default',
+                          flexShrink: 0
+                        }}
+                      >
+                        {isVerifyingCoupon ? '확인 중' : '적용'}
+                      </button>
+                    </div>
+                    {couponError && (
+                      <div style={{ fontSize: '14px', color: '#ff3b30', fontWeight: 700, marginTop: '8px' }}>
+                        ⚠️ {couponError}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -1095,28 +1281,28 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               data-testid={canSelectInstallment ? 'installment-selector-panel' : undefined}
               style={{
                 background: '#f5f5f7',
-                borderRadius: '22px',
+                borderRadius: '24px',
                 border: '1px solid #e5e5ea',
-                padding: '20px 22px',
+                padding: '22px 24px',
                 display: 'flex',
                 flexDirection: 'column',
-                justifyContent: 'space-between',
-                gap: '12px',
+                justifyContent: 'flex-start',
+                gap: '16px',
                 boxSizing: 'border-box'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: '17px', fontWeight: 800, color: '#1d1d1f', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <CreditCard size={19} color="#1d1d1f" />
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#1d1d1f', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <CreditCard size={22} color="#1d1d1f" />
                   <span>신용카드 할부</span>
                 </div>
-                <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 600 }}>
+                <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>
                   5만원 이상 선택 가능
                 </span>
               </div>
 
               {canSelectInstallment ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
                   {INSTALLMENT_MONTH_OPTIONS.map((months) => {
                     const isSelected = effectiveInstallmentMonths === months;
                     const label = months === 0 ? '일시불' : `${months}개월`;
@@ -1127,12 +1313,12 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                         data-testid={`installment-option-${months}`}
                         onClick={() => setInstallmentMonths(months)}
                         style={{
-                          height: '46px',
-                          borderRadius: '12px',
-                          border: isSelected ? '1.5px solid #1d1d1f' : '1px solid #d2d2d7',
+                          height: '54px',
+                          borderRadius: '14px',
+                          border: isSelected ? '2px solid #1d1d1f' : '1px solid #d2d2d7',
                           background: isSelected ? '#1d1d1f' : '#ffffff',
                           color: isSelected ? '#ffffff' : '#1d1d1f',
-                          fontSize: '14px',
+                          fontSize: '17px',
                           fontWeight: 800,
                           cursor: 'pointer',
                           transition: 'all 0.15s ease'
@@ -1146,20 +1332,20 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               ) : (
                 <div
                   style={{
-                    height: '52px',
+                    height: '56px',
                     background: '#ffffff',
                     borderRadius: '14px',
                     border: '1px solid #e5e5ea',
-                    padding: '0 16px',
+                    padding: '0 18px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between'
                   }}
                 >
-                  <span style={{ fontSize: '15px', fontWeight: 800, color: '#1d1d1f' }}>
+                  <span style={{ fontSize: '17px', fontWeight: 800, color: '#1d1d1f' }}>
                     일시불 결제
                   </span>
-                  <span style={{ fontSize: '13px', color: '#86868b', fontWeight: 600 }}>
+                  <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 600 }}>
                     (50,000원 이상 시 할부 가능)
                   </span>
                 </div>
@@ -1171,38 +1357,47 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           <div
             style={{
               borderTop: '1.5px solid #e5e5ea',
-              paddingTop: '20px',
+              paddingTop: '22px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '16px'
+              gap: '18px'
             }}
           >
-            {/* 금액 4열 바 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-              <div style={{ background: '#f5f5f7', borderRadius: '14px', padding: '12px 16px', border: '1px solid #e5e5ea' }}>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: '#86868b' }}>정상 금액</div>
-                <div style={{ fontSize: '18px', fontWeight: 900, color: '#1d1d1f', marginTop: '2px' }}>
+            {/* 금액 요약 바 (등급할인 0원 시 3열 동적 최적화, 등급할인 활성 시 4열) */}
+            <div
+              data-testid="payment-summary-breakdown-grid"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: gradeDiscountAmt > 0 ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)',
+                gap: '12px'
+              }}
+            >
+              <div style={{ background: '#f5f5f7', borderRadius: '16px', padding: '16px 22px', border: '1px solid #e5e5ea' }}>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#86868b' }}>정상 금액</div>
+                <div style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', marginTop: '4px' }}>
                   {amount.toLocaleString()} 원
                 </div>
               </div>
 
-              <div style={{ background: '#f5f5f7', borderRadius: '14px', padding: '12px 16px', border: '1px solid #e5e5ea' }}>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: '#86868b' }}>등급 할인</div>
-                <div style={{ fontSize: '18px', fontWeight: 900, color: gradeDiscountAmt > 0 ? '#0071e3' : '#8e8e93', marginTop: '2px' }}>
-                  - {gradeDiscountAmt.toLocaleString()} 원
+              {gradeDiscountAmt > 0 && (
+                <div style={{ background: '#f5f5f7', borderRadius: '16px', padding: '16px 22px', border: '1px solid #e5e5ea' }}>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#86868b' }}>등급 할인</div>
+                  <div style={{ fontSize: '22px', fontWeight: 900, color: '#059669', marginTop: '4px' }}>
+                    - {gradeDiscountAmt.toLocaleString()} 원
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div style={{ background: '#f5f5f7', borderRadius: '14px', padding: '12px 16px', border: '1px solid #e5e5ea' }}>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: '#86868b' }}>쿠폰 할인</div>
-                <div style={{ fontSize: '18px', fontWeight: 900, color: couponDiscountAmt > 0 ? '#0071e3' : '#8e8e93', marginTop: '2px' }}>
+              <div style={{ background: '#f5f5f7', borderRadius: '16px', padding: '16px 22px', border: '1px solid #e5e5ea' }}>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#86868b' }}>쿠폰 할인</div>
+                <div style={{ fontSize: '22px', fontWeight: 900, color: couponDiscountAmt > 0 ? '#059669' : '#8e8e93', marginTop: '4px' }}>
                   - {couponDiscountAmt.toLocaleString()} 원
                 </div>
               </div>
 
-              <div style={{ background: '#f5f5f7', borderRadius: '14px', padding: '12px 16px', border: '1px solid #e5e5ea' }}>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: '#86868b' }}>포인트 사용</div>
-                <div style={{ fontSize: '18px', fontWeight: 900, color: clampedUsedPoints > 0 ? '#0071e3' : '#8e8e93', marginTop: '2px' }}>
+              <div style={{ background: '#f5f5f7', borderRadius: '16px', padding: '16px 22px', border: '1px solid #e5e5ea' }}>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#86868b' }}>포인트 사용</div>
+                <div style={{ fontSize: '22px', fontWeight: 900, color: clampedUsedPoints > 0 ? '#059669' : '#8e8e93', marginTop: '4px' }}>
                   - {clampedUsedPoints.toLocaleString()} P
                 </div>
               </div>
@@ -1218,18 +1413,18 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               }}
             >
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#86868b' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '17px', fontWeight: 800, color: '#86868b' }}>
                     최종 결제 금액
                   </span>
                   <span
                     style={{
-                      fontSize: '12px',
+                      fontSize: '15px',
                       fontWeight: 800,
                       color: '#1d1d1f',
                       background: '#f5f5f7',
                       border: '1px solid #e5e5ea',
-                      padding: '3px 10px',
+                      padding: '4px 12px',
                       borderRadius: '999px'
                     }}
                   >
@@ -1240,8 +1435,8 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                         : '일시불'}
                   </span>
                 </div>
-                <div style={{ fontSize: '48px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-1.5px', lineHeight: 1.1, marginTop: '2px' }}>
-                  {finalCardAmt.toLocaleString()} <span style={{ fontSize: '26px', fontWeight: 800 }}>원</span>
+                <div style={{ fontSize: '54px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-1.5px', lineHeight: 1.1, marginTop: '4px' }}>
+                  {finalCardAmt.toLocaleString()} <span style={{ fontSize: '28px', fontWeight: 800 }}>원</span>
                 </div>
               </div>
 
@@ -1250,12 +1445,12 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 data-testid="start-card-payment-btn"
                 onClick={handleStartPayment}
                 style={{
-                  height: '76px',
-                  padding: '0 44px',
+                  height: '80px',
+                  padding: '0 48px',
                   borderRadius: '999px',
                   background: '#1d1d1f',
                   color: '#ffffff',
-                  fontSize: '22px',
+                  fontSize: '24px',
                   fontWeight: 900,
                   border: 'none',
                   cursor: 'pointer',
@@ -1263,19 +1458,19 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '12px',
+                  gap: '14px',
                   letterSpacing: '-0.5px',
                   transition: 'all 0.15s ease'
                 }}
               >
                 {finalCardAmt === 0 ? (
                   <>
-                    <Sparkles size={24} />
+                    <Sparkles size={26} />
                     <span>0원 결제 완료하기</span>
                   </>
                 ) : (
                   <>
-                    <CreditCard size={24} />
+                    <CreditCard size={26} />
                     <span>
                       {finalCardAmt.toLocaleString()}원 카드 결제 시작
                     </span>
@@ -1630,9 +1825,10 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             {amount > 0 ? (
               <>
                 <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: '14px', marginBottom: '14px' }}>
-                  <h3 style={{ fontSize: '22px', fontWeight: 900, letterSpacing: '-0.5px' }}>⛳ 무인 골프 스튜디오</h3>
-                  <p style={{ fontSize: '13px', marginTop: '4px' }}>프리미엄 골프 아카데미 무인점</p>
-                  <p style={{ fontSize: '12px', color: '#555' }}>지점코드: {STORE_CODE}</p>
+                  <h3 style={{ fontSize: '22px', fontWeight: 900, letterSpacing: '-0.5px' }}>
+                    ⛳ {settings.deviceName || 'GOLFOS'}
+                  </h3>
+                  <p style={{ fontSize: '12px', color: '#555', marginTop: '4px' }}>지점코드: {settings.storeCode || STORE_CODE}</p>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
@@ -1734,7 +1930,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               <>
                 <div style={{ textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: '14px', marginBottom: '14px' }}>
                   <h3 style={{ fontSize: '24px', fontWeight: 900, letterSpacing: '1px', color: '#111' }}>🎫 타석 배정표</h3>
-                  <p style={{ fontSize: '13px', marginTop: '4px', color: '#666' }}>프리미엄 골프 아카데미 무인점</p>
+                  <p style={{ fontSize: '13px', marginTop: '4px', color: '#666' }}>
+                    {settings.deviceName || 'GOLFOS'}
+                  </p>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '14px' }}>

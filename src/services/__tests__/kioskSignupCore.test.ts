@@ -8,16 +8,28 @@ const storageMap = new Map<string, string>();
   clear: () => storageMap.clear(),
 };
 
-describe('Kiosk Signup Core & Validation Scenarios (R01 ~ R05)', () => {
+describe('Kiosk Signup Core & Validation Scenarios (R01 ~ R06)', () => {
   const originalFetch = global.fetch;
   let api: typeof import('../api').api;
   let validateMemberRegisterForm: typeof import('../../components/MemberRegister').validateMemberRegisterForm;
+  let computeVirtualKeyboardTop: typeof import('../../components/VirtualKeyboard').computeVirtualKeyboardTop;
+  let assembleHangul: typeof import('../../components/VirtualKeyboard').assembleHangul;
+  let Hangul: typeof import('../../components/VirtualKeyboard').Hangul;
+  let resolveIntroBannerImageUrl: typeof import('../../components/IntroScreen').resolveIntroBannerImageUrl;
+  let resolveIntroSlides: typeof import('../../components/IntroScreen').resolveIntroSlides;
 
   beforeAll(async () => {
     const mod = await import('../api');
     api = mod.api;
     const regMod = await import('../../components/MemberRegister');
     validateMemberRegisterForm = regMod.validateMemberRegisterForm;
+    const kbMod = await import('../../components/VirtualKeyboard');
+    computeVirtualKeyboardTop = kbMod.computeVirtualKeyboardTop;
+    assembleHangul = kbMod.assembleHangul;
+    Hangul = kbMod.Hangul;
+    const introMod = await import('../../components/IntroScreen');
+    resolveIntroBannerImageUrl = introMod.resolveIntroBannerImageUrl;
+    resolveIntroSlides = introMod.resolveIntroSlides;
   });
 
   beforeEach(() => {
@@ -305,6 +317,80 @@ describe('Kiosk Signup Core & Validation Scenarios (R01 ~ R05)', () => {
       );
       expect(res.success).toBe(false);
       expect(res.message).toBe('필수 개인정보 수집 및 키오스크 이용약관에 동의해 주세요.');
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // R06: 가상 키보드 입력창 비침범 앵커링 가드 및 한글 오토마타 조합 검증
+  // --------------------------------------------------------------------------
+  describe('R06 [가상 키보드 입력창 비침범 앵커링 및 한글 오토마타 조합 검증]', () => {
+    it('세로형 키오스크(1080x1920) 및 가로형 창모드(1440x900) 전 해상도에서 입력창 하단을 침범하지 않는 top 좌표 산출', () => {
+      // 1) 세로형 키오스크 (1920px): 하단 네비게이션 바(bottom: 24px + height: 84px + 16px 여백 = 124px) 바로 위에 안정 배치
+      const portraitTop = computeVirtualKeyboardTop({
+        anchorBottomPx: 650,
+        viewportHeightPx: 1920,
+        keyboardHeightPx: 395,
+        bottomNavReservePx: 124,
+        minGapPx: 14,
+      });
+      expect(portraitTop).toBe(1401); // 1920 - 124 - 395 = 1401 >= 650 + 14
+      expect(portraitTop).toBeGreaterThanOrEqual(650 + 14);
+
+      // 2) 가로형/창모드 PC 단축 뷰포트 (820px): defaultBottomTop(301px)이 입력창 하단(380px)보다 위에 오려 할 때 강제 하방 클램핑
+      const landscapeTop = computeVirtualKeyboardTop({
+        anchorBottomPx: 380,
+        viewportHeightPx: 820,
+        keyboardHeightPx: 395,
+        bottomNavReservePx: 124,
+        minGapPx: 14,
+      });
+      expect(landscapeTop).toBe(394); // 380 + 14 = 394 (입력창 0% 침범 보장)
+      expect(landscapeTop).toBeGreaterThanOrEqual(380 + 14);
+    });
+
+    it('한글 오토마타 자모 조합(초/중/종성, 쌍자음, 겹받침 연음) 및 분해/초기화 정합성 검증', () => {
+      expect(assembleHangul(['ㅎ', 'ㅗ', 'ㅇ', 'ㄱ', 'ㅣ', 'ㄹ', 'ㄷ', 'ㅗ', 'ㅇ'])).toBe('홍길동');
+      expect(assembleHangul(['ㄲ', 'ㅏ', 'ㅊ', 'ㅣ'])).toBe('까치');
+      expect(assembleHangul(['ㅂ', 'ㅏ', 'ㄱ', 'ㅅ', 'ㅏ'])).toBe('박사');
+      expect(assembleHangul(Hangul.disassemble('김골프'))).toBe('김골프');
+      expect(assembleHangul([])).toBe('');
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // R07: 본사(HQ) 파트너센터 키오스크 대기화면 배너(KIOSK_INTRO) 해석 및 폴백 검증
+  // --------------------------------------------------------------------------
+  describe('R07 [본사 파트너센터 키오스크 대기화면 배너 해석 및 폴백 검증]', () => {
+    it('상대 경로(/static/...) 및 절대 URL(https://...)을 엣지/클라우드 서버 오리진에 맞춰 정규화', () => {
+      expect(
+        resolveIntroBannerImageUrl('/static/uploads/kiosk_ad.webp', 'http://100.127.215.116:8000/api')
+      ).toBe('http://100.127.215.116:8000/static/uploads/kiosk_ad.webp');
+      expect(
+        resolveIntroBannerImageUrl('https://cdn.golfos.co.kr/banner1.webp', 'http://localhost:8000/api')
+      ).toBe('https://cdn.golfos.co.kr/banner1.webp');
+    });
+
+    it('본사 등록 배너(hqBanners)가 1장 이상 존재하면 하드코딩 DEFAULT_ADS를 100% 배제하고 본사 배너만 반환', () => {
+      const hqSlides = [
+        {
+          type: 'image' as const,
+          url: 'https://cdn.golfos.co.kr/gunsan_special.webp',
+          title: '국립군산대학교 골프학습장 특별 프로모션',
+          subtitle: '본사 지정 키오스크 전용 배너',
+          tag: 'EVENT',
+        },
+      ];
+      const resolved = resolveIntroSlides(hqSlides, 'https://example.com/store.jpg', '국립군산대학교');
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0].title).toBe('국립군산대학교 골프학습장 특별 프로모션');
+      expect(resolved[0].tag).toBe('EVENT');
+    });
+
+    it('본사 등록 배너가 0건일 때만 매장 대표사진(photoUrl) 및 기본 슬라이드로 안전 폴백', () => {
+      const fallbackWithPhoto = resolveIntroSlides([], 'https://example.com/store.jpg', '군산대점');
+      expect(fallbackWithPhoto.length).toBeGreaterThanOrEqual(2);
+      expect(fallbackWithPhoto[0].url).toBe('https://example.com/store.jpg');
+      expect(fallbackWithPhoto[0].title).toBe('군산대점');
     });
   });
 });

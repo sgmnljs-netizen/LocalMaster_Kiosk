@@ -18,6 +18,7 @@ import { CompanionSetupModal, CompanionTargetItem } from './components/Companion
 import { ErrorMessageModal, ErrorModalData } from './components/ErrorMessageModal';
 import { CheckinSelect } from './components/CheckinSelect';
 import { AllocationCompleteModal } from './components/AllocationCompleteModal';
+import { AssetSelectModal } from './components/AssetSelectModal';
 import { PurchaseCompleteModal, CompletedPurchaseInfo } from './components/PurchaseCompleteModal';
 import { api, Member, Product, Bay } from './services/api';
 import type { CardApprovalResult } from './services/van/van_types';
@@ -25,7 +26,7 @@ import { kioskVanClient } from './services/van/van_client';
 import { executeKioskAutoReversal } from './services/van/kioskPaymentReversal';
 import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
 import { KioskBottomBar } from './components/KioskBottomBar';
-import { useKioskSettings } from './stores/kioskSettings';
+import { useKioskSettings, hydrateKioskDeviceSettingsFromServer } from './stores/kioskSettings';
 import { useHiddenAdminTrigger } from './hooks/useHiddenAdminTrigger';
 import { AdminPinModal } from './components/AdminPinModal';
 import { KioskSettingsModal } from './components/KioskSettingsModal';
@@ -123,38 +124,16 @@ export default function KioskApp() {
 
   const [step, setStep] = useState<KioskStep>('INTRO');
   const [purpose, setPurpose] = useState<KioskPurpose | null>(null);
-  const [lang, setLang] = useState<'KO' | 'EN'>('KO');
+  const lang: 'KO' | 'EN' = 'KO';
   const [initialAuthMode, setInitialAuthMode] = useState<'SMART_TAG' | 'FACE'>('SMART_TAG');
   const [faceTerminalEnabled, setFaceTerminalEnabled] = useState<boolean>(true);
   const effectiveFaceTerminalEnabled = faceTerminalEnabled && settings.authMethods?.FACE !== false;
 
-
-  // 🔍 키오스크 화면 확대/축소 (Zoom Scale) 상태 및 localStorage 연동
-  const [zoomScale, setZoomScale] = useState<number>(() => {
-    const saved = localStorage.getItem('kiosk_zoom_scale');
-    return saved ? parseFloat(saved) : 1.0;
-  });
-
-  const handleZoomIn = () => {
-    setZoomScale(prev => {
-      const next = Math.min(1.5, Math.round((prev + 0.05) * 100) / 100);
-      localStorage.setItem('kiosk_zoom_scale', String(next));
-      return next;
-    });
-  };
-
-  const handleZoomOut = () => {
-    setZoomScale(prev => {
-      const next = Math.max(0.4, Math.round((prev - 0.05) * 100) / 100);
-      localStorage.setItem('kiosk_zoom_scale', String(next));
-      return next;
-    });
-  };
-
-  const handleZoomReset = () => {
-    setZoomScale(1.0);
-    localStorage.setItem('kiosk_zoom_scale', '1.0');
-  };
+  // 🔍 키오스크 화면 배율은 100%(1.0)로 고정 (고객 오터치로 인한 화면 축소/확대 오염 원천 차단)
+  const zoomScale = 1.0;
+  useEffect(() => {
+    localStorage.removeItem('kiosk_zoom_scale');
+  }, []);
 
   // 이중 클릭 및 중복 API 호출 방어 락 Ref
   const isAllocatingRef = useRef(false);
@@ -216,11 +195,16 @@ export default function KioskApp() {
   const [completedAllocationInfo, setCompletedAllocationInfo] = useState<{
     bayNo: number | string;
     oldBayNo?: number | string;
+    floor?: string | number | null;
     durationMin: number;
     startTime?: string;
     endTime?: string;
     resId?: string;
     memberName?: string;
+    memberNo?: string;
+    productName?: string;
+    actionLabel?: string;
+    remainInfo?: string;
     payAmount?: number;
     originalAmount?: number;
     discountAmount?: number;
@@ -252,7 +236,8 @@ export default function KioskApp() {
       (typeof window !== 'undefined' && (
         window.location.search.includes('demo=true') ||
         window.location.pathname.includes('/demo/') ||
-        window.location.hostname === 'segnet.co.kr'
+        window.location.hostname.endsWith('segnet.co.kr') ||
+        window.location.hostname.endsWith('golfos.co.kr')
       ));
 
     const checkMw = async () => {
@@ -296,6 +281,7 @@ export default function KioskApp() {
 
     const loadSettings = async () => {
       try {
+        void hydrateKioskDeviceSettingsFromServer();
         const kioskConfig = await api.getKioskSystemSettings();
         if (kioskConfig) {
           if (kioskConfig.menu_zone_mappings) {
@@ -1039,6 +1025,8 @@ export default function KioskApp() {
           await loadBays();
           showToast(res.message);
           const movedMemberName = authMember.member_name;
+          const movedMemberNo = authMember.member_no;
+          const targetBayObj = bays.find(b => Number(b.bay_no) === Number(bayNo));
           const remainMin = (res.remain_min ?? (currentBay ? TimeMaster.getRemainingMinutes(currentBay) : 0)) || DEFAULT_SESSION_MIN;
           setAuthMember(null);
           setPurpose(null);
@@ -1047,11 +1035,15 @@ export default function KioskApp() {
           setCompletedAllocationInfo({
             bayNo: bayNo,
             oldBayNo: resolvedOldBayNo,
+            floor: targetBayObj?.floor_no || null,
             durationMin: remainMin,
             startTime: res.start_time || (currentBay as any)?.start_time,
             endTime: res.end_time || (currentBay as any)?.end_time,
             resId: (res as any).res_id || (currentBay as any)?.res_id,
             memberName: movedMemberName,
+            memberNo: movedMemberNo,
+            productName: `${resolvedOldBayNo ?? '?'}번 → ${bayNo}번 타석 이동`,
+            actionLabel: '타석 이동',
             payAmount: 0,
             checkinMode: 'MOVE_BAY',
             noticeMessage: res.message
@@ -1092,7 +1084,21 @@ export default function KioskApp() {
         );
         if (res.success) {
           const confirmedMemberName = authMember.member_name;
+          const confirmedMemberNo = authMember.member_no;
           const effectiveDur = (res as any).duration_min ?? passDuration;
+          const targetBayObj = bays.find(b => Number(b.bay_no) === Number(selectedBayNo));
+          const assetProductName = targetAsset?.item_name || (targetAsset as any)?.prod_nm || '회원 이용권';
+          const rawRemCnt = targetAsset?.rem_count ?? targetAsset?.remain_cnt;
+          const rawExpiry = (targetAsset as any)?.end_date || (targetAsset as any)?.expiry_date || authMember.expiry_date;
+          const remainParts: string[] = [];
+          if (typeof rawRemCnt === 'number' && rawRemCnt > 0) {
+            remainParts.push(`잔여 ${Math.max(0, rawRemCnt - 1)}회`);
+          }
+          if (rawExpiry) {
+            remainParts.push(`만료: ${String(rawExpiry).slice(0, 10)}`);
+          }
+          const remainInfoStr = remainParts.join(' / ');
+
           await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId}, ${effectiveDur}분)`, authMember.member_no);
           await loadBays();
           if (res.hardware_success === false) {
@@ -1109,11 +1115,16 @@ export default function KioskApp() {
           setStep('PRACTICE_SELECT');
           setCompletedAllocationInfo({
             bayNo: allocatedBayNo,
+            floor: targetBayObj?.floor_no || null,
             durationMin: effectiveDur,
             startTime: (res as any).start_time || (res as any).startTime,
             endTime: (res as any).end_time || (res as any).endTime,
             resId: res.res_id,
             memberName: confirmedMemberName,
+            memberNo: confirmedMemberNo,
+            productName: assetProductName,
+            actionLabel: '회원권 타석 배정',
+            remainInfo: remainInfoStr || undefined,
             payAmount: 0
           });
         } else {
@@ -1249,6 +1260,7 @@ export default function KioskApp() {
         }
         const firstRes = groupRes.results?.[0] || {};
         const leaderName = authMember?.member_name || targets[0]?.memberName || '회원';
+        const leaderNo = authMember?.member_no || targets[0]?.memberNo;
         await loadBays();
         showToast(lang === 'KO' ? '동반자 타석 배정이 모두 완료되었습니다!' : 'Group teebox allocation completed!');
         setAuthMember(null);
@@ -1265,6 +1277,9 @@ export default function KioskApp() {
           endTime: firstRes.end_time || firstRes.endTime,
           resId: firstRes.res_id,
           memberName: `${leaderName} 외 ${targets.length - 1}명 (${targets.map(t => t.bayNo).join(', ')}번)`,
+          memberNo: leaderNo,
+          productName: `동반자 ${targets.length}석 회원권 배정`,
+          actionLabel: '동반자 그룹 배정',
           payAmount: 0
         });
       } catch (err: any) {
@@ -1578,6 +1593,9 @@ export default function KioskApp() {
               
               const allocatedBayNo = selectedBayNo;
               const confirmedMemberName = authMember?.member_name || '비회원';
+              const confirmedMemberNo = authMember?.member_no;
+              const targetBayObj = bays.find(b => Number(b.bay_no) === Number(selectedBayNo));
+              const resolvedDailyProdName = selectedProduct.meta_data?.display_nm || selectedProduct.prod_nm || '일일 타석권';
               // 🔒 [1차 방어막] 카드 결제 배정 성공 직후 세션 및 선점 타석 상태 즉시 완전 파기
               setAuthMember(null);
               setSelectedAssetId(null);
@@ -1587,11 +1605,15 @@ export default function KioskApp() {
               setStep('PRACTICE_SELECT');
               setCompletedAllocationInfo({
                 bayNo: allocatedBayNo,
+                floor: targetBayObj?.floor_no || null,
                 durationMin: (allocResult as any).duration_min ?? finalDuration,
                 startTime: (allocResult as any).start_time || (allocResult as any).startTime,
                 endTime: (allocResult as any).end_time || (allocResult as any).endTime,
                 resId: allocResult.res_id,
                 memberName: confirmedMemberName,
+                memberNo: confirmedMemberNo,
+                productName: resolvedDailyProdName,
+                actionLabel: '일일권 타석 배정',
                 payAmount: actualPaidAmount,
                 originalAmount: effectiveDailyBasePrice,
                 discountAmount: payResult?.discountAmount ?? (gradeDiscount + couponDiscount),
@@ -1656,6 +1678,7 @@ export default function KioskApp() {
           }
           const firstRes = groupRes.results?.[0] || {};
           const leaderName = authMember?.member_name || companionTargets[0]?.memberName || '회원';
+          const leaderNo = authMember?.member_no || companionTargets[0]?.memberNo;
           const groupOrigAmt = companionTargets.reduce((sum, c) => sum + (c.price || 0), 0);
           const groupPaidAmt = payResult?.cardApproval?.amount ?? payResult?.amount ?? groupOrigAmt;
           const allocatedSummary = `${leaderName} 외 ${companionTargets.length - 1}명 (${companionTargets.map(t => t.bayNo).join(', ')}번)`;
@@ -1678,6 +1701,9 @@ export default function KioskApp() {
             endTime: firstRes.end_time || firstRes.endTime,
             resId: firstRes.res_id,
             memberName: allocatedSummary,
+            memberNo: leaderNo,
+            productName: selectedProduct?.prod_nm || `동반자 ${companionTargets.length}개 타석 일괄 결제`,
+            actionLabel: '동반자 그룹 배정',
             payAmount: groupPaidAmt,
             originalAmount: groupOrigAmt,
             discountAmount: payResult?.discountAmount ?? (groupGradeDiscount + groupCouponDiscount),
@@ -1830,6 +1856,7 @@ export default function KioskApp() {
             memberName: authMember.member_name,
             memberNo: authMember.member_no,
             memberHp: authMember.hp,
+            lockerNo: finalLockerLabel,
             productName: `${finalLockerLabel}번 개인 사물함 (라카 ${selectedProduct.days || 30}일 대여)`,
             days: selectedProduct.days || 30,
             amount: actualLockerPaid,
@@ -1995,179 +2022,86 @@ export default function KioskApp() {
             <TopTeeboxDashboard bays={bays} onBayClick={handleMiniBayClick} lang={lang} />
           )}
 
-          {/* 메인 기능 터미널 구역 (대시보드일 때는 1560px, 나머지 단계일 때는 1920px 전체화면으로 가변 확장) */}
+          {/* 메인 기능 터미널 구역 (대시보드일 때는 가변 flex, 나머지 단계일 때는 1920px 전체화면으로 가변 확장) */}
           <div 
             className="kiosk-terminal-area-luxury" 
             style={{ 
-              height: step === 'MAIN_DASHBOARD' ? '1560px' : '1920px', 
-              padding: (step === 'MAIN_DASHBOARD' || step === 'PAYMENT') ? '30px' : '30px 30px 130px 30px',
+              flex: step === 'MAIN_DASHBOARD' ? 1 : undefined,
+              height: step === 'MAIN_DASHBOARD' ? 'auto' : '1920px', 
+              padding: (step === 'MAIN_DASHBOARD' || step === 'PAYMENT') ? '22px 30px 26px 30px' : '30px 30px 130px 30px',
               transition: 'height 0.3s cubic-bezier(0.25, 1, 0.5, 1)'
             }}
           >
             
             {/* 최상단 지점 및 세션 네비게이션 헤더 */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              {step === 'MAIN_DASHBOARD' ? (
-                <div 
-                  style={{ cursor: 'pointer', width: '120px', height: '40px' }}
-                  onClick={() => handleLogout()}
-                />
-              ) : (
-                <div style={{ width: '120px', height: '40px' }} />
-              )}
-
-              {/* 현재 로그인 회원 카드 요약 */}
-              {authMember ? (
-                <div 
-                  className="glass-panel" 
-                  style={{ 
-                    padding: '12px 24px', 
-                    borderRadius: '24px', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '12px',
-                    border: '1px solid rgba(52, 199, 89, 0.25)',
-                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.02)'
-                  }}
-                >
-                  <UserCheck size={18} style={{ color: '#0071e3' }} />
-                  <span style={{ fontSize: '16px', fontWeight: 700 }}>
-                    <strong style={{ color: '#0071e3' }}>{authMember.member_name}</strong> 회원님
-                  </span>
-                  <button 
-                    onClick={handleLogout}
+            {(step === 'MAIN_DASHBOARD' || authMember) && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                {step === 'MAIN_DASHBOARD' ? (
+                  <div 
                     style={{
-                      background: 'rgba(255, 59, 48, 0.08)',
-                      border: '0.5px solid rgba(255, 59, 48, 0.25)',
-                      color: 'var(--neon-red)',
-                      padding: '6px 14px',
-                      borderRadius: '16px',
-                      fontSize: '13px',
-                      fontWeight: 700,
                       cursor: 'pointer',
-                      display: 'flex',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '4px'
+                      gap: '8px',
+                      padding: '8px 18px',
+                      borderRadius: '999px',
+                      background: '#ffffff',
+                      border: '1px solid rgba(0, 0, 0, 0.08)',
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+                    }}
+                    onClick={() => handleLogout()}
+                    title="대기화면으로 돌아가기"
+                  >
+                    <span style={{ fontSize: '18px' }}>⛳</span>
+                    <span style={{ fontSize: '18px', fontWeight: 800, color: '#111827', letterSpacing: '-0.3px' }}>
+                      {storeName.replace(/^골포스\s*/, '').replace(/^로컬마스터\s*/, '').trim() || '골프 아카데미'}
+                    </span>
+                  </div>
+                ) : (
+                  <div />
+                )}
+
+                {/* 현재 로그인 회원 카드 요약 */}
+                {authMember && (
+                  <div 
+                    className="glass-panel" 
+                    style={{ 
+                      padding: '12px 24px', 
+                      borderRadius: '24px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '14px',
+                      border: '1.5px solid rgba(52, 199, 89, 0.3)',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.04)'
                     }}
                   >
-                    <LogOut size={12} />
-                    종료
-                  </button>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  {/* KO/EN 다국어 선택 탭 */}
-                  <div className="glass-panel" style={{ display: 'flex', padding: '4px', borderRadius: '24px', background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
-                    <button 
-                      onClick={() => setLang('KO')}
-                      style={{
-                        padding: '6px 16px',
-                        fontSize: '14px',
-                        fontWeight: 800,
-                        border: 'none',
-                        borderRadius: '16px',
-                        cursor: 'pointer',
-                        background: lang === 'KO' ? '#0071e3' : 'transparent',
-                        color: lang === 'KO' ? '#fff' : 'var(--text-secondary)',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      KO
-                    </button>
-                    <button 
-                      onClick={() => setLang('EN')}
-                      style={{
-                        padding: '6px 16px',
-                        fontSize: '14px',
-                        fontWeight: 800,
-                        border: 'none',
-                        borderRadius: '16px',
-                        cursor: 'pointer',
-                        background: lang === 'EN' ? '#0071e3' : 'transparent',
-                        color: lang === 'EN' ? '#fff' : 'var(--text-secondary)',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      EN
-                    </button>
-                  </div>
-
-                  {/* 🔍 [상단 줌 컨트롤러] 화면 확대/축소 [- 100% +] 버튼 */}
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    background: 'rgba(0,0,0,0.04)',
-                    padding: '3px 8px',
-                    borderRadius: '16px',
-                    border: '1px solid rgba(0,0,0,0.08)'
-                  }}>
-                    <button
-                      onClick={handleZoomOut}
-                      title="화면 축소"
-                      style={{
-                        width: '26px',
-                        height: '26px',
-                        borderRadius: '50%',
-                        border: 'none',
-                        background: '#ffffff',
-                        color: '#1d1d1f',
-                        fontSize: '16px',
-                        fontWeight: 900,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.08)'
-                      }}
-                    >
-                      -
-                    </button>
-
-                    <span 
-                      onClick={handleZoomReset}
-                      title="클릭 시 100% 기본 비율로 초기화"
-                      style={{
-                        fontSize: '13px',
-                        fontWeight: 900,
-                        color: '#059669',
-                        padding: '0 6px',
-                        cursor: 'pointer',
-                        userSelect: 'none'
-                      }}
-                    >
-                      {Math.round(zoomScale * 100)}%
+                    <UserCheck size={22} style={{ color: '#0071e3' }} />
+                    <span style={{ fontSize: '20px', fontWeight: 800 }}>
+                      <strong style={{ color: '#0071e3' }}>{authMember.member_name}</strong> 회원님
                     </span>
-
-                    <button
-                      onClick={handleZoomIn}
-                      title="화면 확대"
+                    <button 
+                      onClick={handleLogout}
                       style={{
-                        width: '26px',
-                        height: '26px',
-                        borderRadius: '50%',
-                        border: 'none',
-                        background: '#ffffff',
-                        color: '#1d1d1f',
+                        background: 'rgba(255, 59, 48, 0.1)',
+                        border: '1px solid rgba(255, 59, 48, 0.3)',
+                        color: 'var(--neon-red)',
+                        padding: '8px 18px',
+                        borderRadius: '18px',
                         fontSize: '16px',
-                        fontWeight: 900,
+                        fontWeight: 800,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.08)'
+                        gap: '6px'
                       }}
                     >
-                      +
+                      <LogOut size={16} />
+                      종료
                     </button>
                   </div>
-
-                  <span style={{ fontSize: '15px', color: 'var(--text-muted)', fontWeight: 800, letterSpacing: '1px' }}>
-                    SYSTEM READY
-                  </span>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* ErrorMaster-First 진단 에러 카드 (회원권 만료 등) */}
             {errorMasterCard && (
@@ -2320,17 +2254,22 @@ export default function KioskApp() {
                     checkinMode?: string
                   ) => {
                     const numericBay = typeof bayNo === 'number' ? bayNo : (parseInt(String(bayNo).replace(/[^0-9]/g, ''), 10) || 1);
+                    const targetBayObj = bays.find(b => Number(b.bay_no) === Number(numericBay));
                     setSelectedBayNo(numericBay);
                     setCheckinResId(resId);
                     setPurpose('CHECKIN_RESERVATION');
                     showToast(message || (lang === 'KO' ? `${bayNo}번 타석 체크인이 완료되었습니다.` : `Bay ${bayNo} check-in completed.`));
                     setCompletedAllocationInfo({
                       bayNo: bayNo,
+                      floor: targetBayObj?.floor_no || null,
                       durationMin: durationMin ?? DEFAULT_SESSION_MIN,
                       startTime,
                       endTime,
                       resId: resId,
                       memberName: authMember?.member_name || '회원',
+                      memberNo: authMember?.member_no,
+                      productName: checkinMode === 'REPRINT' ? '사전예약 타석 배정표 (재출력)' : '사전예약 타석 체크인',
+                      actionLabel: checkinMode === 'REPRINT' ? '배정표 재출력' : '사전예약 체크인',
                       payAmount: 0,
                       checkinMode,
                       noticeMessage: message
@@ -2344,74 +2283,76 @@ export default function KioskApp() {
             )}
 
             {/* ----------------------------------------------------------------
-                📥 STEP 2: 회원인증 (안면 / 폰번호 / QR 스캔)
+                📥 STEP 2: 회원인증 (안면 / 폰번호 / QR 스캔) - 크리스탈 라이트 블러 3px 모달 오버레이 (SSOT 규약)
                 ---------------------------------------------------------------- */}
-            {(step === 'MEMBER_AUTH' && ((purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY')) && (
-               <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9000 }}>
-                 <MemberAuth
-                   initialAuthMode={initialAuthMode}
-                   faceTerminalEnabled={effectiveFaceTerminalEnabled}
-                   onAuthSuccess={handleAuthSuccess}
-                   onCancel={handleGoBack}
-                   onSignUpClick={() => setStep('MEMBER_REGISTER')}
-                   onAuthError={(code, detail) => {
-                     const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
-                     if (bayToRelease !== null) {
-                       api.releaseBay(bayToRelease).catch(console.error);
-                       setSelectedBayNo(null);
-                       selectedBayNoRef.current = null;
-                     }
-                     const baysToRelease = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
-                     if (baysToRelease.length > 0) {
-                       api.releaseBays(baysToRelease).catch(console.error);
-                       setSelectedBayNos([]);
-                       selectedBayNosRef.current = [];
-                     }
-                     const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
-                     setErrorMasterCard({
-                       code,
-                       detail,
-                       traceId: trace
-                     });
-                     api.writeKioskLog('AUTH_ERROR', `${detail} (Trace ID: ${trace})`);
-                     setPurpose(null);
-                     setStep('MAIN_DASHBOARD');
-                   }}
-                 />
-               </div>
-            )}
-            
-            {step === 'MEMBER_AUTH' && !((purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY') && (
-              <MemberAuth
-                initialAuthMode={initialAuthMode}
-                faceTerminalEnabled={effectiveFaceTerminalEnabled}
-                onAuthSuccess={handleAuthSuccess}
-                onCancel={handleGoHome}
-                onSignUpClick={purpose === 'CHECKIN_RESERVATION' || purpose === 'MOVE_BAY' || purpose === 'EXTEND_LOCKER' ? undefined : () => setStep('MEMBER_REGISTER')}
-                onAuthError={(code, detail) => {
-                  const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
-                  if (bayToRelease !== null) {
-                    api.releaseBay(bayToRelease).catch(console.error);
-                    setSelectedBayNo(null);
-                    selectedBayNoRef.current = null;
-                  }
-                  const baysToRelease = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
-                  if (baysToRelease.length > 0) {
-                    api.releaseBays(baysToRelease).catch(console.error);
-                    setSelectedBayNos([]);
-                    selectedBayNosRef.current = [];
-                  }
-                  const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
-                  setErrorMasterCard({
-                    code,
-                    detail,
-                    traceId: trace
-                  });
-                  api.writeKioskLog('AUTH_ERROR', `${detail} (Trace ID: ${trace})`);
-                  setPurpose(null);
-                  setStep('MAIN_DASHBOARD');
+            {step === 'MEMBER_AUTH' && (
+              <div
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(15, 23, 42, 0.38)',
+                  backdropFilter: 'blur(3px)',
+                  WebkitBackdropFilter: 'blur(3px)',
+                  zIndex: 9000,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'flex-start',
+                  boxSizing: 'border-box',
                 }}
-              />
+              >
+                <MemberAuth
+                  initialAuthMode={initialAuthMode}
+                  faceTerminalEnabled={effectiveFaceTerminalEnabled}
+                  selectedBayNo={
+                    (purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY'
+                      ? selectedBayNo
+                      : null
+                  }
+                  selectedBayNos={
+                    (purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY'
+                      ? selectedBayNos
+                      : undefined
+                  }
+                  onAuthSuccess={handleAuthSuccess}
+                  onCancel={
+                    (purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY'
+                      ? handleGoBack
+                      : handleGoHome
+                  }
+                  onSignUpClick={
+                    purpose === 'CHECKIN_RESERVATION' || purpose === 'MOVE_BAY' || purpose === 'EXTEND_LOCKER'
+                      ? undefined
+                      : () => setStep('MEMBER_REGISTER')
+                  }
+                  onAuthError={(code, detail) => {
+                    const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
+                    if (bayToRelease !== null) {
+                      api.releaseBay(bayToRelease).catch(console.error);
+                      setSelectedBayNo(null);
+                      selectedBayNoRef.current = null;
+                    }
+                    const baysToRelease = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
+                    if (baysToRelease.length > 0) {
+                      api.releaseBays(baysToRelease).catch(console.error);
+                      setSelectedBayNos([]);
+                      selectedBayNosRef.current = [];
+                    }
+                    const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
+                    setErrorMasterCard({
+                      code,
+                      detail,
+                      traceId: trace
+                    });
+                    api.writeKioskLog('AUTH_ERROR', `${detail} (Trace ID: ${trace})`);
+                    setPurpose(null);
+                    setStep('MAIN_DASHBOARD');
+                  }}
+                />
+              </div>
             )}
 
             {/* ----------------------------------------------------------------
@@ -2491,20 +2432,34 @@ export default function KioskApp() {
                 📥 STEP 3: 타석 배치 맵 (선점 락 연동)
                 ---------------------------------------------------------------- */}
             {step === 'TEEBOX_MAP' && (
-              <TeeboxMap
-                memberNo={authMember?.member_no}
-                memberName={authMember?.member_name}
-                isMoveMode={purpose === 'MOVE_BAY'}
-                lang={lang}
-                justAllocatedBayNo={justAllocatedBayNo}
-                feedbackCountdown={feedbackCountdown}
-                onCancelCountdown={cancelFeedbackCountdown}
-                onBaySelected={handleBaySelected}
-                onCancel={handleGoHome}
-                bays={bays}
-                onRefreshBays={loadBays}
-                selectedZoneIds={selectedZoneIds}
-              />
+              <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                width: '100%',
+                margin: 'auto 0'
+              }}>
+                <TeeboxMap
+                  memberNo={authMember?.member_no}
+                  memberName={authMember?.member_name}
+                  isMoveMode={purpose === 'MOVE_BAY'}
+                  lang={lang}
+                  justAllocatedBayNo={justAllocatedBayNo}
+                  feedbackCountdown={feedbackCountdown}
+                  onCancelCountdown={cancelFeedbackCountdown}
+                  onBaySelected={handleBaySelected}
+                  onCancel={handleGoHome}
+                  onGoPractice={() => {
+                    setPurpose('ALLOCATE_DAILY');
+                    setStep('PRACTICE_SELECT');
+                  }}
+                  bays={bays}
+                  onRefreshBays={loadBays}
+                  selectedZoneIds={selectedZoneIds}
+                />
+              </div>
             )}
 
             {/* ----------------------------------------------------------------
@@ -2598,15 +2553,25 @@ export default function KioskApp() {
                 📥 STEP 5: 라카 조회 및 연장/구매
                 ---------------------------------------------------------------- */}
             {step === 'LOCKER_EXTEND' && authMember && (
-              <LockerExtend
-                memberNo={authMember.member_no}
-                memberName={authMember.member_name}
-                member={authMember}
-                discountRate={authMember.discount_rate || 0}
-                lang={lang}
-                onLockerPaymentTriggered={handleLockerPaymentTriggered}
-                onCancel={handleGoHome}
-              />
+              <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                width: '100%',
+                margin: 'auto 0'
+              }}>
+                <LockerExtend
+                  memberNo={authMember.member_no}
+                  memberName={authMember.member_name}
+                  member={authMember}
+                  discountRate={authMember.discount_rate || 0}
+                  lang={lang}
+                  onLockerPaymentTriggered={handleLockerPaymentTriggered}
+                  onCancel={handleGoHome}
+                />
+              </div>
             )}
 
             {/* ----------------------------------------------------------------
@@ -2689,385 +2654,44 @@ export default function KioskApp() {
             )}
 
             {/* ----------------------------------------------------------------
-                📥 STEP 7: 보유 회원권 및 이용권 선택 (Asset Select - 모달 오버레이로 렌더링)
+                📥 STEP 7: 보유 회원권 및 이용권 선택 (Asset Select - 940px Apple Bento 대형 모달)
                 ---------------------------------------------------------------- */}
             {step === 'ASSET_SELECT' && authMember && (
-              <div style={{
-                position: 'fixed',
-                top: 0, left: 0, right: 0, bottom: 0,
-                backgroundColor: 'rgba(15, 23, 42, 0.75)',
-                backdropFilter: 'blur(10px)',
-                zIndex: 9000,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '24px'
-              }}>
-                <div 
-                  style={{
-                    padding: '40px',
-                    borderRadius: '32px',
-                    border: '1px solid #e5e5ea',
-                    background: '#ffffff',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '30px',
-                    color: '#1d1d1f',
-                    width: '100%',
-                    maxWidth: '680px',
-                    boxSizing: 'border-box',
-                    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
-                  }}
-                >
-                  {/* Header */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                      <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
-                        {lang === 'KO' ? '보유 이용권 선택' : 'Select Active Pass'}
-                      </h2>
-                    </div>
-
-                    {/* 🌟 회원이름 시각적 강화를 위한 대형 프로필 뱃지 */}
-                    <div style={{
-                      background: 'linear-gradient(135deg, rgba(52, 199, 89, 0.12) 0%, rgba(5, 150, 105, 0.06) 100%)',
-                      border: '1.5px solid rgba(52, 199, 89, 0.35)',
-                      padding: '16px 20px',
-                      borderRadius: '20px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      boxShadow: '0 4px 15px rgba(52, 199, 89, 0.08)'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                        <div style={{ background: '#059669', padding: '10px', borderRadius: '50%', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(5, 150, 105, 0.3)' }}>
-                          <UserCheck size={26} />
-                        </div>
-                        <div>
-                          <div style={{ fontSize: '24px', fontWeight: 900, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ color: '#059669', textDecoration: 'underline', textUnderlineOffset: '4px' }}>{authMember.member_name}</span> 님
-                            <span style={{ fontSize: '13px', background: '#059669', color: '#ffffff', padding: '3px 10px', borderRadius: '10px', fontWeight: 800, letterSpacing: '0.5px' }}>
-                              인증 성공
-                            </span>
-                          </div>
-                          <div style={{ fontSize: '14px', color: '#6b7280', fontWeight: 600, marginTop: '2px' }}>
-                            회원번호: {authMember.member_no} {authMember.member_grade ? `| 등급: ${authMember.member_grade}` : ''}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <p style={{ fontSize: '16px', color: '#4b5563', fontWeight: 700, margin: 0 }}>
-                      {lang === 'KO' 
-                        ? `배정에 사용할 유효 이용권을 터치해 주세요.`
-                        : `Please select the pass to allocate.`}
-                    </p>
-
-                    {(() => {
-                      const currentBayObj = bays.find(b => b.bay_no === selectedBayNo);
-                      if (currentBayObj && typeof currentBayObj.max_assignable_min === 'number' && currentBayObj.max_assignable_min > 0) {
-                        return (
-                          <div style={{
-                            background: '#fffbeb',
-                            border: '1.5px solid #fcd34d',
-                            borderRadius: '14px',
-                            padding: '12px 16px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '12px'
-                          }}>
-                            <span style={{ fontSize: '14px', fontWeight: 800, color: '#b45309', lineHeight: 1.4 }}>
-                              ⚠️ 선택하신 {currentBayObj.bay_no}번 타석은 다음 예약({currentBayObj.next_limit_res_start_time || '예정'}) 전까지 최대 [{currentBayObj.max_assignable_min}분] 이용 가능합니다.
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedAssetId(null);
-                                const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
-                                if (bayToRelease !== null) {
-                                  api.releaseBay(bayToRelease).catch(console.error);
-                                  setSelectedBayNo(null);
-                                  selectedBayNoRef.current = null;
-                                }
-                                keepAuthAfterPurchaseRef.current = true;
-                                setStep('PRACTICE_SELECT');
-                              }}
-                              style={{
-                                padding: '8px 14px',
-                                borderRadius: '10px',
-                                background: '#d97706',
-                                color: '#ffffff',
-                                border: 'none',
-                                fontSize: '13px',
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                                whiteSpace: 'nowrap'
-                              }}
-                            >
-                              다른 타석 선택
-                            </button>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })()}
-                  </div>
-
-                  {/* Asset List Grid */}
-                  <div 
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '16px',
-                      maxHeight: '450px',
-                      overflowY: 'auto',
-                      paddingRight: '6px'
-                    }}
-                  >
-                    {(() => {
-                      const targetZoneCode = bays.find(b => b.bay_no === selectedBayNo)?.zone_code?.toUpperCase() || 'BAY';
-                      
-                      const validAssets = (authMember.assets || []).filter(asset => {
-                        if (asset.is_assignable === false) return false;
-                        const logicType = (asset.logic_type || 'PERIOD').toUpperCase();
-                        if (logicType === 'COUNT' || logicType === 'COUPON') {
-                          const cnt = asset.remain_cnt ?? asset.rem_count ?? 0;
-                          if (cnt <= 0) return false;
-                        } else if (logicType === 'TIME') {
-                          const remMin = asset.remain_min ?? asset.remain_cnt ?? asset.rem_count ?? 0;
-                          if (remMin <= 0) return false;
-                        } else if (asset.remain_days !== undefined && asset.remain_days !== null && asset.remain_days < 0) {
-                          return false;
-                        }
-                        if (!asset.allowed_categories || asset.allowed_categories.length === 0) return true;
-                        const allowedUpper = asset.allowed_categories.map(c => c.toUpperCase());
-                        return allowedUpper.includes(targetZoneCode);
-                      });
-
-                      if (validAssets.length === 0) {
-                        const unassignableReasons = (authMember.assets || [])
-                          .filter(a => a.is_assignable === false && a.unassignable_reason)
-                          .map(a => `• ${(a as any).prod_nm || a.item_name}: ${a.unassignable_reason}`);
-                        return (
-                          <div 
-                            style={{
-                              padding: '32px',
-                              textAlign: 'center',
-                              color: '#86868b',
-                              fontSize: '18px',
-                              fontWeight: 700,
-                              border: '1px dashed #dadce0',
-                              borderRadius: '16px',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              gap: '16px'
-                            }}
-                          >
-                            <div>
-                              {lang === 'KO' ? '해당 타석에서 사용할 수 있는 이용권이 없습니다.' : 'No active pass items found for this zone.'}
-                            </div>
-                            {unassignableReasons.length > 0 && (
-                              <div style={{ fontSize: '14px', color: '#dc2626', background: '#fef2f2', padding: '10px 16px', borderRadius: '10px', textAlign: 'left', width: '100%', boxSizing: 'border-box' }}>
-                                {unassignableReasons.map((r, idx) => (
-                                  <div key={idx}>{r}</div>
-                                ))}
-                              </div>
-                            )}
-                            <button
-                              onClick={() => {
-                                setPurpose('ALLOCATE_DAILY');
-                                setStep('PRODUCT_SHOP');
-                              }}
-                              style={{
-                                padding: '14px 24px',
-                                borderRadius: '12px',
-                                background: '#059669',
-                                color: '#ffffff',
-                                fontSize: '16px',
-                                fontWeight: 800,
-                                border: 'none',
-                                cursor: 'pointer',
-                                boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)'
-                              }}
-                            >
-                              {lang === 'KO' ? '💳 일일 타석권 결제로 전환' : 'Switch to Daily Pass Payment'}
-                            </button>
-                          </div>
-                        );
-                      }
-
-                      // 이용권 서브 텍스트 정밀 파서 (Zero-Hardcoding: 오직 백엔드 logic_type 의존)
-                      const getAssetSubtext = (asset: any) => {
-                        const logicType = (asset.logic_type || 'PERIOD').toUpperCase();
-                        
-                        // 유효기간 만료일자 획득 (asset 우선 -> authMember.expiry_date 폴백)
-                        const rawExpDate = asset.expiry_date || asset.end_date || asset.end_dt || authMember.expiry_date;
-                        const expDateText = rawExpDate ? `~${rawExpDate}` : '상시 유효';
-
-                        // 1. 기간제 회원권 (백엔드 마스터 플래그 PERIOD / MEMBERSHIP 의존)
-                        if (logicType === 'PERIOD' || logicType === 'MEMBERSHIP') {
-                          return lang === 'KO' 
-                            ? `유효기간: ${expDateText}` 
-                            : `Valid until: ${expDateText}`;
-                        }
-
-                        // 2. 쿠폰권 / 횟수권 (백엔드 마스터 플래그 COUNT / COUPON 의존)
-                        const count = asset.remain_cnt ?? asset.rem_count;
-                        if ((logicType === 'COUNT' || logicType === 'COUPON') && count > 0) {
-                          return lang === 'KO' 
-                            ? `남은 횟수: ${count}회 | 유효기간: ${expDateText}` 
-                            : `Remaining: ${count} count(s) | Exp: ${expDateText}`;
-                        }
-
-                        // 3. 분 단위 시간권 (백엔드 마스터 플래그 TIME 의존)
-                        if (logicType === 'TIME') {
-                          const remMin = asset.remain_min ?? asset.remain_cnt ?? asset.rem_count ?? 0;
-                          return lang === 'KO'
-                            ? `남은 시간: ${remMin}분 | 유효기간: ${expDateText}`
-                            : `Remaining: ${remMin} min(s) | Exp: ${expDateText}`;
-                        }
-
-                        // 4. 기타(일일권 등)
-                        return lang === 'KO' 
-                          ? `유효기간: ${expDateText}` 
-                          : `Valid until: ${expDateText}`;
-                      };
-
-                      const currentBayObj = bays.find(b => b.bay_no === selectedBayNo);
-                      const bayMaxMin = currentBayObj?.max_assignable_min;
-                      const nextResStartStr = currentBayObj?.next_limit_res_start_time || '예정';
-
-                      return validAssets.map((asset) => {
-                        const isAssetSelected = selectedAssetId === parseInt(asset.member_item_id);
-                        const assetDurationMin = asset.duration_min ?? DEFAULT_SESSION_MIN;
-                        const isExceedingBayLimit = typeof bayMaxMin === 'number' && bayMaxMin > 0 && assetDurationMin > bayMaxMin;
-                        return (
-                          <div
-                            key={asset.member_item_id}
-                            onClick={() => setSelectedAssetId(parseInt(asset.member_item_id))}
-                            style={{
-                              padding: '20px 24px',
-                              borderRadius: '16px',
-                              cursor: 'pointer',
-                              border: isAssetSelected 
-                                ? '2.5px solid #34c759' 
-                                : '1.5px solid #dadce0',
-                              background: isAssetSelected 
-                                ? '#ffffff' 
-                                : '#f5f5f7',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              transition: 'all 0.2s ease',
-                              boxShadow: isAssetSelected 
-                                ? '0 10px 25px rgba(52, 199, 89, 0.15)' 
-                                : 'none',
-                              transform: isAssetSelected ? 'scale(1.01)' : 'none'
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                              <div 
-                                style={{
-                                  background: isAssetSelected ? 'rgba(52, 199, 89, 0.1)' : 'rgba(0, 0, 0, 0.03)',
-                                  padding: '14px',
-                                  borderRadius: '12px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center'
-                                }}
-                              >
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isAssetSelected ? '#34c759' : '#86868b'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M2 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/>
-                                  <path d="M13 5v2"/>
-                                  <path d="M13 17v2"/>
-                                  <path d="M13 11v2"/>
-                                </svg>
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                <span style={{ 
-                                  fontSize: '20px', 
-                                  fontWeight: 800, 
-                                  color: isAssetSelected ? '#121419' : '#1d1d1f' 
-                                }}>
-                                  {(asset as any).prod_nm || (asset as any).item_name}
-                                </span>
-                                <span style={{ 
-                                  fontSize: '15px', 
-                                  color: isAssetSelected ? '#059669' : '#6b7280',
-                                  fontWeight: 700
-                                }}>
-                                  {getAssetSubtext(asset)}
-                                </span>
-                                {isExceedingBayLimit && (
-                                  <span style={{
-                                    display: 'inline-block',
-                                    marginTop: '2px',
-                                    fontSize: '13px',
-                                    fontWeight: 800,
-                                    color: '#b45309',
-                                    background: '#fef3c7',
-                                    border: '1px solid #fcd34d',
-                                    padding: '3px 10px',
-                                    borderRadius: '8px',
-                                    width: 'fit-content'
-                                  }}>
-                                    ⚠️ 현재 타석 최대 {bayMaxMin}분만 가능 (다음예약 {nextResStartStr} · {assetDurationMin - bayMaxMin}분 단축 소멸)
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            {isAssetSelected && (
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#34c759" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                  <polyline points="20 6 9 17 4 12"/>
-                                </svg>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      });
-                    })()}
-                  </div>
-
-                  {/* Actions */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px' }}>
-                    <button 
-                      className="kiosk-btn" 
-                      style={{ width: '160px', height: '64px', borderRadius: '12px', fontSize: '18px', fontWeight: 800 }}
-                      onClick={() => {
-                        setSelectedAssetId(null);
-                        setAuthMember(null);
-                        const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
-                        if (bayToRelease !== null) {
-                          api.releaseBay(bayToRelease).catch(console.error);
-                          setSelectedBayNo(null);
-                          selectedBayNoRef.current = null;
-                        }
-                        setStep('PRACTICE_SELECT');
-                      }}
-                    >
-                      {lang === 'KO' ? '취소' : 'Cancel'}
-                    </button>
-
-                    <button 
-                      className="kiosk-btn kiosk-btn-primary" 
-                      style={{ 
-                        width: '260px', 
-                        height: '64px', 
-                        borderRadius: '12px', 
-                        fontSize: '20px', 
-                        fontWeight: 800 
-                      }}
-                      disabled={selectedAssetId === null}
-                      onClick={() => selectedAssetId !== null && handleAssetSelected(selectedAssetId)}
-                    >
-                      {lang === 'KO' ? '선택한 이용권으로 배정' : 'Allocate with Selected Pass'}
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <AssetSelectModal
+                authMember={authMember}
+                selectedBayNo={selectedBayNo}
+                bays={bays}
+                lang={lang}
+                selectedAssetId={selectedAssetId}
+                onSelectAsset={(assetId) => setSelectedAssetId(assetId)}
+                onConfirm={(assetId) => handleAssetSelected(assetId)}
+                onCancel={() => {
+                  setSelectedAssetId(null);
+                  setAuthMember(null);
+                  const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
+                  if (bayToRelease !== null) {
+                    api.releaseBay(bayToRelease).catch(console.error);
+                    setSelectedBayNo(null);
+                    selectedBayNoRef.current = null;
+                  }
+                  setStep('PRACTICE_SELECT');
+                }}
+                onSwitchToDaily={() => {
+                  setPurpose('ALLOCATE_DAILY');
+                  setStep('PRODUCT_SHOP');
+                }}
+                onChangeBay={() => {
+                  setSelectedAssetId(null);
+                  const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
+                  if (bayToRelease !== null) {
+                    api.releaseBay(bayToRelease).catch(console.error);
+                    setSelectedBayNo(null);
+                    selectedBayNoRef.current = null;
+                  }
+                  keepAuthAfterPurchaseRef.current = true;
+                  setStep('PRACTICE_SELECT');
+                }}
+              />
             )}
           </div>
         </>

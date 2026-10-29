@@ -239,12 +239,12 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
 
     // 2. 메인 대시보드에서 [회원가입] 클릭
     await page.locator('text=회원가입').first().click();
-    await expect(page.getByRole('heading', { name: '무인 스튜디오 30초 즉석 회원가입' })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('heading', { name: /신규 회원가입/ })).toBeVisible({ timeout: 5000 });
 
     // 3. 이름 입력: 가상 키보드 열어서 '김영' 입력 후 '입력 완료'
     const nameInput = page.locator('input[placeholder="여기를 터치하여 이름을 입력하세요"]');
     await nameInput.focus();
-    await expect(page.locator('text=가상 자판을 터치하여 입력하세요')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=/가상 자판을 터치하여/')).toBeVisible({ timeout: 5000 });
     await page.locator('button:has-text("ㄱ")').click();
     await page.locator('button:has-text("ㅣ")').click();
     await page.locator('button:has-text("ㅁ")').click();

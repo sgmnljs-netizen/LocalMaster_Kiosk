@@ -11,6 +11,8 @@ interface TeeboxTileCardProps {
   lang?: 'KO' | 'EN';
   selectionIndex?: number | null;
   isJustAllocated?: boolean;
+  isCurrentMyBay?: boolean; // ✨ 타석 이동 모드: 본인 현재 이용 타석
+  isMoveMode?: boolean; // ✨ 타석 이동 모드 여부
 }
 
 export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
@@ -20,8 +22,9 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   lang = 'KO',
   selectionIndex = null,
   isJustAllocated = false,
+  isCurrentMyBay = false,
+  isMoveMode = false,
 }) => {
-  // 🧮 5대 시간 변수 누적 합산 정밀 계산 함수 (Master Total Availability Calculation)
   const hwState = evaluateBayHardwareState(bay);
   const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
   const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
@@ -31,7 +34,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   const isLessonOnly = Boolean(bay.is_lesson_only);
   const isAvailable = canonicalStatus === 'AVAILABLE' && !isOccupied && !isPreOccupied && !isPrepare && !isMaintenance && !isLessonOnly;
   const isSelfLocked = isPreOccupied && (isSelected || (!!bay.lock_terminal_id && bay.lock_terminal_id === api.getTerminalId()));
-  const isClickable = !isMaintenance && (isAvailable || isOccupied || isPrepare || isSelected || isSelfLocked || isLessonOnly);
+  const isClickable = !isMaintenance && (isAvailable || isOccupied || isPrepare || isSelected || isSelfLocked || isLessonOnly || isCurrentMyBay);
 
   const totalRemainingMin = TimeMaster.getTotalWaitMinutes(bay);
   const finalEndTimeStr = TimeMaster.formatAvailableFromTime(bay);
@@ -40,33 +43,38 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
     ? 100
     : Math.max(0, Math.min(100, (totalRemainingMin / 60) * 100));
 
-  // 스펙 텍스트 라벨 (좌타/장비)
+  // 스펙 텍스트 라벨 (좌타/장비 - 우타는 기본값이므로 시각적 소음 제거를 위해 미노출)
   const handed = bay.handedness || (bay.type === 'LEFT' ? 'LEFT' : 'RIGHT');
+  const isSpecialHanded = handed === 'LEFT' || handed === 'BOTH';
+  const validSimulatorType = bay.simulator_type && !['STANDARD', 'NONE', ''].includes(String(bay.simulator_type).toUpperCase()) ? bay.simulator_type : null;
 
   return (
     <div
       onClick={() => isClickable && onSelect(bay.bay_no)}
       style={{
         position: 'relative',
-        borderRadius: '24px',
-        padding: '18px 20px',
+        borderRadius: '22px',
+        padding: '13px 11px',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        height: '170px',
-        cursor: isClickable ? 'pointer' : 'not-allowed',
-        transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-        transform: isJustAllocated ? 'scale(1.05) translateY(-4px)' : isSelected ? 'scale(1.03) translateY(-4px)' : 'scale(1)',
+        aspectRatio: '1 / 1.22',
+        cursor: isCurrentMyBay ? 'default' : (isClickable ? 'pointer' : 'not-allowed'),
+        transition: 'all 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+        transform: isJustAllocated ? 'scale(1.04) translateY(-3px)' : isSelected ? 'scale(1.02) translateY(-3px)' : 'scale(1)',
+        boxSizing: 'border-box',
         
-        // 애플 스타일 미니멀 패널
+        // 애플 스타일 순백색 & 딥 차콜 고대비 패널 / 내 타석 에메랄드 하이라이트
         backgroundColor: isJustAllocated
           ? 'linear-gradient(135deg, #064e3b 0%, #047857 100%)'
           : isSelected
           ? '#047857'
+          : isCurrentMyBay
+          ? '#ecfdf5'
           : isAvailable
           ? '#ffffff'
-          : isOccupied
-          ? '#f4f4f5'
+          : (isOccupied || isPrepare)
+          ? '#f4f4f6'
           : isPreOccupied
           ? '#fafafa'
           : '#fef2f2',
@@ -74,19 +82,23 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         border: isJustAllocated
           ? '3px solid #10b981'
           : isSelected
-          ? '2px solid #10b981'
+          ? '2.5px solid #10b981'
+          : isCurrentMyBay
+          ? '2.5px solid #059669'
           : isAvailable
-          ? '1px solid rgba(229, 229, 234, 0.8)'
-          : isOccupied
-          ? '1px solid #e4e4e7'
+          ? '1.5px solid rgba(0, 0, 0, 0.08)'
+          : (isOccupied || isPrepare)
+          ? '1.5px solid #d1d5db'
           : isPreOccupied
-          ? '1.5px dashed #a1a1aa'
-          : '1px solid #fecdd3',
+          ? '1.5px dashed #f59e0b'
+          : '1.5px solid #fecaca',
         
         boxShadow: isJustAllocated
           ? '0 0 24px rgba(16, 185, 129, 0.6), 0 16px 36px rgba(4, 120, 87, 0.4)'
           : isSelected
           ? '0 16px 36px rgba(4, 120, 87, 0.3), 0 2px 8px rgba(0, 0, 0, 0.08)'
+          : isCurrentMyBay
+          ? '0 6px 18px rgba(5, 150, 105, 0.18)'
           : isAvailable
           ? '0 4px 16px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 1)'
           : '0 2px 8px rgba(0, 0, 0, 0.02)',
@@ -100,14 +112,14 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         <div
           style={{
             position: 'absolute',
-            top: '12px',
-            right: '12px',
+            top: '10px',
+            right: '10px',
             background: '#10b981',
             color: '#ffffff',
             fontSize: '11px',
             fontWeight: 900,
-            padding: '4px 10px',
-            borderRadius: '12px',
+            padding: '3px 8px',
+            borderRadius: '10px',
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
             zIndex: 10
           }}
@@ -116,24 +128,45 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         </div>
       )}
 
+      {/* ⛳ 타석 이동 시 현재 이용 중인 본인 타석 배지 표시 */}
+      {isCurrentMyBay && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            background: '#059669',
+            color: '#ffffff',
+            fontSize: '11px',
+            fontWeight: 900,
+            padding: '3px 8px',
+            borderRadius: '10px',
+            boxShadow: '0 2px 8px rgba(5, 150, 105, 0.3)',
+            zIndex: 10
+          }}
+        >
+          ⛳ 현재 내 타석
+        </div>
+      )}
+
       {/* 동반자 다중 선택 순서 배지 */}
       {selectionIndex && !isJustAllocated && (
         <div
           style={{
             position: 'absolute',
-            top: '12px',
-            right: '12px',
-            width: '28px',
-            height: '28px',
+            top: '10px',
+            right: '10px',
+            width: '26px',
+            height: '26px',
             borderRadius: '50%',
             backgroundColor: isSelected ? '#ffffff' : '#047857',
             color: isSelected ? '#047857' : '#ffffff',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontWeight: 900,
-            fontSize: '15px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+            fontWeight: 800,
+            fontSize: '14px',
+            boxShadow: '0 4px 10px rgba(0, 0, 0, 0.15)',
             zIndex: 10,
           }}
         >
@@ -141,70 +174,82 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         </div>
       )}
 
-      {/* 1. 상단: 미니멀 스펙 배지 & 🟢 가능 도트 */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-        {/* 스펙 태그 (기본 우타 표시) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {/* 타석 방향 (기본값: 우타) */}
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 800,
-              padding: '2px 7px',
-              borderRadius: '6px',
-              backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : (handed === 'LEFT' ? '#e0f2fe' : handed === 'BOTH' ? '#f3e8ff' : '#f4f4f5'),
-              color: isSelected ? '#ffffff' : (handed === 'LEFT' ? '#0284c7' : handed === 'BOTH' ? '#7e22ce' : '#52525b'),
-              border: isSelected ? '1px solid rgba(255,255,255,0.3)' : '1px solid rgba(0,0,0,0.06)',
-              letterSpacing: '-0.2px',
-            }}
-          >
-            {handed === 'LEFT' ? '좌타' : handed === 'BOTH' ? '양타' : '우타'}
-          </span>
+      {/* 1. 상단 헤더(26px): 좌측 스펙 배지 & 우측 상태 인디케이터 (1줄 고정) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minHeight: '26px', gap: '4px', flexWrap: 'nowrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'nowrap', minWidth: 0, overflow: 'hidden' }}>
+          {/* 특수 타석 방향만 강조 표출 (우타는 디폴트이므로 노이즈 방지를 위해 완전 미노출) */}
+          {isSpecialHanded && (
+            <span
+              style={{
+                fontSize: '12px',
+                fontWeight: 800,
+                padding: '3px 7px',
+                borderRadius: '6px',
+                backgroundColor: isSelected
+                  ? 'rgba(255,255,255,0.16)'
+                  : (isOccupied || isPrepare)
+                  ? '#ffffff'
+                  : handed === 'LEFT'
+                  ? '#e0f2fe'
+                  : '#f3e8ff',
+                color: isSelected ? '#ffffff' : (handed === 'LEFT' ? '#0369a1' : '#7e22ce'),
+                letterSpacing: '-0.3px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              {handed === 'LEFT' ? '좌타' : '양타'}
+            </span>
+          )}
 
-          {/* DB에 실제 입력되어 있는 장비종만 동적 표출 */}
-          {bay.simulator_type && (
+          {/* 유효한 장비종만 동적 표출 ('NONE' 제외) */}
+          {validSimulatorType && (
             <span
               style={{
                 fontSize: '11px',
                 fontWeight: 800,
-                padding: '2px 7px',
+                padding: '3px 6px',
                 borderRadius: '6px',
-                backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#e4e4e7',
-                color: isSelected ? '#ffffff' : '#3f3f46',
-                letterSpacing: '-0.2px',
+                backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#1d1d1f',
+                color: '#ffffff',
+                letterSpacing: '-0.3px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}
             >
-              {bay.simulator_type === 'GDR_PLUS'
+              {validSimulatorType === 'GDR_PLUS'
                 ? 'GDR+'
-                : bay.simulator_type === 'KAKAO_VX'
+                : validSimulatorType === 'KAKAO_VX'
                 ? 'VX'
-                : bay.simulator_type === 'QED'
+                : validSimulatorType === 'QED'
                 ? 'QED'
-                : bay.simulator_type === 'SDR'
+                : validSimulatorType === 'SDR'
                 ? 'SDR'
-                : bay.simulator_type === 'SG_GOLF'
+                : validSimulatorType === 'SG_GOLF'
                 ? 'SG'
-                : bay.simulator_type === 'LM'
+                : validSimulatorType === 'LM'
                 ? 'LM'
-                : bay.simulator_type === 'STR'
+                : validSimulatorType === 'STR'
                 ? 'STR'
-                : bay.simulator_type === 'VIP'
+                : validSimulatorType === 'VIP'
                 ? 'VIP'
-                : bay.simulator_type}
+                : validSimulatorType}
             </span>
           )}
 
           {/* 스크린 규격 배지 */}
-          {bay.screen_spec && bay.screen_spec !== 'STANDARD' && (
+          {bay.screen_spec && !['STANDARD', 'NONE'].includes(String(bay.screen_spec).toUpperCase()) && (
             <span
               style={{
                 fontSize: '11px',
                 fontWeight: 800,
-                padding: '2px 7px',
+                padding: '3px 6px',
                 borderRadius: '6px',
-                backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
-                color: isSelected ? '#ffffff' : '#475569',
-                letterSpacing: '-0.2px',
+                backgroundColor: isSelected ? 'rgba(255,255,255,0.16)' : '#f2f2f7',
+                color: isSelected ? '#ffffff' : '#48484a',
+                letterSpacing: '-0.3px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}
             >
               {bay.screen_spec === 'WIDE_16_9' ? '16:9' : '커브드'}
@@ -217,28 +262,32 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
               style={{
                 fontSize: '11px',
                 fontWeight: 800,
-                padding: '2px 7px',
+                padding: '3px 6px',
                 borderRadius: '6px',
-                backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#ecfeff',
-                color: isSelected ? '#ffffff' : '#155e75',
-                letterSpacing: '-0.2px',
+                backgroundColor: isSelected ? 'rgba(255,255,255,0.16)' : '#ecfeff',
+                color: isSelected ? '#ffffff' : '#0e7490',
+                letterSpacing: '-0.3px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}
             >
               동반자
             </span>
           )}
 
-          {/* DB에 입력된 레슨 전용 배지 */}
+          {/* 레슨 전용 배지 */}
           {bay.is_lesson_only && (
             <span
               style={{
                 fontSize: '11px',
                 fontWeight: 800,
-                padding: '2px 7px',
+                padding: '3px 6px',
                 borderRadius: '6px',
-                backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#fef3c7',
-                color: isSelected ? '#ffffff' : '#d97706',
-                letterSpacing: '-0.2px',
+                backgroundColor: isSelected ? 'rgba(255,255,255,0.16)' : '#fef3c7',
+                color: isSelected ? '#ffffff' : '#b45309',
+                letterSpacing: '-0.3px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}
             >
               레슨
@@ -251,12 +300,14 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
               style={{
                 fontSize: '11px',
                 fontWeight: 800,
-                padding: '2px 7px',
+                padding: '3px 6px',
                 borderRadius: '6px',
                 backgroundColor: hwState.isBallEmpty ? '#fef3c7' : '#fee2e2',
                 color: hwState.isBallEmpty ? '#b45309' : '#dc2626',
                 border: hwState.isBallEmpty ? '1px solid #fde68a' : '1px solid #fecaca',
-                letterSpacing: '-0.2px',
+                letterSpacing: '-0.3px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}
             >
               {hwState.isBallEmpty ? '공부족' : hwState.shortLabel || '점검중'}
@@ -264,113 +315,274 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
           )}
         </div>
 
-        {/* 🟢 이용 가능 도트 뱃지 */}
-        {isAvailable && !selectionIndex && (
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '5px',
-              color: isSelected ? '#ffffff' : '#059669',
-              fontSize: '13px',
-              fontWeight: 800,
-              letterSpacing: '-0.3px',
-            }}
-          >
-            <span
-              style={{
-                width: '7px',
-                height: '7px',
-                borderRadius: '50%',
-                backgroundColor: isSelected ? '#34d399' : '#10b981',
-                boxShadow: isSelected ? '0 0 8px #34d399' : '0 0 6px #10b981',
-              }}
-            />
-            <span>{isSelected ? '선택됨' : '가능'}</span>
-          </div>
+        {/* 우측 상단: 상태별 인디케이터 (가능 / 사용중 / 선점중 / 점검) */}
+        {!selectionIndex && !isJustAllocated && !isCurrentMyBay && (
+          <>
+            {(isAvailable || isSelected) && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  color: isSelected ? '#34d399' : '#059669',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  letterSpacing: '-0.3px',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    backgroundColor: isSelected ? '#34d399' : '#10b981',
+                    boxShadow: '0 0 6px rgba(16, 185, 129, 0.5)',
+                    flexShrink: 0,
+                  }}
+                />
+                <span>{isSelected ? '선택됨' : '가능'}</span>
+              </div>
+            )}
+            {!isSelected && (isOccupied || isPrepare) && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  color: isSelected ? '#ffffff' : '#64748b',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  letterSpacing: '-0.3px',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: isSelected ? '#34d399' : '#64748b',
+                    flexShrink: 0,
+                  }}
+                />
+                <span>
+                  {isSelected
+                    ? (lang === 'KO' ? '대기선택' : 'Select')
+                    : ((bay.waiting_res_count && bay.waiting_res_count > 0)
+                        ? (lang === 'KO' ? `대기 ${bay.waiting_res_count}명` : `Wait ${bay.waiting_res_count}`)
+                        : (lang === 'KO' ? '사용중' : 'In Use'))}
+                </span>
+              </div>
+            )}
+            {!isSelected && isPreOccupied && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  color: isSelected ? '#ffffff' : '#d97706',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  letterSpacing: '-0.3px',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: '#f59e0b',
+                    flexShrink: 0,
+                  }}
+                />
+                <span>선점중</span>
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {/* 2. 중앙: SF Pro 타이포그래피 대형 타석 번호 */}
-      <div style={{ display: 'flex', alignItems: 'center', margin: '2px 0' }}>
+      {/* 2. 정중앙(Center Hero): 대칭형 타석 번호 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, margin: '2px 0' }}>
         <span
           style={{
-            fontSize: '46px',
+            fontSize: isAvailable ? '48px' : '44px',
             fontWeight: 800,
-            letterSpacing: '-1.5px',
+            letterSpacing: '-1px',
             lineHeight: 1,
-            color: isSelected ? '#ffffff' : isAvailable ? '#111827' : isOccupied ? '#059669' : '#9ca3af',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif',
+            color: (isJustAllocated || isSelected)
+              ? '#ffffff'
+              : isCurrentMyBay
+              ? '#047857'
+              : isAvailable
+              ? '#111827'
+              : (isOccupied || isPrepare)
+              ? '#334155'
+              : '#9ca3af',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Roboto, sans-serif',
           }}
         >
           {String(bay.bay_no).padStart(2, '0')}
         </span>
       </div>
 
-      {/* 3. 하단: 5대 시간 변수 누적 합산 표출 (상단 크고 굵게 / 하단에 작게) */}
-      <div>
-        {isAvailable && (
-          <div style={{ color: isSelected ? 'rgba(255,255,255,0.8)' : '#9ca3af', fontSize: '13px', fontWeight: 600 }}>
-            {isSelected ? '선택 완료' : '이용 가능'}
+      {/* 3. 하단(52px 정보 박스): 상태별 최적화 표출 (1줄 강제 + 클리핑 원천 차단) */}
+      <div style={{ minHeight: '52px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        {isCurrentMyBay && (
+          <div
+            style={{
+              height: '38px',
+              borderRadius: '10px',
+              backgroundColor: '#d1fae5',
+              border: '1px solid #6ee7b7',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#047857',
+              fontSize: '13px',
+              fontWeight: 900,
+              letterSpacing: '-0.3px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {lang === 'KO' ? '현재 내 타석 (보전)' : 'Current Teebox (Keep)'}
           </div>
         )}
 
-        {isPrepare && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isSelected ? '#ffffff' : '#d97706', fontSize: '13px', fontWeight: 800 }}>
-            <Clock size={13} />
-            <span>
-              {bay.is_paused ? '⏸ 일시정지 ' : '대기 중 '}({bay.prepare_remaining_sec !== undefined && bay.prepare_remaining_sec !== null
-                ? `${Math.floor(bay.prepare_remaining_sec / 60)}:${String(bay.prepare_remaining_sec % 60).padStart(2, '0')}`
-                : '곧 시작'})
-            </span>
+        {!isCurrentMyBay && (isAvailable || isSelected) && (
+          <div
+            style={{
+              height: '38px',
+              borderRadius: '10px',
+              backgroundColor: isSelected ? 'rgba(255,255,255,0.18)' : '#f0fdf4',
+              border: isSelected ? '1px solid rgba(255,255,255,0.3)' : '1px solid #bbf7d0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: isSelected ? '#ffffff' : '#047857',
+              fontSize: '13.5px',
+              fontWeight: 800,
+              letterSpacing: '-0.3px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {isSelected 
+              ? (isMoveMode ? (lang === 'KO' ? '이동 선택 완료' : 'Move Selected') : (lang === 'KO' ? '선택 완료' : 'Selected')) 
+              : (isMoveMode ? (lang === 'KO' ? '즉시 이동 가능' : 'Move Available') : (lang === 'KO' ? '즉시 배정 가능' : 'Available'))}
           </div>
         )}
 
-        {isOccupied && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-            {/* 1. 상단 대형 강세: 누적 실질 잔여시간 (크고 굵게) */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Clock size={15} color={isSelected ? '#ffffff' : (bay.is_paused ? '#d97706' : '#059669')} />
-              <span style={{ fontSize: '16px', fontWeight: 900, color: isSelected ? '#ffffff' : (bay.is_paused ? '#d97706' : '#059669'), letterSpacing: '-0.4px' }}>
-                {bay.is_paused
-                  ? `⏸ ${totalRemainingMin > 0 ? `${totalRemainingMin}분 (정지)` : '일시정지'}`
-                  : (totalRemainingMin > 0 ? `${totalRemainingMin}분 남음` : '1분 미만')}
-              </span>
+        {!isCurrentMyBay && !isSelected && (isOccupied || isPrepare) && (
+          <div
+            style={{
+              backgroundColor: isSelected ? 'rgba(255,255,255,0.14)' : '#ffffff',
+              borderRadius: '12px',
+              border: isSelected ? '1.5px solid rgba(255,255,255,0.35)' : '1.5px solid #e2e8f0',
+              boxShadow: isSelected ? 'none' : '0 2px 6px rgba(0,0,0,0.04)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxSizing: 'border-box',
+            }}
+          >
+            {/* 상단 2컬럼: 남은 대기 (16px) | 시작 시각 (16px) */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '5px 4px 4px 4px',
+              }}
+            >
+              {/* 좌측: 남은 대기 시간 */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: '10px', fontWeight: 700, color: isSelected ? 'rgba(255,255,255,0.8)' : '#64748b', letterSpacing: '-0.3px', lineHeight: 1, marginBottom: '2px', whiteSpace: 'nowrap' }}>
+                  {lang === 'KO' ? '남은 대기' : 'Wait Time'}
+                </span>
+                <span style={{ fontSize: '16px', fontWeight: 900, color: isSelected ? '#ffffff' : (bay.is_paused ? '#ea580c' : totalRemainingMin <= 15 ? '#d97706' : '#059669'), letterSpacing: '-0.5px', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                  {bay.is_paused
+                    ? (totalRemainingMin > 0 ? `${totalRemainingMin}분(정지)` : (lang === 'KO' ? '일시정지' : 'Paused'))
+                    : (totalRemainingMin > 0 ? `${totalRemainingMin}분` : (lang === 'KO' ? '1분 미만' : '< 1m'))}
+                </span>
+              </div>
+
+              {/* 중앙 1px 정밀 구분선 */}
+              <div style={{ width: '1px', height: '22px', backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#e2e8f0', flexShrink: 0 }} />
+
+              {/* 우측: 시작 시각 */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: '10px', fontWeight: 700, color: isSelected ? 'rgba(255,255,255,0.8)' : '#64748b', letterSpacing: '-0.3px', lineHeight: 1, marginBottom: '2px', whiteSpace: 'nowrap' }}>
+                  {lang === 'KO' ? '시작 시각' : 'Start At'}
+                </span>
+                <span style={{ fontSize: '16px', fontWeight: 900, color: isSelected ? '#ffffff' : (bay.is_paused ? '#ea580c' : '#1e293b'), letterSpacing: '-0.5px', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                  {bay.is_paused ? (lang === 'KO' ? '볼회수중' : 'Paused') : finalEndTimeStr}
+                </span>
+              </div>
             </div>
 
-            {/* 2. 하단 서브: 그 아래 정밀 계산된 최종 빈 타석 예정 시각 (작게) */}
-            <div style={{ fontSize: '12px', fontWeight: 600, color: isSelected ? 'rgba(255,255,255,0.8)' : '#71717a', letterSpacing: '-0.2px', paddingLeft: '2px' }}>
-              {bay.is_paused ? '볼회수/일시정지 중' : `${finalEndTimeStr} 빈타석 예정`}
-            </div>
-
-            {/* 잔여시간 누적 프로그레스 게이지 바 */}
-            <div style={{ width: '100%', height: '5px', backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#e4e4e7', borderRadius: '3px', overflow: 'hidden', marginTop: '2px' }}>
+            {/* 하단 4px 일체형 매립 프로그레스 바 (Graph Bar) */}
+            <div style={{ width: '100%', height: '4px', backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#f1f5f9', overflow: 'hidden' }}>
               <div
                 style={{
                   width: `${progressPercent}%`,
                   height: '100%',
-                  backgroundColor: totalRemainingMin <= 15 ? '#d97706' : isSelected ? '#ffffff' : '#059669',
-                  borderRadius: '3px',
-                  transition: 'width 0.5s ease',
+                  background: isSelected
+                    ? '#ffffff'
+                    : (bay.is_paused ? '#f97316' : totalRemainingMin <= 15 ? '#f59e0b' : 'linear-gradient(90deg, #10b981 0%, #059669 100%)'),
+                  transition: 'width 0.4s ease',
                 }}
               />
             </div>
           </div>
         )}
 
-        {isPreOccupied && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isSelected ? '#ffffff' : '#6366f1', fontSize: '13px', fontWeight: 700 }}>
+        {!isCurrentMyBay && !isSelected && isPreOccupied && (
+          <div
+            style={{
+              height: '38px',
+              borderRadius: '10px',
+              backgroundColor: isSelected ? 'rgba(255,255,255,0.18)' : '#fef3c7',
+              border: isSelected ? '1px solid rgba(255,255,255,0.3)' : '1px solid #fde68a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '5px',
+              color: isSelected ? '#ffffff' : '#b45309',
+              fontSize: '13px',
+              fontWeight: 800,
+              whiteSpace: 'nowrap',
+            }}
+          >
             <Lock size={13} />
             <span>결제 진행 중</span>
           </div>
         )}
 
-        {isMaintenance && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isSelected ? '#ffffff' : (hwState.isBallEmpty ? '#d97706' : '#ef4444'), fontSize: '13px', fontWeight: 700 }}>
+        {!isCurrentMyBay && isMaintenance && (
+          <div
+            style={{
+              height: '38px',
+              borderRadius: '10px',
+              backgroundColor: hwState.isBallEmpty ? '#fef3c7' : '#fee2e2',
+              border: hwState.isBallEmpty ? '1px solid #fde68a' : '1px solid #fecaca',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '5px',
+              color: hwState.isBallEmpty ? '#b45309' : '#dc2626',
+              fontSize: '13px',
+              fontWeight: 800,
+              whiteSpace: 'nowrap',
+            }}
+          >
             {hwState.isBallEmpty ? (
               <>
                 <span style={{ fontSize: '13px' }}>⚠️</span>
-                <span>공부족 (점검중)</span>
+                <span>공부족 (점검)</span>
               </>
             ) : (
               <>

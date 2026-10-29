@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, User, X, Sparkles, Smartphone, QrCode, Delete } from 'lucide-react';
+import { Camera, User, X, Sparkles, Smartphone, QrCode, Delete, Hash } from 'lucide-react';
 import { api, Member } from '../services/api';
 import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
 import {
@@ -13,7 +13,7 @@ import {
 export type AuthMode = 'SMART_TAG' | 'PHONE_KEYPAD' | 'QR_SCAN' | 'FACE';
 
 const AUTH_MODE_SHORT_LABELS: Record<AuthMode, string> = {
-  SMART_TAG: '스마트 태그',
+  SMART_TAG: '앱 스마트 체크인',
   PHONE_KEYPAD: '전화번호',
   QR_SCAN: 'QR 스캔',
   FACE: '안면 인식',
@@ -32,6 +32,8 @@ interface MemberAuthProps {
   enabledAuthModes?: AuthMode[];
   defaultAuthMode?: AuthMode;
   isSubModal?: boolean;
+  selectedBayNo?: number | null;
+  selectedBayNos?: number[];
   onAuthSuccess: (member: Member) => void;
   onCancel: () => void;
   onSignUpClick?: () => void;
@@ -44,6 +46,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   enabledAuthModes,
   defaultAuthMode,
   isSubModal = false,
+  selectedBayNo,
+  selectedBayNos,
   onAuthSuccess, 
   onCancel, 
   onSignUpClick,
@@ -84,8 +88,9 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   const faceTimerRef = useRef<any>(null);
   const authTimeoutRef = useRef<any>(null);
   const faceAbortControllerRef = useRef<AbortController | null>(null);
-  // 키오스크 ↔ 백엔드 NFC/BLE WebSocket 연결 ref
+  // 키오스크 ↔ 로컬 하드웨어 브릿지 NFC/BLE 시퀀스 및 WebSocket 연결 ref
   const nfcBleWsRef = useRef<WebSocket | null>(null);
+  const lastHandledBleSeqRef = useRef<number>(0);
 
   // 🛡️ 안면 스캔 또는 서버 검색 진행 중 전역 비활동(Inactivity) 타이머 리셋 방어 (BUG-M10)
   useEffect(() => {
@@ -96,15 +101,20 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     return () => clearInterval(keepAlive);
   }, [faceScanning, isSearching, detectedMember, duplicateCandidates.length]);
 
-  // 스마트 태그 (NFC/BLE) 감지 시 회원 수신 처리 (3번 본인 확인 팝업 유도)
-  const handleSmartTagDetected = useCallback(async (tokenOrUid: string, fallbackMember?: Member) => {
+  // 스마트 태그 (NFC/BLE/QR) 감지 시 회원 수신 처리 (3번 본인 확인 팝업 유도)
+  const handleSmartTagDetected = useCallback(async (
+    tokenOrUid: string,
+    fallbackMember?: Member,
+    rssi?: number,
+    authType?: 'BLE' | 'NFC' | 'QR'
+  ) => {
     setIsSearching(true);
     setErrorMsg('');
     setDuplicateCandidates([]);
     try {
       const isShortPhone = /^[0-9]{4}$/.test(tokenOrUid.trim());
       const member = !isShortPhone && (api as any).authenticateSmartTag
-        ? await (api as any).authenticateSmartTag(tokenOrUid)
+        ? await (api as any).authenticateSmartTag(tokenOrUid, rssi, authType)
         : await api.getMember(tokenOrUid);
       if (Array.isArray(member) && member.length > 1) {
         setDuplicateCandidates(member);
@@ -122,7 +132,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       } else if (fallbackMember) {
         setDetectedMember(fallbackMember);
       } else {
-        setErrorMsg('등록되지 않은 모바일 회원 또는 NFC 카드입니다.');
+        setErrorMsg('등록되지 않은 모바일 회원이거나 스마트 체크인 신호를 찾을 수 없습니다.');
       }
     } catch (err: any) {
       const status = err?.response?.status || err?.status;
@@ -153,7 +163,11 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
 
   // 🛡️ E2E 테스트 및 외부 하드웨어 브릿지용 전역 헬퍼 및 이벤트 리스너 (BUG-M05)
   useEffect(() => {
-    (window as any).__LM_TRIGGER_SMART_AUTH__ = (tokenOrUid: string) => handleSmartTagDetected(tokenOrUid);
+    (window as any).__LM_TRIGGER_SMART_AUTH__ = (
+      tokenOrUid: string,
+      rssi?: number,
+      authType?: 'BLE' | 'NFC' | 'QR'
+    ) => handleSmartTagDetected(tokenOrUid, undefined, rssi, authType);
     const handleCustomTagEvent = (e: any) => {
       if (!isSmartTagEnabled) return;
       const target =
@@ -162,8 +176,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         e.detail?.tag_uid ||
         e.detail?.query ||
         e.detail?.hp;
+      const rssi = typeof e.detail?.rssi === 'number' ? e.detail.rssi : undefined;
+      const authType = e.detail?.auth_type as ('BLE' | 'NFC' | 'QR' | undefined);
       if (target) {
-        handleSmartTagDetected(String(target));
+        handleSmartTagDetected(String(target), undefined, rssi, authType);
       }
     };
     window.addEventListener('lm-nfc-tag', handleCustomTagEvent);
@@ -173,14 +189,70 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     };
   }, [handleSmartTagDetected, isSmartTagEnabled]);
 
-  // 🛡️ 바코드/QR 하드웨어 스캐너 전역 자동 감지 (본인확인 모달 열림, 안면 매칭 완료 대기, 검색 중, 또는 QR 인증 비활성화 시 스캔 차단)
+  // 🛡️ 바코드/QR 하드웨어 스캐너 전역 자동 감지 (QR_SCAN 또는 SMART_TAG 활성 시 상시 동작, 모달/검색 중 차단)
   useHardwareScanner({
     onScan: (scanned) => {
       console.log('[MemberAuth] Hardware QR/Barcode scanned:', scanned);
-      handleSmartTagDetected(scanned);
+      handleSmartTagDetected(scanned, undefined, undefined, 'QR');
     },
-    enabled: isQrScanEnabled && !isSearching && !detectedMember && !faceMatchResult && duplicateCandidates.length === 0,
+    enabled: (isQrScanEnabled || isSmartTagEnabled) && !isSearching && !detectedMember && !faceMatchResult && duplicateCandidates.length === 0,
   });
+
+  // 📡 로컬 하드웨어 브릿지(:18080/api/v1/ble/poll) WinRT BLE 근접 태그 실시간 감지 폴링
+  useEffect(() => {
+    const canPollBle =
+      isSmartTagEnabled &&
+      !isSearching &&
+      !detectedMember &&
+      !faceMatchResult &&
+      duplicateCandidates.length === 0;
+    if (!canPollBle) return;
+
+    let cancelled = false;
+    const pollBleBridge = async () => {
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:18080/api/v1/ble/poll?since_seq=${lastHandledBleSeqRef.current}`,
+          {
+            method: 'GET',
+            signal: AbortSignal.timeout(800),
+          }
+        );
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (
+          !cancelled &&
+          data?.detected &&
+          data?.token &&
+          typeof data?.seq === 'number' &&
+          data.seq > lastHandledBleSeqRef.current
+        ) {
+          lastHandledBleSeqRef.current = data.seq;
+          fetch('http://127.0.0.1:18080/api/v1/ble/clear', {
+            method: 'POST',
+            signal: AbortSignal.timeout(500),
+          }).catch(() => undefined);
+          const rssiVal = typeof data.rssi === 'number' ? data.rssi : undefined;
+          handleSmartTagDetected(String(data.token), undefined, rssiVal, 'BLE');
+        }
+      } catch {
+        // 로컬 브릿지 미구동/타임아웃 시 조용히 무시
+      }
+    };
+
+    const timer = setInterval(pollBleBridge, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [
+    isSmartTagEnabled,
+    isSearching,
+    detectedMember,
+    faceMatchResult,
+    duplicateCandidates.length,
+    handleSmartTagDetected,
+  ]);
 
   // 전화번호 키패드 입력 제어 핸들러
   const handleKeypadDigit = (digit: string) => {
@@ -208,6 +280,9 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   };
 
   const formatHpDisplay = (raw: string) => {
+    if (!raw.startsWith('01') && raw.length <= 4) {
+      return raw;
+    }
     if (raw.length <= 3) return raw;
     if (raw.length <= 7) return `${raw.slice(0, 3)}-${raw.slice(3)}`;
     return `${raw.slice(0, 3)}-${raw.slice(3, 7)}-${raw.slice(7, 11)}`;
@@ -262,7 +337,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         }, 700);
       } else {
         if (!newController.signal.aborted) {
-          setErrorMsg('등록된 안면 정보가 없습니다. 스마트 태그 인증으로 진행해 주세요.');
+          setErrorMsg('등록된 안면 정보가 없습니다. 다른 인증 수단(전화번호·스마트태그 등)을 이용해 주세요.');
           setFaceScanning(false);
         }
       }
@@ -322,85 +397,164 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   }, [authMode]);
 
   return (
+    <div
+      style={{
+        width: '100%',
+        flex: isSubModal ? undefined : 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: isSubModal ? 'flex-start' : 'flex-start',
+        paddingTop: isSubModal ? '20px' : '180px',
+        paddingBottom: 0,
+        boxSizing: 'border-box',
+      }}
+    >
     <div 
       className="premium-glass-card" 
       style={{
-        width: isSubModal ? '720px' : '940px',
-        height: isSubModal ? '900px' : '1120px',
-        maxWidth: '100%',
+        width: isSubModal ? '880px' : '1000px',
+        maxWidth: 'calc(100% - 32px)',
+        height: isSubModal ? 'auto' : '1040px',
+        minHeight: isSubModal ? 'auto' : '1040px',
         boxSizing: 'border-box',
         margin: '0 auto',
-        padding: isSubModal ? '32px' : '40px',
+        padding: isSubModal ? '34px 36px' : '40px 44px',
+        background: '#ffffff',
+        borderRadius: '36px',
+        border: '1.5px solid #e2e8f0',
+        boxShadow: '0 28px 70px rgba(0, 0, 0, 0.09), 0 4px 18px rgba(0, 0, 0, 0.04)',
         display: 'flex',
         flexDirection: 'column',
-        gap: isSubModal ? '24px' : '30px',
+        justifyContent: 'space-between',
+        gap: '20px',
       }}
     >
-      {/* 타이틀 바 */}
+      {/* 상단 타이틀 바 (스페이스 블랙 원형 아이콘 배지 + 36px 타이틀 + 우측 돌아가기 솔리드 캡슐) */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <User size={isSubModal ? 32 : 40} style={{ color: 'var(--neon-green)' }} />
-          <h2 style={{ fontSize: isSubModal ? '28px' : '36px', fontWeight: 900, color: 'var(--text-primary)' }}>
-            {`회원 인증 (${activeAuthModes.map((m) => AUTH_MODE_SHORT_LABELS[m]).join(' · ')})`}
-          </h2>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <div
+              style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                background: '#111827',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 8px 20px rgba(17, 24, 39, 0.16)',
+              }}
+            >
+              <User size={28} strokeWidth={2.5} style={{ color: '#ffffff' }} />
+            </div>
+            <div
+              style={{
+                position: 'absolute',
+                top: 2,
+                right: 2,
+                width: '14px',
+                height: '14px',
+                borderRadius: '50%',
+                background: '#10b981',
+                border: '2.5px solid #ffffff',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <h2 style={{ fontSize: isSubModal ? '30px' : '36px', fontWeight: 900, color: '#111827', margin: 0, letterSpacing: '-0.8px', lineHeight: 1.15 }}>
+                회원 본인 인증
+              </h2>
+              {(selectedBayNos && selectedBayNos.length > 0 ? true : Boolean(selectedBayNo)) && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 16px',
+                    borderRadius: '999px',
+                    background: 'rgba(0, 113, 227, 0.08)',
+                    border: '1.5px solid rgba(0, 113, 227, 0.35)',
+                    color: '#0071e3',
+                    fontSize: '18px',
+                    fontWeight: 900,
+                    letterSpacing: '-0.4px',
+                    boxShadow: '0 2px 8px rgba(0, 113, 227, 0.12)',
+                  }}
+                >
+                  <span style={{ fontSize: '18px' }}>⛳</span>
+                  <span>
+                    {selectedBayNos && selectedBayNos.length > 0
+                      ? `${selectedBayNos.map((n) => String(n).padStart(2, '0')).join(', ')}번 타석 배정`
+                      : `${String(selectedBayNo).padStart(2, '0')}번 타석 배정`}
+                  </span>
+                </div>
+              )}
+            </div>
+            <span style={{ fontSize: '16px', fontWeight: 700, color: '#64748b', letterSpacing: '-0.2px' }}>
+              {`원하시는 인증 수단을 선택해 주세요 (${activeAuthModes.map((m) => AUTH_MODE_SHORT_LABELS[m]).join(' · ')})`}
+            </span>
+          </div>
         </div>
         <button 
           onClick={onCancel}
+          className="keypad-num-btn"
           style={{
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid var(--glass-border)',
-            color: 'var(--text-secondary)',
-            padding: '10px 20px',
-            borderRadius: '10px',
+            height: '52px',
+            background: '#f1f5f9',
+            border: '1px solid #cbd5e1',
+            color: '#1e293b',
+            padding: '0 24px',
+            borderRadius: '999px',
             cursor: 'pointer',
-            fontSize: '16px',
-            fontWeight: 700,
+            fontSize: '18px',
+            fontWeight: 800,
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            transition: 'transform 0.1s ease'
+            gap: '8px',
+            flexShrink: 0,
           }}
-          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
-          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
         >
-          <X size={18} />
+          <X size={20} strokeWidth={2.6} />
           돌아가기
         </button>
       </div>
 
-      {/* 인증 모드 전환 탭 (기기별 활성화된 인증 방식만 동적 노출) */}
+      {/* 인증 모드 전환 탭 (스페이스 블랙 솔리드 활성 탭 + 에메랄드 아이콘 포인트) */}
       <div style={{ 
         display: 'grid', 
         gridTemplateColumns: `repeat(${activeAuthModes.length}, 1fr)`, 
-        gap: '8px',
-        background: 'rgba(0, 0, 0, 0.04)',
-        padding: '6px',
-        borderRadius: '20px'
+        gap: '12px',
+        background: '#f1f5f9',
+        padding: '8px',
+        borderRadius: '22px',
+        border: '1px solid #e2e8f0',
       }}>
         {activeAuthModes.includes('SMART_TAG') && (
           <button
             onClick={() => { setAuthMode('SMART_TAG'); setErrorMsg(''); }}
             style={{
-              padding: isSubModal ? '12px 8px' : '18px 10px',
-              fontSize: isSubModal ? '15px' : '17px',
+              height: isSubModal ? '62px' : '72px',
+              padding: '0 14px',
+              fontSize: isSubModal ? '19px' : '22px',
               fontWeight: 800,
-              borderRadius: '14px',
+              borderRadius: '16px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px',
-              border: '0.5px solid',
+              gap: '10px',
+              border: authMode === 'SMART_TAG' ? '1px solid #111827' : '1px solid transparent',
               cursor: 'pointer',
               transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-              color: authMode === 'SMART_TAG' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              background: authMode === 'SMART_TAG' ? '#ffffff' : 'transparent',
-              borderColor: authMode === 'SMART_TAG' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-              boxShadow: authMode === 'SMART_TAG' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
+              color: authMode === 'SMART_TAG' ? '#ffffff' : '#64748b',
+              background: authMode === 'SMART_TAG' ? '#111827' : 'transparent',
+              boxShadow: authMode === 'SMART_TAG' ? '0 8px 20px rgba(17, 24, 39, 0.2)' : 'none',
+              letterSpacing: '-0.4px',
             }}
           >
-            <Smartphone size={20} style={{ color: authMode === 'SMART_TAG' ? '#059669' : 'inherit' }} />
-            스마트폰 태그
+            <Smartphone size={26} strokeWidth={2.5} style={{ color: authMode === 'SMART_TAG' ? '#34d399' : '#64748b' }} />
+            앱 스마트 체크인
           </button>
         )}
 
@@ -408,24 +562,25 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           <button
             onClick={() => { setAuthMode('PHONE_KEYPAD'); setErrorMsg(''); }}
             style={{
-              padding: isSubModal ? '12px 8px' : '18px 10px',
-              fontSize: isSubModal ? '15px' : '17px',
+              height: isSubModal ? '62px' : '72px',
+              padding: '0 14px',
+              fontSize: isSubModal ? '19px' : '22px',
               fontWeight: 800,
-              borderRadius: '14px',
+              borderRadius: '16px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px',
-              border: '0.5px solid',
+              gap: '10px',
+              border: authMode === 'PHONE_KEYPAD' ? '1px solid #111827' : '1px solid transparent',
               cursor: 'pointer',
               transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-              color: authMode === 'PHONE_KEYPAD' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              background: authMode === 'PHONE_KEYPAD' ? '#ffffff' : 'transparent',
-              borderColor: authMode === 'PHONE_KEYPAD' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-              boxShadow: authMode === 'PHONE_KEYPAD' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
+              color: authMode === 'PHONE_KEYPAD' ? '#ffffff' : '#64748b',
+              background: authMode === 'PHONE_KEYPAD' ? '#111827' : 'transparent',
+              boxShadow: authMode === 'PHONE_KEYPAD' ? '0 8px 20px rgba(17, 24, 39, 0.2)' : 'none',
+              letterSpacing: '-0.4px',
             }}
           >
-            <span style={{ fontSize: '18px' }}>🔢</span>
+            <Hash size={26} strokeWidth={2.5} style={{ color: authMode === 'PHONE_KEYPAD' ? '#34d399' : '#64748b' }} />
             전화번호 입력
           </button>
         )}
@@ -434,24 +589,25 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           <button
             onClick={() => { setAuthMode('QR_SCAN'); setErrorMsg(''); }}
             style={{
-              padding: isSubModal ? '12px 8px' : '18px 10px',
-              fontSize: isSubModal ? '15px' : '17px',
+              height: isSubModal ? '62px' : '72px',
+              padding: '0 14px',
+              fontSize: isSubModal ? '19px' : '22px',
               fontWeight: 800,
-              borderRadius: '14px',
+              borderRadius: '16px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px',
-              border: '0.5px solid',
+              gap: '10px',
+              border: authMode === 'QR_SCAN' ? '1px solid #111827' : '1px solid transparent',
               cursor: 'pointer',
               transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-              color: authMode === 'QR_SCAN' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              background: authMode === 'QR_SCAN' ? '#ffffff' : 'transparent',
-              borderColor: authMode === 'QR_SCAN' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-              boxShadow: authMode === 'QR_SCAN' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
+              color: authMode === 'QR_SCAN' ? '#ffffff' : '#64748b',
+              background: authMode === 'QR_SCAN' ? '#111827' : 'transparent',
+              boxShadow: authMode === 'QR_SCAN' ? '0 8px 20px rgba(17, 24, 39, 0.2)' : 'none',
+              letterSpacing: '-0.4px',
             }}
           >
-            <QrCode size={20} style={{ color: authMode === 'QR_SCAN' ? '#2563eb' : 'inherit' }} />
+            <QrCode size={26} strokeWidth={2.5} style={{ color: authMode === 'QR_SCAN' ? '#34d399' : '#64748b' }} />
             출입 QR 스캔
           </button>
         )}
@@ -460,63 +616,95 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           <button
             onClick={() => { setAuthMode('FACE'); setErrorMsg(''); }}
             style={{
-              padding: isSubModal ? '12px 8px' : '18px 10px',
-              fontSize: isSubModal ? '15px' : '17px',
+              height: isSubModal ? '62px' : '72px',
+              padding: '0 14px',
+              fontSize: isSubModal ? '19px' : '22px',
               fontWeight: 800,
-              borderRadius: '14px',
+              borderRadius: '16px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px',
-              border: '0.5px solid',
+              gap: '10px',
+              border: authMode === 'FACE' ? '1px solid #111827' : '1px solid transparent',
               cursor: 'pointer',
               transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-              color: authMode === 'FACE' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              background: authMode === 'FACE' ? '#ffffff' : 'transparent',
-              borderColor: authMode === 'FACE' ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-              boxShadow: authMode === 'FACE' ? '0 2px 10px rgba(0, 0, 0, 0.04)' : 'none',
+              color: authMode === 'FACE' ? '#ffffff' : '#64748b',
+              background: authMode === 'FACE' ? '#111827' : 'transparent',
+              boxShadow: authMode === 'FACE' ? '0 8px 20px rgba(17, 24, 39, 0.2)' : 'none',
+              letterSpacing: '-0.4px',
             }}
           >
-            <Camera size={20} style={{ color: authMode === 'FACE' ? '#7c3aed' : 'inherit' }} />
+            <Camera size={26} strokeWidth={2.5} style={{ color: authMode === 'FACE' ? '#34d399' : '#64748b' }} />
             안면 인식
           </button>
         )}
       </div>
 
-      {/* 에러 메세지 */}
-      {errorMsg && (
-        <div 
-          className="neon-border-red"
-          style={{ 
-            background: '#FEF2F2', 
-            border: '1.5px solid rgba(239, 68, 68, 0.35)',
-            padding: '16px', 
-            borderRadius: '14px', 
-            textAlign: 'center',
-            color: '#DC2626',
-            fontSize: '18px',
-            fontWeight: 800
+      {/* 탭 콘텐츠 영역 (750px 고정 워크스페이스로 탭 전환 시 높낮이 요동 원천 차단) */}
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'center', 
+        width: '100%',
+        height: isSubModal ? 'auto' : '750px',
+        minHeight: isSubModal ? 'auto' : '750px',
+        position: 'relative',
+      }}>
+        {/* 에러 메세지 (20px 고시인성 경고 배너, 레이아웃 시프트 방지용 절대 배치 오버레이) */}
+        {errorMsg && (
+          <div 
+            className="neon-border-red"
+            style={{ 
+              position: 'absolute',
+              top: '-24px',
+              left: '20px',
+              right: '20px',
+              zIndex: 30,
+              background: '#fef2f2', 
+              border: '2px solid #ef4444',
+              padding: '14px 22px', 
+              borderRadius: '18px', 
+              textAlign: 'center',
+              color: '#b91c1c',
+              fontSize: '20px',
+              fontWeight: 800,
+              letterSpacing: '-0.3px',
+              lineHeight: 1.4,
+              wordBreak: 'keep-all',
+              boxShadow: '0 12px 28px rgba(239, 68, 68, 0.25)',
+            }}
+          >
+            ⚠️ {errorMsg}
+          </div>
+        )}
+
+        {/* 0. 안면 인식 가상 카메라 패널 (카드 가로폭 100% 일체형 웰 + 스페이스 블랙 뷰포트) */}
+        {authMode === 'FACE' && (
+        <div
+          style={{
+            width: '100%',
+            height: isSubModal ? 'auto' : '750px',
+            minHeight: isSubModal ? 'auto' : '750px',
+            background: '#f8fafc',
+            borderRadius: '28px',
+            border: '1.5px solid #e2e8f0',
+            padding: '28px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxSizing: 'border-box',
           }}
         >
-          {errorMsg}
-        </div>
-      )}
-
-      {/* 탭 콘텐츠 영역 (고정 높이 적용으로 탭 전환 시 높낮이/헤더 흔들림 완벽 방지) */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', width: '100%' }}>
-        {/* 0. 안면 인식 가상 카메라 패널 (프리미엄 리뉴얼) */}
-        {authMode === 'FACE' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', alignItems: 'center' }}>
-          
-          {/* 거대 스캐너 메인 뷰 (640x640 정방형, Apple Face ID + Sci-Fi 무드) */}
+          {/* 스캐너 메인 뷰 (가로 100% 와이드 밸런스, 560px 대형 뷰파인더) */}
           <div 
             className="premium-glass-card"
             style={{
-              width: isSubModal ? '440px' : '640px',
-              height: isSubModal ? '440px' : '640px',
-              background: 'radial-gradient(circle, rgba(20, 20, 24, 0.95) 0%, rgba(4, 5, 7, 0.98) 100%)',
-              borderRadius: '40px',
-              border: `2px solid ${faceMatchResult ? 'var(--neon-green)' : 'rgba(255, 255, 255, 0.05)'}`,
+              width: '100%',
+              height: isSubModal ? '380px' : '560px',
+              background: 'radial-gradient(circle at 50% 45%, #1e293b 0%, #0f172a 100%)',
+              borderRadius: '24px',
+              border: `2px solid ${faceMatchResult ? '#10b981' : 'rgba(255, 255, 255, 0.12)'}`,
               position: 'relative',
               overflow: 'hidden',
               display: 'flex',
@@ -524,28 +712,27 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               boxShadow: faceMatchResult 
-                ? '0 0 40px rgba(52, 199, 89, 0.2), inset 0 0 80px rgba(52, 199, 89, 0.1)' 
-                : '0 24px 60px rgba(0, 0, 0, 0.6), inset 0 0 40px rgba(0, 113, 227, 0.05)',
-              transition: 'all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)'
+                ? '0 0 40px rgba(16, 185, 129, 0.25), inset 0 0 80px rgba(16, 185, 129, 0.12)' 
+                : '0 16px 40px rgba(15, 23, 42, 0.25)',
+              transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)'
             }}
           >
-            {/* 4개의 사이버틱 코너 마커 */}
+            {/* 4개의 코너 가이드 마커 (에메랄드 통일) */}
             {[
-              { top: '30px', left: '30px', borderTop: '4px solid', borderLeft: '4px solid' },
-              { top: '30px', right: '30px', borderTop: '4px solid', borderRight: '4px solid' },
-              { bottom: '30px', left: '30px', borderBottom: '4px solid', borderLeft: '4px solid' },
-              { bottom: '30px', right: '30px', borderBottom: '4px solid', borderRight: '4px solid' }
+              { top: '28px', left: '28px', borderTop: '4px solid', borderLeft: '4px solid' },
+              { top: '28px', right: '28px', borderTop: '4px solid', borderRight: '4px solid' },
+              { bottom: '28px', left: '28px', borderBottom: '4px solid', borderLeft: '4px solid' },
+              { bottom: '28px', right: '28px', borderBottom: '4px solid', borderRight: '4px solid' }
             ].map((pos, idx) => (
               <div 
                 key={idx}
                 style={{
                   position: 'absolute',
-                  width: '60px',
-                  height: '60px',
-                  borderColor: faceMatchResult ? 'var(--neon-green)' : 'var(--neon-indigo)',
-                  boxShadow: faceMatchResult ? '0 0 16px var(--neon-green-glow)' : 'none',
+                  width: '52px',
+                  height: '52px',
+                  borderColor: '#10b981',
                   borderRadius: '12px',
-                  opacity: faceScanning && !faceMatchResult ? 0.8 : 0.4,
+                  opacity: faceScanning && !faceMatchResult ? 0.9 : 0.45,
                   transition: 'all 0.3s ease',
                   ...pos
                 }}
@@ -555,58 +742,58 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             {/* 정중앙 스캔 가이드 & 카메라 아이콘 */}
             <div 
               style={{
-                width: isSubModal ? '240px' : '320px',
-                height: isSubModal ? '240px' : '320px',
-                border: `2px dashed ${faceMatchResult ? 'transparent' : 'rgba(255,255,255,0.1)'}`,
+                width: isSubModal ? '190px' : '230px',
+                height: isSubModal ? '190px' : '230px',
+                border: `2.5px dashed ${faceMatchResult ? 'transparent' : 'rgba(52, 211, 153, 0.45)'}`,
                 borderRadius: '50%',
                 position: 'relative',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                background: 'rgba(16, 185, 129, 0.06)',
                 transition: 'all 0.3s ease',
                 zIndex: 2,
               }}
             >
               <Camera 
-                size={72} 
+                size={80} 
                 style={{ 
-                  color: faceMatchResult ? 'var(--neon-green)' : (faceScanning ? 'var(--neon-indigo)' : 'var(--text-secondary)'),
-                  filter: faceMatchResult ? 'drop-shadow(0 0 12px var(--neon-green))' : 'none',
+                  color: faceMatchResult ? '#10b981' : (faceScanning ? '#34d399' : '#94a3b8'),
                   transition: 'all 0.3s ease',
-                  opacity: faceMatchResult ? 0 : 1 // 매칭 성공시 카메라 사라짐
+                  opacity: faceMatchResult ? 0 : 1
                 }} 
               />
               
-              {/* 스캔 빔 애니메이션 (빛 번짐 레이저) */}
+              {/* 스캔 빔 애니메이션 */}
               {faceScanning && !faceMatchResult && (
                 <div 
                   style={{
                     position: 'absolute',
-                    width: '180%',
+                    width: '160%',
                     height: '4px',
-                    background: 'linear-gradient(90deg, transparent, var(--neon-indigo), transparent)',
-                    boxShadow: '0 0 20px 4px var(--neon-indigo-glow)',
+                    background: 'linear-gradient(90deg, transparent, #34d399, transparent)',
+                    boxShadow: '0 0 20px 4px rgba(52, 211, 153, 0.45)',
                     top: '0%',
-                    left: '-40%',
+                    left: '-30%',
                     animation: 'face-scanner 2s infinite cubic-bezier(0.4, 0, 0.2, 1)',
-                    opacity: 0.8
+                    opacity: 0.9
                   }}
                 />
               )}
             </div>
             
             <p style={{ 
-              marginTop: isSubModal ? '30px' : '40px', 
-              fontSize: isSubModal ? '20px' : '24px', 
-              color: faceMatchResult ? 'var(--neon-green)' : 'var(--text-secondary)', 
+              fontSize: isSubModal ? '22px' : '28px', 
+              color: faceMatchResult ? '#34d399' : '#f8fafc', 
               fontWeight: 800,
-              letterSpacing: '1px',
-              zIndex: 2
+              letterSpacing: '-0.3px',
+              zIndex: 2,
+              margin: '26px 0 0 0'
             }}>
               {faceScanning && !faceMatchResult ? `단말기 정면을 응시해 주세요 (${faceCountdown}초)` : '정면을 응시해 주세요'}
             </p>
 
-            {/* 매칭 결과 축하(Pop-up) 햅틱 레이어 */}
+            {/* 매칭 결과 축하 레이어 */}
             {faceMatchResult && (
               <div 
                 style={{
@@ -615,277 +802,336 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   left: 0,
                   width: '100%',
                   height: '100%',
-                  background: 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(4, 5, 7, 0.95) 80%)',
+                  background: 'radial-gradient(circle, rgba(16, 185, 129, 0.2) 0%, rgba(4, 5, 7, 0.96) 85%)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexDirection: 'column',
-                  gap: '20px',
+                  gap: '16px',
                   zIndex: 10,
                   animation: 'scaleIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
                 }}
               >
                 <div style={{
-                  width: '140px',
-                  height: '140px',
-                  background: 'var(--neon-green)',
+                  width: '110px',
+                  height: '110px',
+                  background: '#10b981',
                   borderRadius: '50%',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 0 40px var(--neon-green-glow)'
+                  boxShadow: '0 0 40px rgba(16, 185, 129, 0.5)'
                 }}>
-                  <Sparkles size={72} color="#ffffff" />
+                  <Sparkles size={56} color="#ffffff" />
                 </div>
-                <h3 style={{ fontSize: '32px', fontWeight: 900, color: '#ffffff', marginTop: '10px' }}>
+                <h3 style={{ fontSize: '34px', fontWeight: 900, color: '#ffffff', margin: '4px 0 0 0' }}>
                   안면 매칭 성공!
                 </h3>
-                <p style={{ fontSize: '24px', color: 'var(--neon-green)', fontWeight: 700 }}>
+                <p style={{ fontSize: '24px', color: '#34d399', fontWeight: 800, margin: 0 }}>
                   {faceMatchResult.masked_name || faceMatchResult.member_name} 회원 ({faceMatchResult.member_no})
                 </p>
-                <p style={{ fontSize: '18px', color: 'var(--text-secondary)' }}>본인 확인 창으로 이동합니다...</p>
+                <p style={{ fontSize: '18px', color: '#cbd5e1', fontWeight: 600, margin: 0 }}>본인 확인 창으로 이동합니다...</p>
               </div>
             )}
           </div>
 
-          {/* 재시도 버튼 */}
+          {/* 재시도 버튼 (스페이스 블랙 솔리드 버튼) */}
           {!faceScanning && !faceMatchResult && (
             <button
               onClick={triggerFaceScan}
               className="kiosk-btn kiosk-btn-primary"
               style={{
-                width: isSubModal ? '440px' : '640px',
-                height: isSubModal ? '70px' : '80px',
+                width: '100%',
+                height: '76px',
                 borderRadius: '20px',
-                fontSize: isSubModal ? '20px' : '24px',
+                fontSize: '24px',
                 fontWeight: 800,
                 display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 gap: '12px',
-                background: 'rgba(0, 113, 227, 0.1)',
-                color: 'var(--neon-indigo)',
-                border: '1px solid rgba(0, 113, 227, 0.3)',
-                boxShadow: 'none'
+                background: '#111827',
+                color: '#ffffff',
+                border: 'none',
+                boxShadow: '0 10px 24px rgba(17, 24, 39, 0.2)',
+                cursor: 'pointer',
+                letterSpacing: '-0.4px'
               }}
             >
-              <Camera size={28} />
+              <Camera size={28} strokeWidth={2.5} style={{ color: '#34d399' }} />
               다시 안면인식 시도
             </button>
           )}
         </div>
       )}
 
-      {/* 1. 스마트폰 NFC / BLE 비접촉 태그 패널 (Apple Light Glass Theme) */}
+      {/* 1. 스마트폰 NFC / BLE 비접촉 태그 패널 (딥 포레스트 그린 & 솔리드 벤토) */}
       {authMode === 'SMART_TAG' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', alignItems: 'center', padding: '10px 0', width: '100%' }}>
-          {/* 비접촉 태그 메인 뷰 카드 (Apple Frosted Light Glass) */}
-          <div 
-            style={{
-              width: isSubModal ? '480px' : '680px',
-              height: isSubModal ? '340px' : '400px',
-              background: 'linear-gradient(145deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.85) 100%)',
-              borderRadius: '32px',
-              border: '1.5px solid rgba(16, 185, 129, 0.3)',
-              position: 'relative',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 20px 40px rgba(16, 185, 129, 0.08), inset 0 1px 0 rgba(255, 255, 255, 1)',
-              gap: '20px',
-              padding: '30px'
-            }}
-          >
-            {/* 애플 호흡(Breathe Glow) 파동 서클 (Light Green Theme) */}
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div 
-                style={{
-                  width: '120px',
-                  height: '120px',
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.05))',
-                  border: '2px solid #10B981',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 0 35px rgba(16, 185, 129, 0.25)',
-                  animation: 'pulse 2.5s infinite ease-in-out'
-                }}
-              >
-                <Smartphone size={56} style={{ color: '#059669', filter: 'drop-shadow(0 0 8px rgba(16,185,129,0.5))' }} />
+        <div 
+          style={{
+            width: '100%',
+            height: isSubModal ? 'auto' : '750px',
+            minHeight: isSubModal ? 'auto' : '750px',
+            background: '#f8fafc',
+            borderRadius: '28px',
+            border: '1.5px solid #e2e8f0',
+            position: 'relative',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '32px',
+            padding: '38px 34px',
+            boxSizing: 'border-box',
+          }}
+        >
+          {/* 딥 포레스트 그린 원형 배지 (140x140px) */}
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div 
+              style={{
+                width: '140px',
+                height: '140px',
+                borderRadius: '50%',
+                background: '#064e3b',
+                border: '4px solid rgba(16, 185, 129, 0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 16px 36px rgba(6, 78, 59, 0.25)',
+              }}
+            >
+              <Smartphone size={64} strokeWidth={2.3} style={{ color: '#34d399' }} />
+            </div>
+          </div>
+
+          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '24px', width: '100%' }}>
+            <h3 style={{ fontSize: isSubModal ? '26px' : '32px', fontWeight: 900, color: '#111827', letterSpacing: '-0.6px', margin: 0, lineHeight: 1.3, wordBreak: 'keep-all' }}>
+              골포스 앱에서 <span style={{ color: '#059669' }}>[스마트 체크인]</span>을 눌러주세요
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', width: '100%' }}>
+              <div style={{ background: '#ffffff', padding: '26px 28px', minHeight: '170px', borderRadius: '22px', border: '1px solid #e2e8f0', textAlign: 'left', boxShadow: '0 4px 14px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: '10px', justifyContent: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ background: '#111827', color: '#ffffff', fontSize: '14px', fontWeight: 800, padding: '5px 12px', borderRadius: '999px' }}>STEP 1</span>
+                  <span style={{ fontSize: '21px', fontWeight: 800, color: '#111827' }}>골포스 앱 실행</span>
+                </div>
+                <div style={{ fontSize: '18px', color: '#475569', fontWeight: 700, lineHeight: 1.5, wordBreak: 'keep-all' }}>
+                  스마트폰에서 <b style={{ color: '#111827' }}>골포스(GOLFOS) 앱</b>을 실행해 주세요.
+                </div>
+              </div>
+              <div style={{ background: '#ffffff', padding: '26px 28px', minHeight: '170px', borderRadius: '22px', border: '1px solid #e2e8f0', textAlign: 'left', boxShadow: '0 4px 14px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: '10px', justifyContent: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ background: '#059669', color: '#ffffff', fontSize: '14px', fontWeight: 800, padding: '5px 12px', borderRadius: '999px' }}>STEP 2</span>
+                  <span style={{ fontSize: '21px', fontWeight: 800, color: '#111827' }}>[스마트 체크인] 터치</span>
+                </div>
+                <div style={{ fontSize: '18px', color: '#475569', fontWeight: 700, lineHeight: 1.5, wordBreak: 'keep-all' }}>
+                  홈 화면의 <b style={{ color: '#059669' }}>[스마트 체크인]</b> 버튼을 누르면 즉시 자동 인증됩니다.
+                </div>
               </div>
             </div>
 
-            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <h3 style={{ fontSize: '26px', fontWeight: 900, color: '#0F172A', letterSpacing: '-0.5px' }}>
-                스마트폰을 대거나 <span style={{ color: '#059669', fontWeight: 900 }}>[스마트 체크인]</span>을 눌러주세요
-              </h3>
-              <div style={{ fontSize: '17px', color: '#334155', fontWeight: 600, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <span>• <b>안드로이드</b>: 골포스 앱 실행 후 하단 리더기에 폰 탭 (NFC)</span>
-                <span>• <b>아이폰</b>: 골포스 앱 실행 ➔ <b style={{ color: '#059669' }}>[스마트 체크인]</b> 터치 (BLE)</span>
-              </div>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              padding: '12px 24px',
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: '999px',
+              color: '#475569',
+              fontSize: '16px',
+              fontWeight: 700,
+              margin: '0 auto',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+            }}>
+              <span>💡</span>
+              <span>키오스크 기기에 스마트폰을 대지 않아도 무선으로 안전하게 자동 인식됩니다.</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* 2. 전화번호 직접 입력 텐키 키패드 패널 */}
+      {/* 2. 전화번호 직접 입력 텐키 키패드 패널 (가로 100% 솔리드 벤토 웰) */}
       {authMode === 'PHONE_KEYPAD' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center', padding: '10px 0', width: '100%' }}>
-          <div 
+        <div 
+          style={{
+            width: '100%',
+            height: isSubModal ? 'auto' : '750px',
+            minHeight: isSubModal ? 'auto' : '750px',
+            background: '#f8fafc',
+            borderRadius: '28px',
+            border: '1.5px solid #e2e8f0',
+            padding: '28px 32px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxSizing: 'border-box',
+          }}
+        >
+          {/* 휴대폰 번호 디스플레이 창 (높이 100px & 42px 대형 등폭 숫자로 흔들림 원천 차단) */}
+          <div style={{
+            width: '100%',
+            height: '100px',
+            background: '#ffffff',
+            borderRadius: '22px',
+            border: '2px solid #111827',
+            padding: '0 28px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxSizing: 'border-box',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '22px', color: '#475569', fontWeight: 800 }}>
+                휴대폰 번호 (뒷 4자리 또는 전체)
+              </span>
+              {phoneDigits.length >= 4 && (
+                <span style={{
+                  background: '#d1fae5',
+                  color: '#065f46',
+                  fontSize: '15px',
+                  fontWeight: 800,
+                  padding: '5px 12px',
+                  borderRadius: '999px',
+                }}>
+                  {phoneDigits.length === 4 && !phoneDigits.startsWith('01') ? '뒷 4자리 조회 가능' : '조회 가능'}
+                </span>
+              )}
+            </div>
+            <span style={{
+              fontSize: phoneDigits ? '42px' : '26px',
+              fontWeight: 900,
+              color: phoneDigits ? '#111827' : '#94a3b8',
+              letterSpacing: phoneDigits ? '2px' : '-0.3px',
+              fontVariantNumeric: 'tabular-nums',
+              lineHeight: 1,
+            }}>
+              {phoneDigits ? formatHpDisplay(phoneDigits) : '번호를 입력해 주세요'}
+            </span>
+          </div>
+
+          {/* 3x4 텐키 키패드 (높이 98px 대형 캡슐 버튼, 가로세로 2.8:1 이상적 비율) */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '14px',
+            width: '100%'
+          }}>
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'DEL'].map((k) => (
+              <button
+                key={k}
+                type="button"
+                className="keypad-num-btn"
+                onClick={() => {
+                  if (k === 'C') handleKeypadClear();
+                  else if (k === 'DEL') handleKeypadBackspace();
+                  else handleKeypadDigit(k);
+                }}
+                style={{
+                  height: '98px',
+                  fontSize: k === 'C' || k === 'DEL' ? '24px' : '36px',
+                  fontWeight: 800,
+                  borderRadius: '22px',
+                  border: '1px solid #cbd5e1',
+                  background: k === 'C' ? '#fef2f2' : k === 'DEL' ? '#e2e8f0' : '#ffffff',
+                  color: k === 'C' ? '#dc2626' : '#111827',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 3px 8px rgba(0,0,0,0.04)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {k === 'DEL' ? <Delete size={32} strokeWidth={2.5} /> : k === 'C' ? '전체지움' : k}
+              </button>
+            ))}
+          </div>
+
+          {/* 회원 조회 확인 버튼 */}
+          <button
+            type="button"
+            onClick={handleKeypadSubmit}
+            disabled={isSearching || phoneDigits.length < 4}
             style={{
-              width: isSubModal ? '480px' : '560px',
-              background: 'linear-gradient(145deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.85) 100%)',
-              borderRadius: '28px',
-              border: '1.5px solid rgba(16, 185, 129, 0.3)',
-              padding: '24px 28px',
+              width: '100%',
+              height: '84px',
+              borderRadius: '22px',
+              background: phoneDigits.length >= 4 ? '#064e3b' : '#cbd5e1',
+              color: '#ffffff',
+              fontSize: '26px',
+              fontWeight: 800,
+              border: 'none',
+              cursor: phoneDigits.length >= 4 ? 'pointer' : 'not-allowed',
+              boxShadow: phoneDigits.length >= 4 ? '0 10px 24px rgba(6, 78, 59, 0.25)' : 'none',
               display: 'flex',
-              flexDirection: 'column',
               alignItems: 'center',
-              boxShadow: '0 20px 40px rgba(16, 185, 129, 0.08), inset 0 1px 0 rgba(255, 255, 255, 1)',
-              gap: '16px'
+              justifyContent: 'center',
+              gap: '10px',
+              letterSpacing: '-0.4px'
             }}
           >
-            {/* 휴대폰 번호 디스플레이 창 */}
-            <div style={{
-              width: '100%',
-              background: '#ffffff',
-              borderRadius: '18px',
-              border: '2px solid #10b981',
-              padding: '16px 20px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.04)'
-            }}>
-              <span style={{ fontSize: '15px', color: '#64748b', fontWeight: 700 }}>휴대폰 번호</span>
-              <span style={{ fontSize: '28px', fontWeight: 900, color: '#0f172a', letterSpacing: '2px' }}>
-                {phoneDigits ? formatHpDisplay(phoneDigits) : '010-____-____'}
-              </span>
-            </div>
-
-            {/* 3x4 텐키 키패드 */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '10px',
-              width: '100%'
-            }}>
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'DEL'].map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  className="keypad-num-btn"
-                  onClick={() => {
-                    if (k === 'C') handleKeypadClear();
-                    else if (k === 'DEL') handleKeypadBackspace();
-                    else handleKeypadDigit(k);
-                  }}
-                  style={{
-                    height: '52px',
-                    fontSize: k === 'C' || k === 'DEL' ? '18px' : '24px',
-                    fontWeight: 800,
-                    borderRadius: '14px',
-                    border: '1px solid #cbd5e1',
-                    background: k === 'C' ? '#fef2f2' : k === 'DEL' ? '#f1f5f9' : '#ffffff',
-                    color: k === 'C' ? '#ef4444' : '#0f172a',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
-                    transition: 'all 0.1s ease'
-                  }}
-                  onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
-                  onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-                >
-                  {k === 'DEL' ? <Delete size={22} /> : k}
-                </button>
-              ))}
-            </div>
-
-            {/* 회원 조회 확인 버튼 */}
-            <button
-              type="button"
-              onClick={handleKeypadSubmit}
-              disabled={isSearching || phoneDigits.length < 4}
-              style={{
-                width: '100%',
-                height: '56px',
-                borderRadius: '16px',
-                background: phoneDigits.length >= 4 ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : '#cbd5e1',
-                color: '#ffffff',
-                fontSize: '20px',
-                fontWeight: 800,
-                border: 'none',
-                cursor: phoneDigits.length >= 4 ? 'pointer' : 'not-allowed',
-                boxShadow: phoneDigits.length >= 4 ? '0 8px 20px rgba(16, 185, 129, 0.3)' : 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px'
-              }}
-            >
-              {isSearching ? '조회 중...' : '회원 조회하기'}
-            </button>
-          </div>
+            {isSearching ? '조회 중...' : '회원 조회하기'}
+          </button>
         </div>
       )}
 
       {/* 3. 모바일 출입 QR / 바코드 스캐너 패널 */}
       {authMode === 'QR_SCAN' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center', padding: '10px 0', width: '100%' }}>
-          <div 
-            style={{
-              width: isSubModal ? '480px' : '560px',
-              height: isSubModal ? '340px' : '380px',
-              background: 'linear-gradient(145deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.85) 100%)',
-              borderRadius: '28px',
-              border: '1.5px solid rgba(37, 99, 235, 0.3)',
-              padding: '24px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 20px 40px rgba(37, 99, 235, 0.08), inset 0 1px 0 rgba(255, 255, 255, 1)',
-              gap: '18px',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            {/* 스캐너 가이드 프레임 */}
+        <div 
+          style={{
+            width: '100%',
+            height: isSubModal ? 'auto' : '750px',
+            minHeight: isSubModal ? 'auto' : '750px',
+            background: '#f8fafc',
+            borderRadius: '28px',
+            border: '1.5px solid #e2e8f0',
+            padding: '38px 34px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '30px',
+            position: 'relative',
+            overflow: 'hidden',
+            boxSizing: 'border-box',
+          }}
+        >
+          {/* 스캐너 가이드 프레임 (220x220px) */}
+          <div style={{
+            width: '220px',
+            height: '220px',
+            borderRadius: '28px',
+            border: '3.5px dashed #059669',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#ffffff',
+            boxShadow: '0 12px 28px rgba(6, 78, 59, 0.1)',
+            position: 'relative'
+          }}>
+            <QrCode size={110} style={{ color: '#064e3b' }} />
             <div style={{
-              width: '160px',
-              height: '160px',
-              borderRadius: '24px',
-              border: '3px dashed #2563eb',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(37, 99, 235, 0.04)',
-              position: 'relative'
-            }}>
-              <QrCode size={80} style={{ color: '#2563eb', opacity: 0.8 }} />
-              <div style={{
-                position: 'absolute',
-                top: '50%',
-                left: '10%',
-                right: '10%',
-                height: '3px',
-                background: '#ef4444',
-                boxShadow: '0 0 12px #ef4444',
-                animation: 'pulse 1.5s infinite'
-              }} />
-            </div>
+              position: 'absolute',
+              top: '50%',
+              left: '12%',
+              right: '12%',
+              height: '4px',
+              background: '#10b981',
+              boxShadow: '0 0 12px #10b981',
+              animation: 'pulse 1.5s infinite'
+            }} />
+          </div>
 
-            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#0f172a', margin: 0 }}>
-                모바일 출입 QR을 스캐너에 비춰주세요
-              </h3>
-              <p style={{ fontSize: '15px', color: '#64748b', margin: 0, fontWeight: 500 }}>
-                골포스 회원 전용 앱의 <b>[출입용 QR 티켓]</b> 또는 카카오톡 알림톡 QR을 하단 리더기에 인식시켜 주세요.
-              </p>
-            </div>
+          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '720px' }}>
+            <h3 style={{ fontSize: isSubModal ? '26px' : '32px', fontWeight: 900, color: '#111827', margin: 0, letterSpacing: '-0.6px' }}>
+              모바일 출입 QR을 하단 스캐너에 비춰주세요
+            </h3>
+            <p style={{ fontSize: '20px', color: '#475569', margin: 0, fontWeight: 700, lineHeight: 1.5, wordBreak: 'keep-all' }}>
+              골포스 회원 전용 앱의 <b style={{ color: '#059669' }}>[출입용 QR 티켓]</b> 또는 카카오톡 알림톡 QR을 키오스크 하단 바코드 리더기에 인식시켜 주세요.
+            </p>
           </div>
         </div>
       )}
@@ -915,30 +1161,30 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         >
           <div
             style={{
-              width: '540px',
-              padding: '36px 32px',
-              borderRadius: '28px',
+              width: '620px',
+              padding: '40px 36px',
+              borderRadius: '32px',
               textAlign: 'center',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: '20px',
-              background: 'rgba(255, 255, 255, 0.96)',
-              border: '1px solid rgba(255, 255, 255, 0.85)',
-              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.2)',
+              gap: '24px',
+              background: '#ffffff',
+              border: '1.5px solid #e2e8f0',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.25)',
               animation: 'scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
           >
             <div>
-              <h3 style={{ fontSize: '26px', fontWeight: 900, color: '#0F172A', marginBottom: '6px' }}>
+              <h3 style={{ fontSize: '32px', fontWeight: 800, color: '#0f172a', marginBottom: '8px', letterSpacing: '-0.6px' }}>
                 이용하실 회원님을 선택해 주세요
               </h3>
-              <p style={{ fontSize: '16px', color: '#475569', fontWeight: 600 }}>
+              <p style={{ fontSize: '20px', color: '#475569', fontWeight: 700, margin: 0 }}>
                 동일 번호로 등록된 가족/다중 회원이 확인되었습니다.
               </p>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxHeight: '320px', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', maxHeight: '360px', overflowY: 'auto' }}>
               {duplicateCandidates.map((cand) => (
                 <button
                   key={cand.member_no}
@@ -949,23 +1195,23 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   }}
                   style={{
                     width: '100%',
-                    padding: '16px 20px',
-                    borderRadius: '16px',
-                    border: '1.5px solid #10B981',
-                    background: '#F8FAFC',
+                    padding: '20px 24px',
+                    borderRadius: '18px',
+                    border: '2px solid #10b981',
+                    background: '#f8fafc',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     cursor: 'pointer',
-                    fontSize: '18px',
+                    fontSize: '23px',
                     fontWeight: 800,
-                    color: '#0F172A'
+                    color: '#0f172a'
                   }}
                 >
                   <span>
                     <strong style={{ color: '#059669' }}>[{cand.masked_name || buildMaskedName(cand.member_name)}]</strong> 회원님
                   </span>
-                  <span style={{ fontSize: '14px', color: '#64748B', fontWeight: 700 }}>
+                  <span style={{ fontSize: '18px', color: '#475569', fontWeight: 700 }}>
                     회원번호 {cand.member_no}
                   </span>
                 </button>
@@ -977,13 +1223,13 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               onClick={() => setDuplicateCandidates([])}
               style={{
                 width: '100%',
-                height: '52px',
-                borderRadius: '14px',
-                fontSize: '16px',
-                fontWeight: 700,
-                background: '#F1F5F9',
-                color: '#475569',
-                border: '1px solid #CBD5E1',
+                height: '62px',
+                borderRadius: '999px',
+                fontSize: '21px',
+                fontWeight: 800,
+                background: '#f1f5f9',
+                color: '#334155',
+                border: '1.5px solid #cbd5e1',
                 cursor: 'pointer'
               }}
             >
@@ -994,7 +1240,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         document.body
       )}
 
-      {/* 3번 방어선: 1초 회원 이름 확인 팝업 모달 (Apple Light System Dialog Portal) */}
+      {/* 3번 방어선: 1초 회원 이름 확인 팝업 모달 (620px 고시인성 대형 다이얼로그) */}
       {detectedMember && createPortal(
         <div 
           style={{
@@ -1005,7 +1251,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             bottom: 0,
             width: '100vw',
             height: '100vh',
-            background: 'rgba(15, 23, 42, 0.45)',
+            background: 'rgba(15, 23, 42, 0.5)',
             backdropFilter: 'blur(24px) saturate(180%)',
             WebkitBackdropFilter: 'blur(24px) saturate(180%)',
             display: 'flex',
@@ -1018,56 +1264,56 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         >
           <div 
             style={{
-              width: '520px',
-              padding: '40px 32px',
-              borderRadius: '28px',
+              width: '620px',
+              padding: '44px 40px',
+              borderRadius: '32px',
               textAlign: 'center',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: '22px',
-              background: 'rgba(255, 255, 255, 0.94)',
-              border: '1px solid rgba(255, 255, 255, 0.8)',
-              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.18), 0 4px 16px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 1)',
+              gap: '26px',
+              background: '#ffffff',
+              border: '1.5px solid #e2e8f0',
+              boxShadow: '0 28px 65px rgba(0, 0, 0, 0.22), 0 4px 16px rgba(0, 0, 0, 0.06)',
               animation: 'scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
           >
-            {/* Apple Pay 성공 뱃지 스타일 서클 */}
+            {/* 성공 뱃지 스타일 서클 */}
             <div 
               style={{ 
-                width: '76px', 
-                height: '76px', 
+                width: '88px', 
+                height: '88px', 
                 borderRadius: '50%', 
-                background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                 display: 'flex', 
                 alignItems: 'center', 
                 justifyContent: 'center',
-                boxShadow: '0 10px 25px rgba(16, 185, 129, 0.35)'
+                boxShadow: '0 12px 28px rgba(16, 185, 129, 0.35)'
               }}
             >
-              <Sparkles size={40} style={{ color: '#ffffff' }} />
+              <Sparkles size={46} style={{ color: '#ffffff' }} />
             </div>
 
             <div>
-              <h3 style={{ fontSize: '32px', fontWeight: 900, color: '#0F172A', marginBottom: '8px', letterSpacing: '-0.5px' }}>
+              <h3 style={{ fontSize: '38px', fontWeight: 900, color: '#0f172a', marginBottom: '10px', letterSpacing: '-0.6px' }}>
                 <span style={{ color: '#059669', fontWeight: 900 }}>
                   [{detectedMember.masked_name || detectedMember.member_name}]
                 </span> 회원님
               </h3>
-              <p style={{ fontSize: '19px', color: '#475569', fontWeight: 600 }}>
+              <p style={{ fontSize: '24px', color: '#334155', fontWeight: 800, margin: 0 }}>
                 본인이 맞으신가요?
               </p>
-              {/* 회원 보유 이용권/등급 요약 안내 뱃지 (BUG-M01, BUG-M11) */}
+              {/* 회원 보유 이용권/등급 요약 안내 뱃지 */}
               <div
                 style={{
-                  marginTop: '12px',
-                  padding: '8px 16px',
-                  borderRadius: '12px',
-                  background: '#F0FDF4',
-                  border: '1px solid #BBF7D0',
-                  color: '#065F46',
-                  fontSize: '14px',
-                  fontWeight: 700,
+                  marginTop: '16px',
+                  padding: '12px 22px',
+                  borderRadius: '16px',
+                  background: '#f0fdf4',
+                  border: '1.5px solid #86efac',
+                  color: '#065f46',
+                  fontSize: '19px',
+                  fontWeight: 800,
                   display: 'inline-block'
                 }}
               >
@@ -1088,17 +1334,17 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '12px', width: '100%', marginTop: '6px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.25fr', gap: '16px', width: '100%', marginTop: '6px' }}>
               <button
                 onClick={() => setDetectedMember(null)}
                 style={{
-                  height: '56px',
-                  borderRadius: '16px',
-                  fontSize: '17px',
-                  fontWeight: 700,
-                  background: '#F1F5F9',
-                  color: '#475569',
-                  border: '1px solid #CBD5E1',
+                  height: '68px',
+                  borderRadius: '999px',
+                  fontSize: '22px',
+                  fontWeight: 800,
+                  background: '#f1f5f9',
+                  color: '#334155',
+                  border: '1.5px solid #cbd5e1',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease'
                 }}
@@ -1114,14 +1360,14 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   onAuthSuccess(target);
                 }}
                 style={{
-                  height: '56px',
-                  borderRadius: '16px',
-                  fontSize: '19px',
+                  height: '68px',
+                  borderRadius: '999px',
+                  fontSize: '23px',
                   fontWeight: 800,
-                  background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                   color: '#ffffff',
                   border: 'none',
-                  boxShadow: '0 8px 20px rgba(16, 185, 129, 0.35)',
+                  boxShadow: '0 10px 24px rgba(16, 185, 129, 0.35)',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease'
                 }}
@@ -1136,42 +1382,49 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         document.body
       )}
 
-      {/* 신규 즉석 회원가입 유도 영역 */}
+      {/* 신규 즉석 회원가입 유도 영역 (메인화면 배너와 통일된 고시인성 솔리드 바) */}
       {isSignUpAllowed && onSignUpClick && (
         <div 
-          className="glass-panel" 
           style={{ 
-            marginTop: '20px', 
-            padding: '24px', 
-            borderRadius: '16px', 
+            padding: '22px 28px', 
+            borderRadius: '22px', 
             display: 'flex', 
             justifyContent: 'space-between', 
             alignItems: 'center',
-            border: '1.5px dashed rgba(16, 185, 129, 0.35)',
-            background: 'rgba(16, 185, 129, 0.04)'
+            border: '1.5px solid #e2e8f0',
+            background: '#f8fafc',
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A' }}>아직 회원이 아니신가요?</span>
-            <p style={{ fontSize: '14px', color: '#475569', fontWeight: 600 }}>
-              골포스 앱을 다운로드 받아 스마트 체크인을 이용해보세요.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <span style={{ fontSize: '21px', fontWeight: 900, color: '#111827', letterSpacing: '-0.4px' }}>
+              아직 등록된 회원이 아니신가요?
+            </span>
+            <p style={{ fontSize: '16px', color: '#64748b', fontWeight: 700, margin: 0 }}>
+              현장에서 30초 만에 간편 가입하고 즉시 이용하실 수 있습니다.
             </p>
           </div>
           <button
             onClick={onSignUpClick}
-            className="kiosk-btn kiosk-btn-success animate-pulse-glow"
+            className="kiosk-btn kiosk-btn-success"
             style={{ 
-              height: '56px', 
-              fontSize: '18px', 
+              height: '58px', 
+              fontSize: '19px', 
               fontWeight: 800, 
-              padding: '0 30px', 
-              borderRadius: '10px'
+              padding: '0 28px', 
+              borderRadius: '999px',
+              background: '#064e3b',
+              color: '#ffffff',
+              border: 'none',
+              boxShadow: '0 6px 16px rgba(6, 78, 59, 0.22)',
+              cursor: 'pointer',
+              flexShrink: 0,
             }}
           >
-            30초 신규 회원가입
+            30초 신규 회원가입 →
           </button>
         </div>
       )}
+    </div>
     </div>
   );
 };

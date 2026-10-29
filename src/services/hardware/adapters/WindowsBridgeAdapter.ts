@@ -39,6 +39,11 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
       tradeDate: data.trade_dt,
       bayNo: data.bayNo ?? data.bay_no,
       memberName: data.member_name,
+      memberNo: data.member_no,
+      payMethod: data.pay_method,
+      headerMessage: data.header_message,
+      footerMessage: data.footer_message,
+      slipMeta: data.slip_meta || undefined,
       itemName: data.items?.map((i) => i.name).join(', ') || data.items?.[0]?.name,
       items: data.items,
       useMinutes: data.useMinutes ?? data.use_minutes,
@@ -78,15 +83,22 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(10000),
       });
 
       if (res.ok) {
         const json = await res.json();
         return { success: true, message: json.message || '영수증 출력 완료' };
       }
-      return await this.fallbackEscPosPrint(data);
-    } catch {
+      const errJson = await res.json().catch(() => null);
+      return {
+        success: false,
+        message: errJson?.message || `프린터 브릿지 출력 실패 (HTTP ${res.status})`,
+      };
+    } catch (err: any) {
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        return { success: false, message: '프린터 출력 응답 대기 시간 초과 (10초)' };
+      }
       return await this.fallbackEscPosPrint(data);
     }
   }

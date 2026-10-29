@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Check, Printer, ArrowRight, RefreshCw } from 'lucide-react';
 import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
+import { printKioskBayAllocationSlip } from '../utils/kioskSlipPrinter';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { TimeMaster } from '../utils/timeMaster';
 import { api } from '../services/api';
@@ -8,11 +9,16 @@ import { api } from '../services/api';
 interface AllocationCompleteModalProps {
   bayNo: number | string;
   oldBayNo?: number | string;
+  floor?: string | number | null;
   durationMin: number;
   startTime?: string;
   endTime?: string;
   resId?: string;
   memberName?: string;
+  memberNo?: string;
+  productName?: string;
+  actionLabel?: string;
+  remainInfo?: string;
   payAmount?: number;
   originalAmount?: number;
   discountAmount?: number;
@@ -32,11 +38,16 @@ interface AllocationCompleteModalProps {
 export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = ({
   bayNo,
   oldBayNo,
+  floor,
   durationMin,
   startTime,
   endTime,
   resId,
   memberName,
+  memberNo,
+  productName,
+  actionLabel,
+  remainInfo,
   payAmount = 0,
   originalAmount,
   discountAmount,
@@ -83,84 +94,88 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
       const info = storeInfo || (await api.getStoreInfo().catch(() => null));
       if (info && !storeInfo) setStoreInfo(info);
 
-      const isPreCheckin = checkinMode === 'PRE_CHECKIN';
-      const isPendingWait = checkinMode === 'PENDING_WAIT';
-      const isMoveBay = checkinMode === 'MOVE_BAY';
-      const headerTitle = isMoveBay
-        ? `★★★ [${oldBayNo ? `${oldBayNo}번 ➔ ` : ''}${bayNo}번 타석 이동 확인표] ★★★`
-        : isPreCheckin
-        ? `★★★ [${bayNo}번 사전체크인 확인표] ★★★`
-        : isPendingWait
-        ? `★★★ [${bayNo}번 체크인 대기 확인표] ★★★`
-        : `★★★ [${bayNo}번 타석 배정표] ★★★`;
-      const footerGuide = isMoveBay
-        ? `보전 시간: ${startStr} ~ ${endTime || '종료시'} (잔여 ${durationMin}분)\n변경된 ${bayNo}번 타석으로 이동하여 연습을 계속해 주십시오.`
-        : isPreCheckin
-        ? `예약시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n예약시간 정각에 타석 전원이 자동 가동됩니다.`
-        : isPendingWait
-        ? `예약시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n앞 타임 종료 즉시 타석이 가동됩니다.`
-        : `이용시간: ${startStr} ~ ${endTime || '종료시'} (${durationMin}분)\n타석으로 이동하여 연습을 시작해 주십시오.`;
+      const resolvedStoreInfo = {
+        store_name: info?.store_nm || storeName,
+        biz_no: (info as any)?.biz_no || (info as any)?.biz_reg_no || '',
+        ceo_name: (info as any)?.ceo_name || (info as any)?.owner_name || '',
+        tel: info?.tel || '',
+        address: info?.address || '',
+      };
 
-      const res = await kioskHardwareBridge.printReceipt({
-        sale_id: resId || `ALLOC-${Date.now()}`,
-        receipt_no: resId ? `TICK-${resId.slice(-6)}` : `TICK-${Date.now().toString().slice(-6)}`,
-        trade_dt: nowStr,
-        bay_no: bayNo,
-        bayNo,
-        use_minutes: durationMin,
-        useMinutes: durationMin,
-        start_time: startStr,
-        startTime: startStr,
-        end_time: endTime,
-        endTime,
-        member_name: memberName || '회원',
-        pay_method: payAmount > 0 ? 'CARD' : 'SERVICE',
-        store_info: {
-          store_name: info?.store_nm || storeName,
-          biz_no: (info as any)?.biz_no || (info as any)?.biz_reg_no || '',
-          ceo_name: (info as any)?.ceo_name || (info as any)?.owner_name || '',
-          tel: info?.tel || '',
-          address: info?.address || '',
-        },
-        items: [
-          {
-            name: isMoveBay
-              ? `타석 이동 [${oldBayNo ? `${oldBayNo}번 ➔ ` : ''}${bayNo}번] (잔여 ${durationMin}분)`
-              : isPreCheckin
-              ? `타석 [${bayNo}번] ${durationMin}분 사전체크인`
-              : `타석 [${bayNo}번] ${durationMin}분 배정표`,
-            qty: 1,
-            unit_price: resolvedUnitPrice,
-            amount: payAmount,
+      let cardReceiptOk = true;
+      if (payAmount > 0) {
+        const cardRes = await kioskHardwareBridge.printReceipt({
+          sale_id: resId || `ALLOC-${Date.now()}`,
+          receipt_no: resId ? `RC-${resId.slice(-6)}` : `RC-${Date.now().toString().slice(-6)}`,
+          trade_dt: nowStr,
+          bay_no: bayNo,
+          bayNo,
+          use_minutes: durationMin,
+          useMinutes: durationMin,
+          start_time: startStr,
+          startTime: startStr,
+          end_time: endTime,
+          endTime,
+          member_name: memberName || '비회원',
+          member_no: memberNo,
+          client_type: 'KIOSK',
+          pay_method: 'CARD',
+          store_info: resolvedStoreInfo,
+          items: [
+            {
+              name: productName || `일일타석 [${bayNo}번] (${durationMin}분)`,
+              qty: 1,
+              unit_price: resolvedUnitPrice,
+              amount: payAmount,
+              discount_amt: resolvedDiscount,
+              is_tax_free: isTaxFree,
+            },
+          ],
+          tax_summary: {
+            supply_amt: supply,
+            tax_amt: vat,
+            tax_free_amt: taxFreeAmt,
+            total_amt: resolvedUnitPrice,
             discount_amt: resolvedDiscount,
-            is_tax_free: isTaxFree,
+            pay_amt: payAmount,
           },
-        ],
-        tax_summary: {
-          supply_amt: supply,
-          tax_amt: vat,
-          tax_free_amt: taxFreeAmt,
-          total_amt: resolvedUnitPrice,
-          discount_amt: resolvedDiscount,
-          pay_amt: payAmount,
-        },
-        card_info: payAmount > 0 ? {
-          issuer_name: cardIssuer || '신용카드',
-          card_no_masked: cardNoMasked || '신용카드',
-          approval_no: authNo || resId || '00000000',
-          installment_months: installmentMonths ?? 0,
-          terminal_id: terminalId || settings.terminalId || api.getTerminalId(),
-        } : undefined,
-        barcode_text: `BAY-${bayNo}-${startStr.replace(':', '')}`,
-        header_message: headerTitle,
-        footer_message: footerGuide,
+          card_info: {
+            issuer_name: cardIssuer || '신용카드',
+            card_no_masked: cardNoMasked || '신용카드',
+            approval_no: authNo || resId || '00000000',
+            installment_months: installmentMonths ?? 0,
+            terminal_id: terminalId || settings.terminalId || api.getTerminalId(),
+          },
+          header_message: '[ 신용카드 매출전표 ]',
+        });
+        cardReceiptOk = cardRes.success;
+      }
+
+      const slipRes = await printKioskBayAllocationSlip({
+        bayNo,
+        oldBayNo,
+        floor,
+        resId,
+        memberName: memberName || (payAmount > 0 ? '일일타석 고객' : '회원'),
+        memberNo,
+        productName: productName || (payAmount > 0 ? `일일타석 (${durationMin}분)` : '회원권/쿠폰 타석 이용'),
+        actionLabel,
+        checkinMode,
+        durationMin,
+        startTime: startStr,
+        endTime,
+        remainInfo,
+        extraNote: noticeMessage,
+        storeInfo: resolvedStoreInfo,
+        tradeDt: nowStr,
       });
 
-      setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
+      const finalOk = cardReceiptOk && slipRes.success;
+      setPrintStatus(finalOk ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
     } finally {
       setIsPrinting(false);
     }
-  }, [bayNo, oldBayNo, durationMin, startTime, endTime, resId, memberName, payAmount, originalAmount, discountAmount, usedPoints, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, installmentMonths, checkinMode, lang, storeName, storeInfo, settings.terminalId]);
+  }, [bayNo, oldBayNo, floor, durationMin, startTime, endTime, resId, memberName, memberNo, productName, actionLabel, remainInfo, payAmount, originalAmount, discountAmount, usedPoints, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, installmentMonths, checkinMode, noticeMessage, lang, storeName, storeInfo, settings.terminalId]);
 
   // 마운트 시 자동 인쇄 (단 1회 보장)
   useEffect(() => {

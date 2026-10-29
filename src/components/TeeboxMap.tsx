@@ -16,10 +16,31 @@ interface TeeboxMapProps {
   onCancelCountdown?: () => void;
   onBaySelected: (bayNo: number, sourceBayNo?: number) => void;
   onCancel: () => void;
+  onGoPractice?: () => void;
   bays: Bay[];
   onRefreshBays: () => void;
   selectedZoneIds?: (string | number)[];
 }
+
+// 🛡️ 시각 표시 KST 친절 정규화 헬퍼 (ISO UTC 원시 문자열 방어)
+const formatEndTime = (timeStr?: string | null): string => {
+  if (!timeStr) return '';
+  if (timeStr.includes('T')) {
+    const d = new Date(timeStr);
+    if (!isNaN(d.getTime())) {
+      const hours = String(d.getHours()).padStart(2, '0');
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+  }
+  if (/^\d{4}$/.test(timeStr)) {
+    return `${timeStr.slice(0, 2)}:${timeStr.slice(2, 4)}`;
+  }
+  if (/^\d{2}:\d{2}:\d{2}$/.test(timeStr)) {
+    return timeStr.slice(0, 5);
+  }
+  return timeStr;
+};
 
 export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   member,
@@ -32,6 +53,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   onCancelCountdown,
   onBaySelected,
   onCancel,
+  onGoPractice,
   bays,
   onRefreshBays,
   selectedZoneIds = []
@@ -297,7 +319,12 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       (bay as any).is_global_paused === true ||
       ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
     if (isBlocked) return;
-    if (['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus)) return;
+    if (['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus)) {
+      if (isMoveMode) {
+        setErrorMsg(lang === 'KO' ? '이용 중인 타석으로는 즉시 이동할 수 없습니다. 빈 타석을 선택해 주세요.' : 'Cannot move to an occupied teebox. Please select an available teebox.');
+      }
+      return;
+    }
     if (canonicalStatus === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId()) {
       setErrorMsg(lang === 'KO' ? '이미 다른 고객님께서 선택 중인 타석입니다.' : 'Teebox selected by another user.');
       return;
@@ -429,276 +456,369 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div
             style={{
-              width: '54px',
-              height: '54px',
-              borderRadius: '18px',
-              background: '#f5f5f7',
-              border: '1px solid #e5e5ea',
+              width: '58px',
+              height: '58px',
+              borderRadius: '20px',
+              background: '#0071e3',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              boxShadow: '0 4px 14px rgba(0, 113, 227, 0.35)'
             }}
           >
             {isMoveMode ? (
-              <ArrowLeftRight size={28} style={{ color: '#1d1d1f' }} />
+              <ArrowLeftRight size={30} style={{ color: '#ffffff' }} strokeWidth={2.5} />
             ) : (
-              <Compass size={28} style={{ color: '#1d1d1f' }} />
+              <Compass size={30} style={{ color: '#ffffff' }} strokeWidth={2.5} />
             )}
           </div>
           <div>
-            <h2 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.8px' }}>
-              {isMoveMode ? '이동하실 타석 선택' : '이용하실 타석 선택'}
+            <h2 style={{ fontSize: '36px', fontWeight: 800, color: '#1d1d1f', margin: 0, letterSpacing: '-0.8px' }}>
+              {isMoveMode ? (lang === 'KO' ? '타석 이동' : 'Move Teebox') : (lang === 'KO' ? '이용하실 타석 선택' : 'Select Practice Teebox')}
             </h2>
             {memberName && (
-              <p style={{ fontSize: '15px', color: '#86868b', margin: '4px 0 0 0', fontWeight: 600 }}>
-                회원명: <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>{memberName}</strong> 님
+              <p style={{ fontSize: '21px', color: '#4b5563', margin: '4px 0 0 0', fontWeight: 600 }}>
+                <strong style={{ color: '#111827', fontWeight: 800 }}>{memberName}</strong> {isMoveMode ? (lang === 'KO' ? '님의 이용 중인 타석' : '— Active Teebox') : '님'}
               </p>
             )}
           </div>
         </div>
 
-        {/* 층별 탭 전환 스위치 */}
-        <div
-          style={{
-            display: 'flex',
-            padding: '6px',
-            borderRadius: '18px',
-            background: '#f5f5f7',
-            border: '1px solid #e5e5ea',
-            gap: '4px'
-          }}
-        >
-          {floorTabs.map(f => (
-            <button
-              key={f}
-              onClick={() => setActiveFloor(f)}
-              style={{
-                padding: '10px 24px',
-                fontSize: '16px',
-                fontWeight: 800,
-                borderRadius: '14px',
-                border: 'none',
-                cursor: 'pointer',
-                color: activeFloor === f ? '#ffffff' : '#86868b',
-                background: activeFloor === f ? '#1d1d1f' : 'transparent',
-                boxShadow: activeFloor === f ? '0 4px 12px rgba(0,0,0,0.12)' : 'none',
-                transition: 'all 0.2s ease',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              <Layers size={16} />
-              {f}층 타석
-            </button>
-          ))}
-        </div>
+        {/* 우측 컨트롤 (미보유 시 돌아가기 버튼, 정상 시 층별 탭 전환 스위치) */}
+        {isMoveMode && hasNoActiveBay ? (
+          <button
+            onClick={onCancel}
+            style={{
+              background: '#f5f5f7',
+              border: 'none',
+              color: '#1d1d1f',
+              padding: '14px 28px',
+              borderRadius: '20px',
+              cursor: 'pointer',
+              fontSize: '17px',
+              fontWeight: 700,
+              transition: 'all 0.2s ease',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.background = '#e8e8ed'}
+            onMouseOut={(e) => e.currentTarget.style.background = '#f5f5f7'}
+          >
+            {lang === 'KO' ? '이전으로 돌아가기' : 'Go Back'}
+          </button>
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              padding: '6px',
+              borderRadius: '18px',
+              background: '#f5f5f7',
+              border: '1px solid #e5e5ea',
+              gap: '4px'
+            }}
+          >
+            {floorTabs.map(f => (
+              <button
+                key={f}
+                onClick={() => setActiveFloor(f)}
+                style={{
+                  padding: '10px 24px',
+                  fontSize: '16px',
+                  fontWeight: 800,
+                  borderRadius: '14px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: activeFloor === f ? '#ffffff' : '#86868b',
+                  background: activeFloor === f ? '#1d1d1f' : 'transparent',
+                  boxShadow: activeFloor === f ? '0 4px 12px rgba(0,0,0,0.12)' : 'none',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Layers size={16} />
+                {f}층 타석
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* 타석 이동(MOVE_BAY) 전용 오버레이 헤더 패널 */}
-      {isMoveMode && (
+      {/* 🛡️ 타석 미보유 회원 전용 Full-Width Empty State 안내 뷰 */}
+      {isMoveMode && hasNoActiveBay ? (
+        <div style={{
+          padding: '64px 40px',
+          borderRadius: '24px',
+          background: '#fbfbfd',
+          border: '1px solid #e5e5ea',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          gap: '24px',
+          minHeight: '440px'
+        }}>
+          <div style={{
+            width: '96px',
+            height: '96px',
+            borderRadius: '50%',
+            background: 'rgba(234, 88, 12, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: '2px solid rgba(234, 88, 12, 0.25)',
+            boxShadow: '0 8px 24px rgba(234, 88, 12, 0.15)'
+          }}>
+            <ArrowLeftRight size={48} color="#ea580c" strokeWidth={2.4} />
+          </div>
+
+          <div>
+            <h3 style={{ fontSize: '32px', fontWeight: 900, color: '#111827', margin: '0 0 16px 0', letterSpacing: '-0.5px' }}>
+              {lang === 'KO' ? '현재 이용 중인 타석이 없습니다' : 'No Active Teebox Found'}
+            </h3>
+            <p style={{ fontSize: '23px', color: '#1f2937', lineHeight: 1.75, margin: 0, fontWeight: 600, maxWidth: '720px' }}>
+              {lang === 'KO' ? (
+                <>
+                  <strong style={{ color: '#111827', fontWeight: 800 }}>{memberName || '고객'}</strong> 회원님 명의로 점유 중인 타석을 찾을 수 없습니다.<br/>
+                  무인 키오스크의 <strong style={{ color: '#0071e3' }}>[타석 이동]</strong>은 현재 연습 중인 타석의 위치를 변경하는 메뉴입니다.<br/>
+                  새로운 타석을 배정받으시려면 <strong style={{ color: '#059669', textDecoration: 'underline' }}>[연습타석 배정]</strong> 메뉴를 이용해 주세요.
+                </>
+              ) : (
+                <>
+                  <strong style={{ color: '#111827', fontWeight: 800 }}>{memberName || 'Customer'}</strong> does not have an active teebox at this store.<br/>
+                  <strong style={{ color: '#0071e3' }}>[Move Teebox]</strong> is only for changing your currently occupied practice spot.<br/>
+                  To get a new teebox, please use the <strong style={{ color: '#059669', textDecoration: 'underline' }}>[Practice Teebox]</strong> menu.
+                </>
+              )}
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: '16px', marginTop: '12px' }}>
+            {onGoPractice && (
+              <button
+                onClick={onGoPractice}
+                style={{
+                  background: '#059669',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '20px 44px',
+                  borderRadius: '999px',
+                  fontSize: '22px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  boxShadow: '0 8px 24px rgba(5, 150, 105, 0.25)',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
+                <span style={{ fontSize: '24px' }}>⛳</span>
+                <span>{lang === 'KO' ? '연습타석 배정하기' : 'Assign Practice Teebox'}</span>
+              </button>
+            )}
+            <button
+              onClick={onCancel}
+              style={{
+                background: '#1d1d1f',
+                color: '#ffffff',
+                border: 'none',
+                padding: '20px 44px',
+                borderRadius: '999px',
+                fontSize: '22px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '12px',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+              onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+            >
+              <span style={{ fontSize: '24px' }}>🏠</span>
+              <span>{lang === 'KO' ? '메인 화면으로 돌아가기' : 'Return to Main Dashboard'}</span>
+            </button>
+          </div>
+        </div>
+      ) : (
         <>
-          {hasNoActiveBay ? (
-            <div
-              style={{
-                background: '#fef2f2',
-                border: '1.5px solid #fecaca',
-                borderRadius: '20px',
-                padding: '20px 24px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <ShieldAlert size={26} style={{ color: '#dc2626' }} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '19px', fontWeight: 900, color: '#991b1b', margin: 0 }}>
-                    현재 이용 중인 타석 내역이 없습니다
-                  </h3>
-                  <p style={{ fontSize: '14px', color: '#b91c1c', margin: '4px 0 0 0', fontWeight: 600 }}>
-                    <strong>{memberName || '고객'}</strong> 님 명의로 점유 중인 타석을 찾을 수 없습니다. [연습타석배정] 메뉴에서 신규 배정을 진행해 주세요.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={onCancel}
-                style={{
-                  padding: '12px 22px',
-                  borderRadius: '999px',
-                  background: '#1d1d1f',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontWeight: 800,
-                  fontSize: '14px',
-                  cursor: 'pointer'
-                }}
-              >
-                메인으로 복귀
-              </button>
-            </div>
-          ) : isGlobalPaused ? (
-            <div
-              style={{
-                background: '#fef2f2',
-                border: '1.5px solid #fecaca',
-                borderRadius: '20px',
-                padding: '20px 24px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <ShieldAlert size={26} style={{ color: '#dc2626' }} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '19px', fontWeight: 900, color: '#991b1b', margin: 0 }}>
-                    ⏸️ 매장 볼회수(전체 일시정지) 중 타석 {isMoveMode ? '이동' : '배정'} 제한
-                  </h3>
-                  <p style={{ fontSize: '14px', color: '#b91c1c', margin: '4px 0 0 0', fontWeight: 600 }}>
-                    현재 매장 볼회수(전체 일시정지)가 진행 중입니다. 볼회수 종료 후 타석 {isMoveMode ? '이동' : '배정'}을 이용해 주세요.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={onCancel}
-                style={{
-                  padding: '12px 22px',
-                  borderRadius: '999px',
-                  background: '#1d1d1f',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontWeight: 800,
-                  fontSize: '14px',
-                  cursor: 'pointer'
-                }}
-              >
-                메인으로 복귀
-              </button>
-            </div>
-          ) : isTimeRestricted ? (
-            <div
-              style={{
-                background: '#fef2f2',
-                border: '1.5px solid #fecaca',
-                borderRadius: '20px',
-                padding: '20px 24px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <ShieldAlert size={26} style={{ color: '#dc2626' }} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '19px', fontWeight: 900, color: '#991b1b', margin: 0 }}>
-                    ⏱️ 타석 이동 불가 (잔여시간 5분 미만)
-                  </h3>
-                  <p style={{ fontSize: '14px', color: '#b91c1c', margin: '4px 0 0 0', fontWeight: 600 }}>
-                    현재 이용 중인 <strong>{currentBay?.bay_no}번 타석</strong>의 남은 시간이 5분 미만(<strong>{currentRemMin}분 남음</strong>)이므로 자리 이동이 제한됩니다.
-                  </p>
-                </div>
-              </div>
-              <span
-                style={{
-                  fontSize: '13px',
-                  fontWeight: 800,
-                  color: '#dc2626',
-                  background: '#ffffff',
-                  border: '1px solid #fecaca',
-                  padding: '8px 16px',
-                  borderRadius: '999px'
-                }}
-              >
-                이용 종료 임박
-              </span>
-            </div>
-          ) : (
-            <div
-              style={{
-                background: '#f5f5f7',
-                border: '1.5px solid #e5e5ea',
-                borderRadius: '22px',
-                padding: '20px 26px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {/* 타석 이동(MOVE_BAY) 전용 오버레이 헤더 패널 */}
+          {isMoveMode && (
+            <>
+              {isGlobalPaused ? (
                 <div
                   style={{
-                    background: '#ffffff',
-                    padding: '12px',
-                    borderRadius: '16px',
-                    border: '1px solid #e5e5ea',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                    background: '#fef2f2',
+                    border: '1.5px solid #fecaca',
+                    borderRadius: '20px',
+                    padding: '20px 24px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
                   }}
                 >
-                  <ArrowLeftRight size={26} style={{ color: '#059669' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <ShieldAlert size={26} style={{ color: '#dc2626' }} />
+                    </div>
+                    <div>
+                      <h3 style={{ fontSize: '19px', fontWeight: 900, color: '#991b1b', margin: 0 }}>
+                        ⏸️ 매장 볼회수(전체 일시정지) 중 타석 {isMoveMode ? '이동' : '배정'} 제한
+                      </h3>
+                      <p style={{ fontSize: '14px', color: '#b91c1c', margin: '4px 0 0 0', fontWeight: 600 }}>
+                        현재 매장 볼회수(전체 일시정지)가 진행 중입니다. 볼회수 종료 후 타석 {isMoveMode ? '이동' : '배정'}을 이용해 주세요.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={onCancel}
+                    style={{
+                      padding: '12px 22px',
+                      borderRadius: '999px',
+                      background: '#1d1d1f',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontWeight: 800,
+                      fontSize: '14px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    메인으로 복귀
+                  </button>
                 </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span
+              ) : isTimeRestricted ? (
+                <div
+                  style={{
+                    background: '#fef2f2',
+                    border: '1.5px solid #fecaca',
+                    borderRadius: '20px',
+                    padding: '20px 24px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <ShieldAlert size={26} style={{ color: '#dc2626' }} />
+                    </div>
+                    <div>
+                      <h3 style={{ fontSize: '19px', fontWeight: 900, color: '#991b1b', margin: 0 }}>
+                        ⏱️ 타석 이동 불가 (잔여시간 5분 미만)
+                      </h3>
+                      <p style={{ fontSize: '14px', color: '#b91c1c', margin: '4px 0 0 0', fontWeight: 600 }}>
+                        현재 이용 중인 <strong>{currentBay?.bay_no}번 타석</strong>의 남은 시간이 5분 미만(<strong>{currentRemMin}분 남음</strong>)이므로 자리 이동이 제한됩니다.
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '13px',
+                      fontWeight: 800,
+                      color: '#dc2626',
+                      background: '#ffffff',
+                      border: '1px solid #fecaca',
+                      padding: '8px 16px',
+                      borderRadius: '999px'
+                    }}
+                  >
+                    이용 종료 임박
+                  </span>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    background: '#f5f5f7',
+                    border: '1.5px solid #e5e5ea',
+                    borderRadius: '24px',
+                    padding: '24px 28px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.04)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                    <div
                       style={{
-                        fontSize: '12px',
-                        fontWeight: 800,
-                        background: isReservedNotStarted ? '#fef3c7' : '#d1fae5',
-                        color: isReservedNotStarted ? '#92400e' : '#065f46',
-                        padding: '4px 10px',
-                        borderRadius: '999px'
+                        background: '#ffffff',
+                        width: '64px',
+                        height: '64px',
+                        borderRadius: '20px',
+                        border: '1.5px solid #e5e5ea',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
                       }}
                     >
-                      {isReservedNotStarted ? '사전체크인/예약 대기 중' : '현재 이용 중'}
-                    </span>
-                    <h3 style={{ fontSize: '23px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.5px' }}>
-                      {currentBay?.bay_no}번 타석
-                    </h3>
-                    {selectedBayNo !== null && (
-                      <>
-                        <span style={{ fontSize: '18px', color: '#86868b', fontWeight: 900 }}>➔</span>
+                      <ArrowLeftRight size={32} style={{ color: '#059669' }} />
+                    </div>
+                    <div style={{ minWidth: 0, flexShrink: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
                         <span
                           style={{
-                            fontSize: '12px',
+                            fontSize: '14px',
                             fontWeight: 800,
-                            background: '#1d1d1f',
-                            color: '#ffffff',
-                            padding: '4px 10px',
-                            borderRadius: '999px'
+                            background: isReservedNotStarted ? '#fef3c7' : '#d1fae5',
+                            color: isReservedNotStarted ? '#92400e' : '#065f46',
+                            padding: '4px 12px',
+                            borderRadius: '999px',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0
                           }}
                         >
-                          이동 대상
+                          {isReservedNotStarted ? '사전체크인/예약 대기 중' : '현재 이용 중'}
                         </span>
-                        <h3 style={{ fontSize: '23px', fontWeight: 900, color: '#059669', margin: 0, letterSpacing: '-0.5px' }}>
-                          {selectedBayNo}번 타석
+                        <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.5px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          {currentBay?.bay_no}번 타석
                         </h3>
-                      </>
-                    )}
+                        {selectedBayNo !== null && (
+                          <>
+                            <span style={{ fontSize: '22px', color: '#86868b', fontWeight: 900, flexShrink: 0 }}>➔</span>
+                            <span
+                              style={{
+                                fontSize: '14px',
+                                fontWeight: 800,
+                                background: '#1d1d1f',
+                                color: '#ffffff',
+                                padding: '4px 12px',
+                                borderRadius: '999px',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0
+                              }}
+                            >
+                              이동 대상
+                            </span>
+                            <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#059669', margin: 0, letterSpacing: '-0.5px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                              {selectedBayNo}번 타석
+                            </h3>
+                          </>
+                        )}
+                      </div>
+                      <p style={{ fontSize: '17px', color: '#374151', margin: '6px 0 0 0', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        회원명: <strong style={{ color: '#111827', fontWeight: 800 }}>{memberName}</strong> | {isReservedNotStarted ? '예정 이용 시간: ' : '이용 잔여 시간: '}
+                        <strong style={{ color: '#059669', fontWeight: 800 }}>{currentRemMin}분</strong> {currentBay?.end_time ? `(${formatEndTime(currentBay.end_time)} 종료)` : ''}
+                      </p>
+                    </div>
                   </div>
-                  <p style={{ fontSize: '14px', color: '#515154', margin: '6px 0 0 0', fontWeight: 600 }}>
-                    회원명: <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>{memberName}</strong> | {isReservedNotStarted ? '예정 이용 시간: ' : '이용 잔여 시간: '}
-                    <strong style={{ color: '#059669', fontWeight: 800 }}>{currentRemMin}분</strong> {currentBay?.end_time ? `(종료: ${currentBay.end_time})` : ''}
-                  </p>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontSize: '17px', color: '#059669', fontWeight: 800 }}>잔여시간 100% 보전 (상품 호환)</div>
+                    <div style={{ fontSize: '16px', color: selectedBayNo !== null ? '#1d1d1f' : '#6b7280', marginTop: '6px', fontWeight: selectedBayNo !== null ? 700 : 600 }}>
+                      {selectedBayNo !== null
+                        ? `하단 [${isMoveMode ? '타석 이동 확정' : '선택 완료'}] 버튼을 누르면 즉시 이동됩니다.`
+                        : '이동을 원하시는 빈 타석 카드를 선택해 주세요.'}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '13px', color: '#059669', fontWeight: 800 }}>잔여시간 100% 보전 (상품 호환)</div>
-                <div style={{ fontSize: '13px', color: '#86868b', marginTop: '4px', fontWeight: 600 }}>
-                  {selectedBayNo !== null
-                    ? `하단 [${isMoveMode ? '타석 이동 확정' : '선택 완료'}] 버튼을 누르면 즉시 이동됩니다.`
-                    : '이동을 원하시는 빈 타석 카드를 선택해 주세요.'}
-                </div>
-              </div>
-            </div>
+              )}
+            </>
           )}
-        </>
-      )}
 
       {/* ⏱ 5초 배정 완료 확인 안내 피드백 바 */}
       {feedbackCountdown !== undefined && feedbackCountdown !== null && (
@@ -777,21 +897,25 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           border: '1px solid #e5e5ea' 
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#354238' }} />
+            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#ffffff', border: '1.5px solid rgba(0,0,0,0.15)' }} />
             <span style={{ fontSize: '14px', fontWeight: 700, color: '#1d1d1f' }}>이용 가능</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#d2d2d7' }} />
-            <span style={{ fontSize: '14px', fontWeight: 700, color: '#515154' }}>이용 중</span>
+            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#f4f4f6', border: '1px solid #d1d5db' }} />
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#515154' }}>이용 중 (잔여시간)</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#34c759' }} />
-            <span style={{ fontSize: '14px', fontWeight: 700, color: '#1d4e33' }}>선택 완료</span>
+            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#ecfdf5', border: '2px solid #059669' }} />
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#047857' }}>현재 내 타석</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#ff453a' }} />
+            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#047857', border: '2px solid #10b981' }} />
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#064e3b' }}>선택 완료</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#fee2e2', border: '1px solid #fecaca' }} />
             <span style={{ fontSize: '14px', fontWeight: 700, color: '#991b1b' }}>점검/고장</span>
           </div>
         </div>
@@ -825,345 +949,45 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         </span>
       </div>
 
-      {/* 0. 애플 모션 스타일 전용 CSS 스타일 태그 주입 */}
-      <style>{`
-        @keyframes rippleWave {
-          0% {
-            transform: scale(0.96);
-            opacity: 0.9;
-            box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.6);
-          }
-          100% {
-            transform: scale(1.24);
-            opacity: 0;
-            box-shadow: 0 0 0 20px rgba(52, 199, 89, 0);
-          }
-        }
-        @keyframes softBlink {
-          0% {
-            opacity: 0.35;
-          }
-          100% {
-            opacity: 1;
-          }
-        }
-      `}</style>
 
-      {/* 실시간 타석 배치도 그리드 (Data Density 최적화) */}
+      {/* 실시간 타석 배치도 그리드 (TeeboxTileCard SSOT 100% 통합) */}
       <div 
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
-          gap: '18px',
-          background: '#f5f5f7',
-          padding: '24px',
-          borderRadius: '18px',
-          border: '1px solid #e5e5ea',
-          minHeight: '400px'
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: "16px",
+          background: "#f5f5f7",
+          padding: "20px",
+          borderRadius: "20px",
+          border: "1px solid #e5e5ea",
+          minHeight: "340px"
         }}
       >
-        {floorBays.map((bay) => {
-          const hwState = evaluateBayHardwareState(bay);
-          const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
-          const isSelected = selectedBayNo === bay.bay_no;
-          const isCurrentMyBay = Boolean(isMoveMode && currentBay && Number(currentBay.bay_no) === Number(bay.bay_no));
-          const isLessonOnly = isLessonOnlyBay(bay);
-          const isPreOccupiedByOther = canonicalStatus === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId();
-          const isOccupied = ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus) && !isCurrentMyBay;
-          const isUnderMaintenance = !isCurrentMyBay && hwState.isBlocked;
-          const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance && !isCurrentMyBay && !isLessonOnly;
+        {floorBays.length === 0 ? (
+          <div style={{ gridColumn: "span 5", display: "flex", justifyContent: "center", alignItems: "center", height: "240px", color: "#9ca3af", fontSize: "18px", fontWeight: 700 }}>
+            {lang === "KO" ? `${activeFloor}층에 가용한 타석 정보가 없습니다.` : `No teebox information available on floor ${activeFloor}.`}
+          </div>
+        ) : (
+          floorBays.map((bay) => {
+            const isSelected = selectedBayNo === bay.bay_no;
+            const isCurrentMyBay = Boolean(isMoveMode && currentBay && Number(currentBay.bay_no) === Number(bay.bay_no));
 
-          // 1. 헤더 영역 스타일 (30% 높이)
-          let headerBg = '#e5e5ea';
-          let headerTextColor = '#86868b';
-
-          if (isCurrentMyBay) {
-            headerBg = '#059669';
-            headerTextColor = '#ffffff';
-          } else if (isAvailable) {
-            headerBg = '#354238';
-            headerTextColor = '#ffffff';
-          } else if (isSelected) {
-            headerBg = '#34c759'; // 고대비 맑은 애플 그린 헤더 복원
-            headerTextColor = '#121419'; // 진하고 선명한 검정 폰트
-          } else if (isLessonOnly) {
-            headerBg = '#7e22ce';
-            headerTextColor = '#ffffff';
-          } else if (isOccupied) {
-            headerBg = '#d2d2d7';
-            headerTextColor = '#515154';
-          } else if (isPreOccupiedByOther) {
-            headerBg = '#e5e5ea';
-            headerTextColor = '#86868b';
-          } else if (isUnderMaintenance) {
-            headerBg = hwState.isBallEmpty ? '#d97706' : '#ff453a';
-            headerTextColor = '#ffffff';
-          }
-
-          // 2. 바디/컨테이너 영역 스타일 (70% 높이)
-          let containerBorder = '1px solid #dadce0';
-          let containerBg = '#ffffff';
-          let statusText = '이용가능';
-          let statusColor = '#354238';
-          let cursorStyle = 'pointer';
-          let opacity = '1';
-          let pointerEvents: React.CSSProperties['pointerEvents'] = 'auto';
-          let transform = 'none';
-          let zIndex = 1;
-          let boxShadow = 'none';
-
-          if (isCurrentMyBay) {
-            containerBorder = '2.5px solid #059669';
-            containerBg = '#ecfdf5';
-            statusText = isReservedNotStarted ? '예정 내 타석' : '현재 내 타석';
-            statusColor = '#047857';
-            cursorStyle = 'not-allowed';
-            boxShadow = '0 6px 18px rgba(5, 150, 105, 0.18)';
-          } else if (isAvailable) {
-            containerBorder = '1.5px solid #dadce0';
-            containerBg = '#ffffff';
-            statusText = '이용가능';
-            statusColor = '#354238';
-          } else if (isSelected) {
-            containerBorder = '2.5px solid #354238';
-            containerBg = '#ffffff'; // 밝은 화이트 배경 복원
-            statusText = '선택 완료';
-            statusColor = '#1d4e33'; // 포레스트 그린 텍스트
-            
-            // 3D 입체 플로팅 효과 극대화
-            transform = 'scale(1.05) translateY(-6px)';
-            zIndex = 10;
-            boxShadow = '0 12px 30px rgba(53, 66, 56, 0.22)';
-          } else if (isLessonOnly) {
-            containerBorder = '1.5px solid #d8b4fe';
-            containerBg = '#faf5ff';
-            statusText = '레슨전용';
-            statusColor = '#7e22ce';
-            cursorStyle = 'not-allowed';
-            opacity = '0.65';
-          } else if (isOccupied) {
-            containerBorder = '1px solid #dadce0';
-            containerBg = '#eaeaea';
-            statusText = '이용중';
-            statusColor = '#515154';
-            cursorStyle = 'not-allowed';
-          } else if (isPreOccupiedByOther) {
-            containerBorder = '1px solid #e5e5ea';
-            containerBg = '#f5f5f7';
-            statusText = '선택 중';
-            statusColor = '#86868b';
-            cursorStyle = 'not-allowed';
-            opacity = '0.35';
-            pointerEvents = 'none';
-          } else if (isUnderMaintenance) {
-            containerBorder = hwState.isBallEmpty ? '1.5px solid #d97706' : '1.5px solid #ff453a';
-            containerBg = hwState.isBallEmpty ? '#fffbeb' : '#fff5f5';
-            statusText = hwState.isBallEmpty ? '공부족' : (hwState.shortLabel || '점검중');
-            statusColor = hwState.isBallEmpty ? '#d97706' : '#ff453a';
-            cursorStyle = 'not-allowed';
-            opacity = '0.55';
-            pointerEvents = 'none';
-          }
-
-          return (
-            <div 
-              key={bay.bay_no}
-              style={{ position: 'relative', zIndex: zIndex }}
-            >
-              {/* --- RIPPLE LASER WAVE EFFECT (2중 동심원 방출) --- */}
-              {isSelected && (
-                <>
-                  <div style={{
-                    position: 'absolute',
-                    top: 0, left: 0, right: 0, bottom: 0,
-                    borderRadius: '12px',
-                    border: '2.5px solid #34c759',
-                    animation: 'rippleWave 1.8s infinite linear',
-                    pointerEvents: 'none',
-                    zIndex: -1
-                  }} />
-                  <div style={{
-                    position: 'absolute',
-                    top: 0, left: 0, right: 0, bottom: 0,
-                    borderRadius: '12px',
-                    border: '2.5px solid #34c759',
-                    animation: 'rippleWave 1.8s infinite linear',
-                    animationDelay: '0.9s',
-                    pointerEvents: 'none',
-                    zIndex: -1
-                  }} />
-                </>
-              )}
-
-              {/* --- CARD MAIN BODY --- */}
-              <div
-                onClick={() => (isAvailable || isSelected || isCurrentMyBay || isLessonOnly) && handleBayTouch(bay)}
-                style={{
-                  height: '130px',
-                  borderRadius: '12px',
-                  border: containerBorder,
-                  background: containerBg,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  cursor: cursorStyle,
-                  transition: 'all 0.25s cubic-bezier(0.25, 1, 0.5, 1)',
-                  transform: transform,
-                  position: 'relative',
-                  overflow: 'hidden',
-                  opacity: opacity,
-                  pointerEvents: pointerEvents,
-                  boxShadow: boxShadow
+            return (
+              <TeeboxTileCard
+                key={bay.bay_no}
+                bay={bay}
+                isSelected={isSelected}
+                isCurrentMyBay={isCurrentMyBay}
+                isMoveMode={isMoveMode}
+                lang={lang}
+                onSelect={(bayNo) => {
+                  const target = floorBays.find((b) => b.bay_no === bayNo);
+                  if (target) handleBayTouch(target);
                 }}
-              >
-                {/* --- HEADER SECTION (30%) --- */}
-                <div
-                  style={{
-                    flexBasis: '30%',
-                    background: headerBg,
-                    color: headerTextColor,
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    borderBottom: '1px solid rgba(0,0,0,0.06)',
-                    position: 'relative',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <span style={{ fontSize: '20px', fontWeight: 900, fontFamily: 'monospace', letterSpacing: '-0.5px' }}>
-                    {bay.bay_no.toString().padStart(2, '0')}
-                  </span>
-
-                  {bay.type === 'LEFT' && (
-                    <span 
-                      style={{ 
-                        position: 'absolute', 
-                        top: '4px', 
-                        right: '6px', 
-                        fontSize: '9px', 
-                        fontWeight: 900, 
-                        background: isSelected ? 'rgba(0, 0, 0, 0.08)' : isAvailable ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.05)', 
-                        color: isSelected ? '#121419' : isAvailable ? '#ffffff' : '#86868b', 
-                        padding: '1px 4px', 
-                        borderRadius: '3px',
-                        border: '0.5px solid rgba(255,255,255,0.1)'
-                      }}
-                    >
-                      좌타
-                    </span>
-                  )}
-                </div>
-
-                {/* --- BODY SECTION (70%) --- */}
-                <div
-                  style={{
-                    flexBasis: '70%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    padding: '8px',
-                    boxSizing: 'border-box',
-                    gap: '6px'
-                  }}
-                >
-                  {isCurrentMyBay ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', width: '100%' }}>
-                      <span style={{ fontSize: '14px', fontWeight: 900, color: statusColor }}>
-                        {statusText}
-                      </span>
-                      <span style={{ fontSize: '12px', fontWeight: 800, color: '#065f46' }}>
-                        {currentRemMin}분 보전
-                      </span>
-                    </div>
-                  ) : isOccupied ? (
-                    (() => {
-                      const remMin = TimeMaster.getRemainingMinutes(bay);
-                      return (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px', width: '100%' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#515154', fontSize: '16px', fontWeight: 800 }}>
-                            <Timer size={14} style={{ color: '#515154' }} />
-                            <span>{remMin}분 남음</span>
-                          </div>
-                          <div style={{ width: '85%', height: '4px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
-                            <div 
-                              style={{ 
-                                width: `${Math.min(100, (remMin / 60) * 100)}%`, 
-                                height: '100%', 
-                                backgroundColor: '#515154',
-                                transition: 'width 0.5s ease'
-                              }} 
-                            />
-                          </div>
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    <span style={{ fontSize: '16px', fontWeight: 800, color: statusColor, letterSpacing: '-0.3px' }}>
-                      {statusText}
-                    </span>
-                  )}
-
-                  {isSelected && (
-                    <span 
-                      style={{ 
-                        fontSize: '12px', 
-                        fontWeight: 700, 
-                        color: '#ff453a', 
-                        marginTop: '-2px',
-                        opacity: 0.9,
-                        animation: 'softBlink 1s infinite alternate'
-                      }}
-                    >
-                      {countdown}초 남음
-                    </span>
-                  )}
-
-                  {/* 스펙 뱃지 바 (GDR+, VX, 좌타, 레슨전용 등) */}
-                  {(() => {
-                    const simType = bay.simulator_type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).simulator_type; } catch { return null; } })() : null);
-                    const handed = bay.handedness || bay.type || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).handedness; } catch { return null; } })() : null);
-                    const lessonOnly = bay.is_lesson_only || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).is_lesson_only; } catch { return false; } })() : false);
-                    const companionAllowed = bay.allow_companion || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).allow_companion; } catch { return false; } })() : false);
-                    const screenSpec = bay.screen_spec || (bay.config_json ? (() => { try { return JSON.parse(bay.config_json).screen_spec; } catch { return null; } })() : null);
-
-                    const hasBadges = (simType && simType !== 'NONE') || (handed && (handed === 'LEFT' || handed === 'BOTH')) || lessonOnly || companionAllowed || (screenSpec && screenSpec !== 'STANDARD');
-                    if (!hasBadges) return null;
-
-                    return (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', justifyContent: 'center', marginTop: '2px' }}>
-                        {simType && simType !== 'NONE' && (
-                          <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe' }}>
-                            {simType === 'GDR_PLUS' ? 'GDR+' : simType === 'KAKAO_VX' ? 'VX' : simType === 'QED' ? 'QED' : simType === 'SDR' ? 'SDR' : simType === 'LM' ? 'LM' : simType === 'STR' ? 'STR' : simType === 'VIP' ? 'VIP' : simType}
-                          </span>
-                        )}
-                        {handed && (handed === 'LEFT' || handed === 'BOTH') && (
-                          <span style={{ fontSize: '9px', fontWeight: 900, padding: '1px 4px', borderRadius: '3px', background: handed === 'LEFT' ? '#ffe4e6' : '#f3e8ff', color: handed === 'LEFT' ? '#9f1239' : '#6b21a8', border: '1px solid #fecdd3' }}>
-                            {handed === 'LEFT' ? '좌타 🎯' : '양타 ↔'}
-                          </span>
-                        )}
-                        {lessonOnly && (
-                          <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #e9d5ff' }}>
-                            레슨 🎓
-                          </span>
-                        )}
-                        {companionAllowed && (
-                          <span style={{ fontSize: '9px', fontWeight: 800, padding: '1px 4px', borderRadius: '3px', background: '#ecfeff', color: '#155e75', border: '1px solid #a5f3fc' }}>
-                            동반자 👥
-                          </span>
-                        )}
-                        {screenSpec && screenSpec !== 'STANDARD' && (
-                          <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: '3px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>
-                            {screenSpec === 'WIDE_16_9' ? '16:9' : '커브드'}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+              />
+            );
+          })
+        )}
       </div>
 
       {/* 하단 최종 조작 액션 바 */}
@@ -1183,26 +1007,26 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                 style={{
                   background: '#f5f5f7',
                   border: '1.5px solid #e5e5ea',
-                  borderRadius: '18px',
-                  padding: '12px 24px',
+                  borderRadius: '20px',
+                  padding: '16px 28px',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '16px'
+                  gap: '20px'
                 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 700 }}>이전 타석</span>
-                  <span style={{ fontSize: '21px', fontWeight: 900, color: '#1d1d1f' }}>{currentBay.bay_no}번</span>
+                  <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>이전 타석</span>
+                  <span style={{ fontSize: '26px', fontWeight: 900, color: '#1d1d1f' }}>{currentBay.bay_no}번</span>
                 </div>
-                <ArrowLeftRight size={22} style={{ color: '#059669' }} />
+                <ArrowLeftRight size={26} style={{ color: '#059669' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <span style={{ fontSize: '12px', color: '#059669', fontWeight: 700 }}>이동할 타석</span>
-                  <span style={{ fontSize: '21px', fontWeight: 900, color: '#059669' }}>{selectedBayNo}번</span>
+                  <span style={{ fontSize: '14px', color: '#059669', fontWeight: 700 }}>이동할 타석</span>
+                  <span style={{ fontSize: '26px', fontWeight: 900, color: '#059669' }}>{selectedBayNo}번</span>
                 </div>
-                <div style={{ width: '1px', height: '32px', background: '#e5e5ea', margin: '0 4px' }} />
+                <div style={{ width: '1px', height: '36px', background: '#e5e5ea', margin: '0 6px' }} />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontSize: '14px', color: '#1d1d1f', fontWeight: 800 }}>남은 {currentRemMin}분 100% 보전</span>
-                  <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 600 }}>선점 락: {countdown}초 남음</span>
+                  <span style={{ fontSize: '17px', color: '#1d1d1f', fontWeight: 800 }}>남은 {currentRemMin}분 100% 보전</span>
+                  <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>선점 락: {countdown}초 남음</span>
                 </div>
               </div>
             </div>
@@ -1211,26 +1035,26 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               <div 
                 style={{ 
                   background: '#f5f5f7', 
-                  border: '1.5px solid #e5e5ea',
-                  padding: '10px 20px', 
-                  borderRadius: '14px', 
-                  fontSize: '17px', 
+                  border: '1.5px solid #e5e5ea', 
+                  padding: '14px 24px', 
+                  borderRadius: '16px', 
+                  fontSize: '19px', 
                   fontWeight: 800,
                   color: '#1d1d1f',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px'
+                  gap: '10px'
                 }}
               >
-                <Check size={18} style={{ color: '#059669' }} />
-                <span>선택된 타석: <strong style={{ color: '#059669', fontSize: '21px' }}>{selectedBayNo}</strong>번</span>
+                <Check size={22} style={{ color: '#059669' }} />
+                <span>선택된 타석: <strong style={{ color: '#059669', fontSize: '24px' }}>{selectedBayNo}</strong>번</span>
               </div>
-              <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>
+              <span style={{ fontSize: '16px', color: '#86868b', fontWeight: 700 }}>
                 (배정 대기 시간: {countdown}초 남음)
               </span>
             </div>
           ) : (
-            <span style={{ fontSize: '15px', color: (isTimeRestricted || isGlobalPaused) ? '#dc2626' : '#86868b', fontWeight: 700 }}>
+            <span style={{ fontSize: '18px', color: (isTimeRestricted || isGlobalPaused) ? '#dc2626' : '#6b7280', fontWeight: 700 }}>
               {isMoveMode 
                 ? isGlobalPaused
                   ? '⏸️ 매장 볼회수(전체 일시정지) 중에는 타석 이동이 제한됩니다.'
@@ -1249,15 +1073,15 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             onClick={handleConfirm}
             disabled={selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused}
             style={{ 
-              padding: '0 36px',
-              height: '62px', 
+              padding: '0 44px',
+              height: '68px', 
               borderRadius: '999px', 
-              fontSize: '19px', 
+              fontSize: '22px', 
               fontWeight: 800,
               border: 'none',
               background: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? '#e5e5ea' : '#1d1d1f',
               color: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? '#86868b' : '#ffffff',
-              boxShadow: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 'none' : '0 8px 24px rgba(0, 0, 0, 0.14)',
+              boxShadow: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 'none' : '0 8px 24px rgba(0, 0, 0, 0.16)',
               cursor: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 'not-allowed' : 'pointer',
               transition: 'all 0.2s ease'
             }}
@@ -1266,6 +1090,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           </button>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };

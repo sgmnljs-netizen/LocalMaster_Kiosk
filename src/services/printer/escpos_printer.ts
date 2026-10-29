@@ -13,6 +13,23 @@ export interface KioskReceiptPrintData {
   tradeDate: string;
   bayNo?: number | string;
   memberName?: string;
+  memberNo?: string;
+  payMethod?: string;
+  headerMessage?: string;
+  footerMessage?: string;
+  slipMeta?: {
+    title?: string;
+    badge_text?: string;
+    target_label?: string;
+    action_label?: string;
+    product_name?: string;
+    time_range?: string;
+    duration_label?: string;
+    remain_info?: string;
+    start_date?: string;
+    end_date?: string;
+    extra_note?: string;
+  };
   itemName?: string;
   items?: Array<{
     name: string;
@@ -41,6 +58,8 @@ export interface KioskReceiptPrintData {
     cardNoMasked: string;
     approvalNo: string;
     terminalId: string;
+    installmentMonths?: number;
+    approvalDt?: string;
   };
   cashInfo?: {
     approvalNo: string;
@@ -115,105 +134,137 @@ export class KioskEscPosPrinterService {
     // 1. 프린터 초기화
     appendBytes(0x1b, 0x40);
 
-    // 2. 헤더 및 가맹점 사업자 정보
-    appendBytes(0x1b, 0x61, 0x01); // Center Align
-    appendBytes(0x1d, 0x21, 0x11); // Double Size
-    append(`${data.storeName}\n`);
-    appendBytes(0x1d, 0x21, 0x00); // Normal Size
-    append(`[타석 배정표 및 영수증]\n`);
-    if (data.bizNo || data.ceoName) {
-      append(`사업자: ${data.bizNo || '-'} / 대표: ${data.ceoName || '-'}\n`);
-    }
-    if (data.storeTel) {
-      append(`TEL: ${data.storeTel}\n`);
-    }
-    if (data.address) {
-      append(`${data.address}\n`);
-    }
-    append(`\n`);
+    // 2. 모드 판별
+    const normalizedMethod = String(data.payMethod || '').toUpperCase();
+    const isSlipMode = normalizedMethod === 'ALLOCATION_SLIP' || normalizedMethod === 'LOCKER_SLIP';
+    const isLockerSlip = normalizedMethod === 'LOCKER_SLIP';
 
-    // 3. 배정 타석 정보 (크고 굵게)
-    if (data.bayNo) {
-      appendBytes(0x1d, 0x21, 0x11); // Double Size
-      append(`타석 번호: [ ${data.bayNo}번 ]\n`);
-      appendBytes(0x1d, 0x21, 0x00); // Normal Size
-      append(`${dblDivider}\n`);
-    }
-
-    // 4. 이용 시간 / 고객 정보
-    appendBytes(0x1b, 0x61, 0x00); // Left Align
-    if (data.memberName) append(`${formatTwoCol('회 원 명', data.memberName, colWidth)}\n`);
-    const resolvedItemName = data.itemName || (data.items && data.items.length > 0 ? data.items.map((i) => i.name).join(', ') : undefined);
-    if (resolvedItemName) append(`${formatTwoCol('상 품 명', resolvedItemName, colWidth)}\n`);
-    if (data.useMinutes) append(`${formatTwoCol('이용시간', `${data.useMinutes}분`, colWidth)}\n`);
-    if (data.startTime && data.endTime) append(`${formatTwoCol('이용구간', `${data.startTime} ~ ${data.endTime}`, colWidth)}\n`);
-    append(`${formatTwoCol('거래일시', data.tradeDate, colWidth)}\n`);
-    append(`${formatTwoCol('영수증No', data.receiptNo, colWidth)}\n`);
-    append(`${divider}\n`);
-
-    // 5. 과세/면세 세액 및 결제 금액
-    if (data.discountAmt !== undefined && data.discountAmt > 0) {
-      append(`${formatTwoCol('할인금액', `-${data.discountAmt.toLocaleString()}원`, colWidth)}\n`);
-    }
-    if (data.supplyAmt !== undefined) {
-      append(`${formatTwoCol('공급가액', `${data.supplyAmt.toLocaleString()}원`, colWidth)}\n`);
-    }
-    if (data.vatAmt !== undefined) {
-      append(`${formatTwoCol('부 가 세', `${data.vatAmt.toLocaleString()}원`, colWidth)}\n`);
-    }
-    if (data.taxFreeAmt !== undefined && data.taxFreeAmt > 0) {
-      append(`${formatTwoCol('면세금액', `${data.taxFreeAmt.toLocaleString()}원`, colWidth)}\n`);
-    }
-    append(`${formatTwoCol('결제금액', `${data.payAmount.toLocaleString()}원`, colWidth)}\n`);
-
-    const resolvedIssuer = data.cardInfo?.issuerName || data.cardIssuer;
-    const resolvedCardNo = data.cardInfo?.cardNoMasked || data.cardNoMasked;
-    const resolvedApprNo = data.cardInfo?.approvalNo || data.approvalNo;
-    const resolvedTermId = data.cardInfo?.terminalId || data.terminalId;
-
-    if (resolvedIssuer || resolvedCardNo || resolvedApprNo || resolvedTermId) {
+    if (isSlipMode) {
+      // ===== [타석 배정표 / 라카 확인증 에코 다이어트 (약 5.0~5.5cm)] =====
+      // 1) 상단 컴팩트 헤더: 매장명 (좌) + 발행일시 (우)
+      appendBytes(0x1b, 0x61, 0x00); // Left Align
+      const tradeShort = data.tradeDate
+        ? (data.tradeDate.length > 16 ? data.tradeDate.slice(5, 16) : data.tradeDate)
+        : '';
+      append(`${formatTwoCol(data.storeName, tradeShort, colWidth)}\n`);
       append(`${divider}\n`);
-      if (resolvedIssuer || resolvedCardNo) {
-        append(`${formatTwoCol('카드정보', `${resolvedIssuer || '신용카드'} (${resolvedCardNo || '****'})`, colWidth)}\n`);
+
+      // 2) 메인 히어로: 배정 타석/라카 (2배 크기) + 이용시간
+      const badgeLabel = data.slipMeta?.badge_text || (data.bayNo ? `${data.bayNo}번 타석` : '');
+      const rawDuration = data.slipMeta?.duration_label || (data.useMinutes ? `${data.useMinutes}분` : '');
+      const durationLabel = rawDuration ? (rawDuration.startsWith('(') ? rawDuration : `(${rawDuration})`) : '';
+      const heroLine = durationLabel ? `${badgeLabel} ${durationLabel}` : badgeLabel;
+
+      appendBytes(0x1b, 0x61, 0x01); // Center Align
+      appendBytes(0x1d, 0x21, 0x11); // Double Size (Width & Height)
+      append(`${heroLine}\n`);
+      appendBytes(0x1d, 0x21, 0x00); // Normal Size
+
+      if (isLockerSlip && data.slipMeta) {
+        if (data.slipMeta.start_date && data.slipMeta.end_date) {
+          append(`${data.slipMeta.start_date} ~ ${data.slipMeta.end_date}\n`);
+        }
+      } else if (data.slipMeta?.time_range) {
+        append(`${data.slipMeta.time_range}\n`);
+      } else if (data.startTime && data.endTime) {
+        append(`${data.startTime} ~ ${data.endTime}\n`);
       }
-      if (resolvedApprNo) {
+      append(`${divider}\n`);
+
+      // 3) 회원 정보 및 배정 구분 (컴팩트 1줄)
+      appendBytes(0x1b, 0x61, 0x00); // Left Align
+      if (data.memberName) {
+        const custStr = data.memberNo && !data.memberName.includes(data.memberNo)
+          ? `${data.memberName} (${data.memberNo})`
+          : data.memberName;
+        const rightLabel = data.slipMeta?.action_label || data.slipMeta?.product_name || '타석이용';
+        append(`${formatTwoCol(`회원: ${custStr}`, rightLabel, colWidth)}\n`);
+      } else if (data.slipMeta?.action_label) {
+        append(`${formatTwoCol('구분', data.slipMeta.action_label, colWidth)}\n`);
+      }
+
+      if (data.slipMeta?.remain_info) {
+        append(`${formatTwoCol('잔여', data.slipMeta.remain_info, colWidth)}\n`);
+      }
+      if (data.slipMeta?.extra_note) {
+        append(`${formatTwoCol('안내', data.slipMeta.extra_note, colWidth)}\n`);
+      }
+      append(`${divider}\n`);
+
+      // 4) [Code128 5mm 슬림 출입 바코드] (스캔 인식 100% 보장)
+      const barcode = data.barcodeText || (data.bayNo ? `BAY-${data.bayNo}-${data.receiptNo.slice(-6)}` : undefined);
+      if (barcode) {
+        appendBytes(0x1b, 0x61, 0x01); // Center Align
+        // 5mm 슬림 바코드: GS h 40 (0x28), GS w 2
+        appendBytes(0x1d, 0x68, 0x28); // 바코드 높이 40 dot (약 5mm)
+        appendBytes(0x1d, 0x77, 0x02); // 바코드 폭 2
+        appendBytes(0x1d, 0x48, 0x00); // HRI 문자 내장 출력 비활성화
+        
+        const bBytes = encoder.encode(barcode);
+        const code128Payload = [0x7b, 0x42, ...Array.from(bBytes)];
+        appendBytes(0x1d, 0x6b, 0x49, code128Payload.length, ...code128Payload);
+        append(`\n${barcode} [게이트출입]\n`);
+      }
+
+      // 5) 절단 여백 1줄 최소화 (Feed 1 line) + Full Cut
+      appendBytes(0x1b, 0x64, 0x01); // Feed 1 line
+      appendBytes(0x1d, 0x56, 0x41, 0x00); // Full Cut
+    } else {
+      // ===== [신용카드 매출전표 / 현금영수증 슬림화 (약 6.0cm)] =====
+      // 1) 헤더 및 가맹점 사업자 정보 (컴팩트 압축)
+      appendBytes(0x1b, 0x61, 0x00); // Left Align
+      const headerTitle = data.headerMessage || (data.cashInfo ? '[ 현금영수증 (고객용) ]' : '[ 신용카드 매출전표 (고객용) ]');
+      append(`${formatTwoCol(headerTitle, '고객용', colWidth)}\n`);
+
+      const bizParts = [data.storeName, data.bizNo, data.ceoName].filter(Boolean);
+      if (bizParts.length > 0) {
+        append(`${bizParts.join(' / ')}\n`);
+      }
+      if (data.storeTel) {
+        append(`TEL: ${data.storeTel}\n`);
+      }
+      append(`${divider}\n`);
+
+      // 2) 카드 승인 / 거래 정보
+      const resolvedIssuer = data.cardInfo?.issuerName || data.cardIssuer || '신용카드';
+      const resolvedCardNo = data.cardInfo?.cardNoMasked || data.cardNoMasked || '****';
+      const resolvedApprNo = data.cardInfo?.approvalNo || data.approvalNo || '-';
+      const resolvedTermId = data.cardInfo?.terminalId || data.terminalId;
+      const installment = (data.cardInfo?.installmentMonths ?? 0) > 0 ? `${data.cardInfo?.installmentMonths}개월` : '일시불';
+
+      if (data.cashInfo) {
+        append(`${formatTwoCol('현금영수증', data.cashInfo.receiptType || '소득공제', colWidth)}\n`);
+        append(`${formatTwoCol('승인번호', data.cashInfo.approvalNo || '-', colWidth)}\n`);
+      } else {
+        append(`${formatTwoCol('카드종류', `${resolvedIssuer} (${resolvedCardNo})`, colWidth)}\n`);
         append(`${formatTwoCol('승인번호', resolvedApprNo, colWidth)}\n`);
       }
       if (resolvedTermId) {
         append(`${formatTwoCol('단말기ID', resolvedTermId, colWidth)}\n`);
       }
-    } else if (data.cashInfo) {
+      append(`${formatTwoCol('거래일시', `${data.tradeDate} (${installment})`, colWidth)}\n`);
       append(`${divider}\n`);
-      append(`${formatTwoCol('현금영수증', data.cashInfo.receiptType || '소득공제', colWidth)}\n`);
-      append(`${formatTwoCol('승인번호', data.cashInfo.approvalNo, colWidth)}\n`);
+
+      // 3) 금액 내역
+      const resolvedItemName = data.itemName || (data.items && data.items.length > 0 ? data.items.map((i) => i.name).join(', ') : '타석 이용');
+      append(`${formatTwoCol('상 품 명', resolvedItemName, colWidth)}\n`);
+      if (data.discountAmt !== undefined && data.discountAmt > 0) {
+        append(`${formatTwoCol('할인금액', `-${data.discountAmt.toLocaleString()}원`, colWidth)}\n`);
+      }
+      if (data.supplyAmt !== undefined && data.vatAmt !== undefined) {
+        append(`${formatTwoCol('공급가/세액', `${data.supplyAmt.toLocaleString()}원 / ${data.vatAmt.toLocaleString()}원`, colWidth)}\n`);
+      }
+
+      appendBytes(0x1d, 0x21, 0x01); // Double Height
+      append(`${formatTwoCol('합계금액', `${data.payAmount.toLocaleString()}원`, colWidth)}\n`);
+      appendBytes(0x1d, 0x21, 0x00); // Normal Size
+      append(`${dblDivider}\n`);
+
+      // 🚨 영수증에는 출입 게이트 바코드를 출력하지 않음! (바코드는 배정표에만 존재)
+      // 절단 여백 1줄 최소화 (Feed 1 line) + Full Cut
+      appendBytes(0x1b, 0x64, 0x01); // Feed 1 line
+      appendBytes(0x1d, 0x56, 0x41, 0x00); // Full Cut
     }
-    append(`${dblDivider}\n`);
-
-    // 6. [Code128 출입 바코드] (게이트 통과용)
-    const barcode = data.barcodeText || (data.bayNo ? `BAY-${data.bayNo}-${data.receiptNo.slice(-6)}` : undefined);
-    if (barcode) {
-      appendBytes(0x1b, 0x61, 0x01); // Center Align
-      append(`[출입 게이트 태깅 바코드]\n`);
-      
-      // Code128 바코드 커맨드: GS h 80, GS w 2, GS H 2, GS k 73 {n} {data}
-      appendBytes(0x1d, 0x68, 0x50); // 바코드 높이 80 dot
-      appendBytes(0x1d, 0x77, 0x02); // 바코드 폭 2
-      appendBytes(0x1d, 0x48, 0x02); // HRI 문자 바코드 아래 인쇄
-      
-      // Code128-B 인코딩 ({B prefix = 0x7B, 0x42)
-      const bBytes = encoder.encode(barcode);
-      const code128Payload = [0x7b, 0x42, ...Array.from(bBytes)];
-      appendBytes(0x1d, 0x6b, 0x49, code128Payload.length, ...code128Payload);
-      append(`\n\n`);
-    }
-
-    // 7. 푸터
-    appendBytes(0x1b, 0x61, 0x01); // Center Align
-    append(`배정된 타석으로 이동해 주시기 바랍니다.\n이용해 주셔서 감사합니다.\n\n`);
-
-    // 8. 용지 절단 (Full Cut)
-    appendBytes(0x1b, 0x64, 0x04); // Feed 4 lines
-    appendBytes(0x1d, 0x56, 0x41, 0x00); // Full Cut
 
     const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
     const result = new Uint8Array(totalLength);

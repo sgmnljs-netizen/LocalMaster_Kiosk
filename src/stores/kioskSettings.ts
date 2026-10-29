@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 
 export type KioskAuthModeKey = 'SMART_TAG' | 'PHONE_KEYPAD' | 'QR_SCAN' | 'FACE';
+export type KioskTopDashboardMode = 'AUTO' | 'COMPACT_1ROW' | 'HIDDEN';
 
 export interface KioskAuthMethodsConfig {
   SMART_TAG: boolean;
@@ -31,6 +32,8 @@ export interface KioskSettings {
   defaultAuthMode?: KioskAuthModeKey;
   /** 중간 빈타석 표시 기준 시간(분): 대기시간 제외 순수 이용 가능 시간 기준 (표준 기본값: 60분) */
   minGapMinutes?: number;
+  /** 상단 실시간 타석 현황판 표시 모드: AUTO(타석수 감지 자동 1~2줄 대형화), COMPACT_1ROW(1줄 고정), HIDDEN(숨김) */
+  topDashboardMode?: KioskTopDashboardMode;
 }
 
 export const DEFAULT_AUTH_METHODS: KioskAuthMethodsConfig = {
@@ -130,14 +133,26 @@ export const DEFAULT_KIOSK_SETTINGS: KioskSettings = {
   authMethods: { ...DEFAULT_AUTH_METHODS },
   defaultAuthMode: 'SMART_TAG',
   minGapMinutes: 60,
+  topDashboardMode: 'AUTO',
 };
 
 const STORAGE_KEY = 'lm-kiosk-settings';
 
+export function getDefaultApiUrl(): string {
+  if (typeof window !== 'undefined' && window.location) {
+    const hostname = window.location.hostname;
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return `${window.location.protocol}//${hostname}:8000`;
+    }
+  }
+  return 'http://127.0.0.1:8000';
+}
+
 export function normalizeApiUrl(rawUrl?: string): string {
-  const base = (rawUrl || DEFAULT_KIOSK_SETTINGS.apiUrl || 'http://127.0.0.1:8000')
-    .trim()
-    .replace(/\/+$/, '');
+  let base = (rawUrl || '').trim().replace(/\/+$/, '');
+  if (!base) {
+    base = getDefaultApiUrl();
+  }
   return base.endsWith('/api') ? base : `${base}/api`;
 }
 
@@ -146,22 +161,28 @@ export function getKioskSettings(): KioskSettings {
     if (typeof window === 'undefined' || !window.localStorage) {
       return DEFAULT_KIOSK_SETTINGS;
     }
+    const defaultApi = getDefaultApiUrl();
     const raw = localStorage.getItem(STORAGE_KEY);
     const fallbackStoreCd = localStorage.getItem('LM_STORE_CD') || DEFAULT_KIOSK_SETTINGS.storeCode;
     if (!raw) {
       return {
         ...DEFAULT_KIOSK_SETTINGS,
+        apiUrl: defaultApi,
         storeCode: fallbackStoreCd,
         menuOverrides: {},
         authMethods: { ...DEFAULT_AUTH_METHODS },
       };
     }
     const parsed = JSON.parse(raw);
+    const parsedApi = (parsed.apiUrl || defaultApi).trim().replace(/\/+$/, '');
+    const isLocalhostTarget = parsedApi.includes('127.0.0.1') || parsedApi.includes('localhost');
+    const isRemoteClient = typeof window !== 'undefined' && window.location && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+    const effectiveApi = isLocalhostTarget && isRemoteClient ? defaultApi : parsedApi;
     return {
       ...DEFAULT_KIOSK_SETTINGS,
       ...parsed,
       storeCode: parsed.storeCode || fallbackStoreCd,
-      apiUrl: (parsed.apiUrl || DEFAULT_KIOSK_SETTINGS.apiUrl).trim().replace(/\/+$/, ''),
+      apiUrl: effectiveApi,
       menuOverrides: parsed.menuOverrides && typeof parsed.menuOverrides === 'object' ? parsed.menuOverrides : {},
       authMethods: {
         ...DEFAULT_AUTH_METHODS,
@@ -177,7 +198,10 @@ export function getKioskSettings(): KioskSettings {
   }
 }
 
-export function saveKioskSettings(settings: Partial<KioskSettings>): KioskSettings {
+export function saveKioskSettings(
+  settings: Partial<KioskSettings>,
+  options?: { syncRemote?: boolean }
+): KioskSettings {
   const current = getKioskSettings();
   const next: KioskSettings = {
     ...current,
@@ -192,7 +216,102 @@ export function saveKioskSettings(settings: Partial<KioskSettings>): KioskSettin
     localStorage.setItem('LM_KIOSK_TERMINAL_ID', next.terminalId);
   }
   window.dispatchEvent(new Event('kiosk-settings-changed'));
+
+  if (options?.syncRemote) {
+    void pushKioskDeviceSettingsToServer(next);
+  }
+
   return next;
+}
+
+export async function pushKioskDeviceSettingsToServer(settings: KioskSettings): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  try {
+    const baseUrl = (settings.apiUrl || getDefaultApiUrl()).trim().replace(/\/+$/, '');
+    const storeCd = (settings.storeCode || localStorage.getItem('LM_STORE_CD') || '').trim();
+    if (!storeCd) return false;
+    const res = await fetch(`${baseUrl}/api/v1/kiosk/device-settings`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        store_cd: storeCd,
+        device_id: settings.deviceId,
+        device_name: settings.deviceName,
+        terminal_id: settings.terminalId,
+        vcat_port: settings.vcatPort,
+        provider_type: settings.providerType,
+        admin_pin: settings.adminPin,
+        is_maintenance_mode: settings.isMaintenanceMode,
+        menu_overrides: settings.menuOverrides || {},
+        auth_methods: settings.authMethods || DEFAULT_AUTH_METHODS,
+        default_auth_mode: settings.defaultAuthMode || 'SMART_TAG',
+        min_gap_minutes: settings.minGapMinutes ?? 60,
+        top_dashboard_mode: settings.topDashboardMode || 'AUTO',
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('[kioskSettings] Failed to push device settings to server:', err);
+    return false;
+  }
+}
+
+export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSettings | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const current = getKioskSettings();
+    const baseUrl = (
+      window.location.port === '8000'
+        ? window.location.origin
+        : current.apiUrl || getDefaultApiUrl()
+    )
+      .trim()
+      .replace(/\/+$/, '');
+    const storeCd = (localStorage.getItem('LM_STORE_CD') || current.storeCode || '').trim();
+    if (!storeCd) return null;
+
+    const res = await fetch(
+      `${baseUrl}/api/v1/kiosk/device-settings?store_cd=${encodeURIComponent(storeCd)}&device_id=${encodeURIComponent(current.deviceId || '')}`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.has_saved_settings || !data?.settings || typeof data.settings !== 'object') {
+      return null;
+    }
+    const srv = data.settings;
+    const patch: Partial<KioskSettings> = {};
+    if (srv.deviceId) patch.deviceId = srv.deviceId;
+    if (srv.deviceName) patch.deviceName = srv.deviceName;
+    if (srv.terminalId) patch.terminalId = srv.terminalId;
+    if (srv.vcatPort) patch.vcatPort = String(srv.vcatPort);
+    if (srv.providerType) patch.providerType = srv.providerType;
+    if (srv.adminPin) patch.adminPin = srv.adminPin;
+    if (typeof srv.isMaintenanceMode === 'boolean') patch.isMaintenanceMode = srv.isMaintenanceMode;
+    if (srv.menuOverrides && typeof srv.menuOverrides === 'object') {
+      patch.menuOverrides = srv.menuOverrides;
+    }
+    if (srv.authMethods && typeof srv.authMethods === 'object') {
+      patch.authMethods = {
+        ...DEFAULT_AUTH_METHODS,
+        ...srv.authMethods,
+      };
+    }
+    if (srv.defaultAuthMode) {
+      patch.defaultAuthMode = srv.defaultAuthMode;
+    }
+    if (typeof srv.minGapMinutes === 'number' && srv.minGapMinutes >= 10) {
+      patch.minGapMinutes = srv.minGapMinutes;
+    }
+    if (srv.topDashboardMode) {
+      patch.topDashboardMode = srv.topDashboardMode;
+    }
+
+    return saveKioskSettings(patch, { syncRemote: false });
+  } catch {
+    return null;
+  }
 }
 
 let bootstrapPromise: Promise<KioskSettings | null> | null = null;
@@ -218,27 +337,32 @@ export async function bootstrapLocalKioskSettings(): Promise<KioskSettings | nul
       const baseUrl = (
         window.location.port === '8000'
           ? window.location.origin
-          : current.apiUrl || DEFAULT_KIOSK_SETTINGS.apiUrl
+          : current.apiUrl || getDefaultApiUrl()
       )
         .trim()
         .replace(/\/+$/, '');
       const existingStoreCd = localStorage.getItem('LM_STORE_CD') || '';
       const query = existingStoreCd ? `?store_cd=${encodeURIComponent(existingStoreCd)}` : '';
+
       const res = await fetch(`${baseUrl}/api/v1/kiosk/local-bootstrap${query}`);
       if (!res.ok) return null;
+
       const data = await res.json();
       if (!data?.store_cd) return null;
 
-      return saveKioskSettings({
-        apiUrl: baseUrl,
-        storeCode: existingStoreCd || data.store_cd,
-        deviceKey: data.device_key || current.deviceKey,
-        deviceId: data.device_id || current.deviceId,
-        deviceName: data.device_name || current.deviceName,
-        terminalId: data.terminal_id || current.terminalId,
-        vcatPort: data.vcat_port || current.vcatPort,
-        providerType: data.provider_type || current.providerType,
-      });
+      return saveKioskSettings(
+        {
+          apiUrl: baseUrl,
+          storeCode: existingStoreCd || data.store_cd,
+          deviceKey: data.device_key || current.deviceKey,
+          deviceId: data.device_id || current.deviceId,
+          deviceName: data.device_name || current.deviceName,
+          terminalId: data.terminal_id || current.terminalId,
+          vcatPort: data.vcat_port || current.vcatPort,
+          providerType: data.provider_type || current.providerType,
+        },
+        { syncRemote: false }
+      );
     } catch {
       return null;
     } finally {
@@ -261,8 +385,8 @@ export function useKioskSettings() {
     return () => window.removeEventListener('kiosk-settings-changed', handleUpdate);
   }, []);
 
-  const updateSettings = (newSettings: Partial<KioskSettings>) => {
-    const updated = saveKioskSettings(newSettings);
+  const updateSettings = (newSettings: Partial<KioskSettings>, options?: { syncRemote?: boolean }) => {
+    const updated = saveKioskSettings(newSettings, options);
     setSettings(updated);
   };
 

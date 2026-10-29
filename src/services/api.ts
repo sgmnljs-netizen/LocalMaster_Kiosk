@@ -8,7 +8,7 @@
 
 import { TimeMaster } from '../utils/timeMaster';
 import type { CardApprovalResult } from './van/van_types';
-import { getKioskSettings, normalizeApiUrl } from '../stores/kioskSettings';
+import { getKioskSettings, saveKioskSettings, normalizeApiUrl, hydrateKioskDeviceSettingsFromServer } from '../stores/kioskSettings';
 import {
   recordKioskBlackBox,
   getFormattedKioskBlackBoxText,
@@ -32,13 +32,18 @@ export interface MemberAsset {
   item_name: string;
   rem_count?: number;
   remain_cnt?: number;
+  total_count?: number;
   remain_min?: number;
+  start_date?: string;
   expiry_date?: string;
   end_date?: string;
   end_dt?: string;
   days?: number;
   remain_days?: number;
   duration_min?: number;
+  available_days_label?: string;
+  available_time_label?: string;
+  daily_limit_count?: number;
   logic_type?: string;
   pass_type?: string;
   allowed_categories?: string[];
@@ -366,7 +371,8 @@ export const isDemoEnvironment = (): boolean => {
     import.meta.env.VITE_DEMO_MODE === 'true' ||
     window.location.search.includes('demo=true') ||
     window.location.pathname.includes('/demo/') ||
-    window.location.hostname === 'segnet.co.kr'
+    window.location.hostname.endsWith('segnet.co.kr') ||
+    window.location.hostname.endsWith('golfos.co.kr')
   );
 };
 
@@ -503,9 +509,13 @@ class HybridAPIClient {
   }
 
   /**
-   * 📱 스마트 태그 (NFC / BLE UID) 회원 인증 (/v1/kiosk/smart-auth)
+   * 📱 스마트 태그 (NFC / BLE / QR UID) 회원 인증 (/v1/kiosk/smart-auth)
    */
-  async authenticateSmartTag(tagUid: string): Promise<Member | null> {
+  async authenticateSmartTag(
+    tagUid: string,
+    rssi?: number,
+    authType?: 'BLE' | 'NFC' | 'QR'
+  ): Promise<Member | null> {
     const isConnected = await this.checkConnection();
     if (!isConnected) {
       return this.getMember(tagUid);
@@ -513,21 +523,27 @@ class HybridAPIClient {
     let httpErr: Error | null = null;
     try {
       const upper = tagUid.trim().toUpperCase();
-      const inferredType = upper.startsWith('QR') || upper.startsWith('GOLFOS_QR')
-        ? 'QR'
-        : upper.startsWith('GOLFOS_MEMBER')
-          ? 'BLE'
-          : 'NFC';
+      const resolvedAuthType =
+        authType ||
+        (upper.startsWith('QR') || upper.startsWith('GOLFOS_QR')
+          ? 'QR'
+          : upper.startsWith('GOLFOS_MEMBER')
+            ? 'BLE'
+            : 'NFC');
+      const payload: Record<string, any> = {
+        store_cd: this.getStoreCd(),
+        auth_type: resolvedAuthType,
+        token_or_uid: tagUid,
+        tag_uid: tagUid,
+        token: tagUid,
+      };
+      if (typeof rssi === 'number' && !Number.isNaN(rssi)) {
+        payload.rssi = rssi;
+      }
       const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/smart-auth`, {
         method: 'POST',
         headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          store_cd: this.getStoreCd(),
-          auth_type: inferredType,
-          token_or_uid: tagUid,
-          tag_uid: tagUid,
-          token: tagUid,
-        }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
@@ -966,24 +982,44 @@ class HybridAPIClient {
     };
   }
 
-  // 네트워크 헬스 체크
+  // 네트워크 헬스 체크 및 가맹점(store_cd) 자동 프로비저닝
   async checkConnection(): Promise<boolean> {
     if (isDemoEnvironment()) {
-      this.isOnline = false;
-      return false;
+      this.isOnline = true;
+      return true;
     }
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
       const res = await fetch(`${this.getBaseUrl()}/store`, { 
         method: 'GET',
-        headers: this.getSecureHeaders(),
+        headers: {
+          'x-terminal-id': this.getTerminalId(),
+        },
         signal: controller.signal
       });
       clearTimeout(timeoutId);
-      this.isOnline = res.ok;
-      return res.ok;
+      if (res.ok) {
+        this.isOnline = true;
+        try {
+          const data = await res.clone().json();
+          if (data?.store_cd) {
+            const currentStoreCd = localStorage.getItem('LM_STORE_CD');
+            if (currentStoreCd !== data.store_cd) {
+              localStorage.setItem('LM_STORE_CD', data.store_cd);
+              localStorage.setItem('LM_STORE_INFO', JSON.stringify(data));
+              saveKioskSettings({ storeCode: data.store_cd }, { syncRemote: false });
+              void hydrateKioskDeviceSettingsFromServer();
+            }
+          }
+        } catch {
+          // ignore json parse error
+        }
+        return true;
+      }
+      this.isOnline = false;
+      return false;
     } catch {
       this.isOnline = false;
       return false;
@@ -1620,6 +1656,45 @@ class HybridAPIClient {
       throw new Error(err.detail || '시리얼 쿠폰 등록에 실패했습니다.');
     }
     return res.json();
+  }
+
+  // 회원 보유 유효 할인쿠폰 목록 조회 API
+  async getMemberCoupons(memberNo: string): Promise<Array<{
+    coupon_no: string;
+    policy_id?: string;
+    coupon_name?: string;
+    coupon_nm?: string;
+    benefit_type?: 'RATE' | 'FIX' | string;
+    benefit_val?: number;
+    discount_rate?: number;
+    discount_amount?: number;
+    min_order_amt?: number;
+    max_discount_amt?: number;
+    target_categories?: string[];
+    status_cd?: string;
+    valid_from?: string;
+    valid_to?: string;
+  }>> {
+    if (!memberNo || !memberNo.trim()) return [];
+    try {
+      const cleanBase = this.getBaseUrl().replace(/\/api$/, '');
+      const storeCd = this.getStoreCd();
+      const res = await fetch(
+        `${cleanBase}/api/marketing/coupons/${encodeURIComponent(memberNo.trim())}?store_cd=${encodeURIComponent(storeCd)}`,
+        {
+          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' })
+        }
+      );
+      if (!res.ok) return [];
+      const data = await res.json();
+      if (!Array.isArray(data)) return [];
+      return data.filter((c: any) => {
+        const st = String(c.status_cd || '').toUpperCase();
+        return !st || st === 'UNUSED' || st === 'ACTIVE' || st === '10';
+      });
+    } catch {
+      return [];
+    }
   }
 
   // 5. 타석 최종 배정 완료 — 통합 API 단일 호출 (/v1/kiosk/allocate-bay)

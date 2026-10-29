@@ -16,9 +16,36 @@ export const KioskBottomBar: React.FC<KioskBottomBarProps> = ({
   onGoBack,
 }) => {
   const [isMounted, setIsMounted] = useState(false);
+  const [zoomScale, setZoomScale] = useState<number>(1);
 
   useEffect(() => {
     setIsMounted(true);
+    const syncZoom = () => {
+      if (typeof document === 'undefined') return;
+      const container = document.querySelector('.kiosk-container') as HTMLElement | null;
+      const inlineZoom = container?.style?.zoom ? parseFloat(container.style.zoom) : NaN;
+      const saved = parseFloat(localStorage.getItem('kiosk_zoom_scale') || '1');
+      const nextZoom =
+        Number.isFinite(inlineZoom) && inlineZoom > 0
+          ? inlineZoom
+          : Number.isFinite(saved) && saved > 0
+            ? saved
+            : 1;
+      setZoomScale(nextZoom);
+    };
+    syncZoom();
+
+    let observer: MutationObserver | null = null;
+    const container = typeof document !== 'undefined' ? document.querySelector('.kiosk-container') : null;
+    if (container && typeof MutationObserver !== 'undefined') {
+      observer = new MutationObserver(syncZoom);
+      observer.observe(container, { attributes: true, attributeFilter: ['style'] });
+    }
+    window.addEventListener('storage', syncZoom);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('storage', syncZoom);
+    };
   }, []);
 
   // 인트로 화면, 메인 대시보드, 결제 화면에서는 하단 내비게이션 바 숨김 (결제 도중 오작동 방지 및 결제 전용 독 중첩 방지)
@@ -34,6 +61,7 @@ export const KioskBottomBar: React.FC<KioskBottomBarProps> = ({
         bottom: '24px',
         left: '50%',
         transform: 'translateX(-50%)',
+        zoom: zoomScale,
         zIndex: 99999,
         display: 'flex',
         alignItems: 'center',

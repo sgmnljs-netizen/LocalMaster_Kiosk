@@ -107,8 +107,11 @@ describe('Kiosk Smart Gap Merge, 2-Line Tile Display & Truncate Guard QA', () =>
       })
     );
 
-    expect(html).toContain('100분 남음');
-    expect(html).toContain('14:40 빈타석 예정');
+    expect(html).toContain('남은 대기');
+    expect(html).toContain('100분');
+    expect(html).toContain('시작 시각');
+    expect(html).toContain('14:40');
+    expect(html).toContain('대기 2명');
     expect(html).not.toContain('대기예약');
   });
 
@@ -223,5 +226,68 @@ describe('Kiosk Smart Gap Merge, 2-Line Tile Display & Truncate Guard QA', () =>
     expect(html).toContain('data-testid="product-card-DAILY_90" data-duration="90" data-disabled="true"');
     expect(html).toContain('⚠️ 최대 60분 가능 (초과)');
     expect(html).toContain('다음 예약(15:00)으로 선택 불가 (최대 60분)');
+  });
+
+  it('G06: TeeboxTileCard isMoveMode 및 isCurrentMyBay 렌더링 무결성 검증 (타석이동 SSOT 공용화)', () => {
+    const availableBay: Bay = {
+      bay_id: 10,
+      bay_no: 15,
+      floor_no: 2,
+      type: 'RIGHT',
+      status: 'AVAILABLE',
+      simulator_type: 'KAKAO_VX',
+    };
+
+    const myBay: Bay = {
+      bay_id: 9,
+      bay_no: 14,
+      floor_no: 2,
+      type: 'LEFT',
+      status: 'USE',
+      minutes_left: 84,
+      total_wait_minutes: 84,
+      simulator_type: 'GDR_PLUS',
+    };
+
+    // 1. 현재 내 타석 렌더링 검증
+    const myBayHtml = renderToStaticMarkup(
+      React.createElement(TeeboxTileCard, {
+        bay: myBay,
+        isSelected: false,
+        isCurrentMyBay: true,
+        isMoveMode: true,
+        onSelect: () => {},
+        lang: 'KO',
+      })
+    );
+    expect(myBayHtml).toContain('⛳ 현재 내 타석');
+    expect(myBayHtml).toContain('현재 내 타석 (보전)');
+    expect(myBayHtml).toContain('좌타');
+    expect(myBayHtml).toContain('GDR+');
+
+    // 2. 이동 가용 타석 (미선택 시 '즉시 이동 가능')
+    const availHtml = renderToStaticMarkup(
+      React.createElement(TeeboxTileCard, {
+        bay: availableBay,
+        isSelected: false,
+        isMoveMode: true,
+        onSelect: () => {},
+        lang: 'KO',
+      })
+    );
+    expect(availHtml).toContain('즉시 이동 가능');
+    expect(availHtml).toContain('VX');
+
+    // 3. 이동 가용 타석 (선택 완료 시 '이동 선택 완료')
+    const selectedHtml = renderToStaticMarkup(
+      React.createElement(TeeboxTileCard, {
+        bay: availableBay,
+        isSelected: true,
+        isMoveMode: true,
+        onSelect: () => {},
+        lang: 'KO',
+      })
+    );
+    expect(selectedHtml).toContain('이동 선택 완료');
   });
 });

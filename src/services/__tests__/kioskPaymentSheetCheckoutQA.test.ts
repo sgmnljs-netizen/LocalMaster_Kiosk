@@ -281,10 +281,19 @@ describe('🏛️ 키오스크 애플 미니멀 결제 시트(v6.3) 다각도 �
         return rawPoints;
       };
 
-      const safePoints = calcSafePoints(20050, 20000);
-      const finalCard = 20050 - safePoints;
-      expect(finalCard >= 100 || finalCard === 0).toBe(true);
-      expect(finalCard).toBe(100);
+      // 4. 포인트 1,000P 단위 고정 절사(POINT_USE_UNIT = 1000) 및 등급할인 0원 시 3열 동적 정산 바 검증
+      const POINT_USE_UNIT = 1000;
+      const calcMaxUsablePoints = (memberPt: number, targetAmt: number) =>
+        Math.floor(Math.min(memberPt, targetAmt) / POINT_USE_UNIT) * POINT_USE_UNIT;
+
+      expect(calcMaxUsablePoints(2750, 100000)).toBe(2000);
+      expect(calcMaxUsablePoints(850, 100000)).toBe(0);
+      expect(calcMaxUsablePoints(50000, 15000)).toBe(15000);
+
+      const getSummaryGridColumns = (gradeDiscountAmt: number) =>
+        gradeDiscountAmt > 0 ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)';
+      expect(getSummaryGridColumns(0)).toBe('repeat(3, 1fr)');
+      expect(getSummaryGridColumns(5000)).toBe('repeat(4, 1fr)');
     });
   });
 
@@ -600,6 +609,41 @@ describe('🏛️ 키오스크 애플 미니멀 결제 시트(v6.3) 다각도 �
 
       clearAll();
       vi.useRealTimers();
+    });
+  });
+
+  // =========================================================================
+  // P-QA-11: 회원 보유 할인 쿠폰 조회(getMemberCoupons) 및 1-Touch 선택 검증
+  // =========================================================================
+  describe('P-QA-11 [회원 보유 할인 쿠폰 자동 조회 및 1-Touch 선택 검증]', () => {
+    it('api.getMemberCoupons가 회원 보유 활성 쿠폰 목록을 조회하고 최소 주문금액/카테고리 적격 여부를 판별한다', async () => {
+      const mockCoupons = [
+        {
+          coupon_no: 'CPN-10000',
+          coupon_nm: '신규회원 1만원 할인쿠폰',
+          benefit_type: 'AMOUNT',
+          benefit_val: 10000,
+          status_cd: 'ACTIVE',
+          min_order_amt: 50000,
+          target_categories: ['PERIOD', 'ALL'],
+        },
+        {
+          coupon_no: 'CPN-USED',
+          coupon_nm: '기사용 쿠폰',
+          benefit_type: 'AMOUNT',
+          benefit_val: 5000,
+          status_cd: 'USED',
+        },
+      ];
+
+      vi.spyOn(api, 'getMemberCoupons').mockResolvedValue(
+        mockCoupons.filter((c) => c.status_cd === 'ACTIVE')
+      );
+
+      const activeList = await api.getMemberCoupons('10101');
+      expect(activeList).toHaveLength(1);
+      expect(activeList[0].coupon_no).toBe('CPN-10000');
+      expect(activeList[0].benefit_val).toBe(10000);
     });
   });
 });

@@ -13,6 +13,7 @@ import { HardwareAdapterFactory, DEFAULT_HARDWARE_CONFIG } from '../adapters/Har
 
 export class KioskHardwareBridgeClient implements IHardwareBridgeClient {
   private config: HardwareConfig;
+  private serialQueue: Promise<unknown> = Promise.resolve();
 
   constructor(customConfig?: Partial<HardwareConfig>) {
     this.config = { ...DEFAULT_HARDWARE_CONFIG, ...customConfig };
@@ -34,12 +35,21 @@ export class KioskHardwareBridgeClient implements IHardwareBridgeClient {
     return HardwareAdapterFactory.createScanner(() => this.config);
   }
 
+  private enqueueSerialTask<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.serialQueue.then(task, task);
+    this.serialQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
   public async printReceipt(data: ReceiptPrintData): Promise<PrintResult> {
     const mode = data.print_mode || this.config.printMode;
     if (mode === 'NONE') {
       return { success: true, message: '미출력 정책 적용' };
     }
-    return this.printer.printReceipt(data);
+    return this.enqueueSerialTask(() => this.printer.printReceipt(data));
   }
 
   public subscribeScanner(handler: BarcodeScanHandler): () => void {

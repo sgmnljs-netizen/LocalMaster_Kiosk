@@ -334,4 +334,34 @@ describe('Kiosk Member Authentication Audit Fixes (BUG-M01 ~ BUG-M08)', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(String(mockFetch.mock.calls[1][0])).toContain('/reservations/RES_LOCKER_20261019_25_ABCD/cancel');
   });
+
+  it('BLE & QR Hardware Bridge: authenticateSmartTag forwards rssi and explicit auth_type to /v1/kiosk/smart-auth', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        member_no: '10101',
+        member_name: '이종섭',
+        masked_name: '이*섭',
+        hp: '010-1234-5678',
+        assets: [],
+      }),
+    });
+    global.fetch = mockFetch as any;
+
+    const bleRes = await api.authenticateSmartTag('GOLFOS_MEMBER_10101', -54, 'BLE');
+    expect(bleRes?.member_no).toBe('10101');
+    const [, bleInit] = mockFetch.mock.calls[0];
+    const bleBody = JSON.parse(bleInit.body);
+    expect(bleBody.auth_type).toBe('BLE');
+    expect(bleBody.rssi).toBe(-54);
+    expect(bleBody.token_or_uid).toBe('GOLFOS_MEMBER_10101');
+
+    const qrRes = await api.authenticateSmartTag('10101', undefined, 'QR');
+    expect(qrRes?.member_no).toBe('10101');
+    const [, qrInit] = mockFetch.mock.calls[1];
+    const qrBody = JSON.parse(qrInit.body);
+    expect(qrBody.auth_type).toBe('QR');
+    expect(qrBody.rssi).toBeUndefined();
+  });
 });

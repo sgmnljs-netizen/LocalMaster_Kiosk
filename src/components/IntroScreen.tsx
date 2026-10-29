@@ -10,26 +10,77 @@ interface IntroScreenProps {
   logoUrl?: string;
 }
 
-const DEFAULT_ADS = [
+export interface KioskIntroSlide {
+  type: 'image';
+  url: string;
+  title: string;
+  subtitle?: string | null;
+  tag?: string;
+}
+
+const DEFAULT_ADS: KioskIntroSlide[] = [
   {
     type: 'image',
     url: 'https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=1080&q=80',
     title: 'PREMIUM GOLF CLUB',
-    subtitle: '국내 최고 수준의 프리미엄 프라이빗 GDR 골프 연습장'
+    subtitle: '국내 최고 수준의 프리미엄 프라이빗 GDR 골프 연습장',
+    tag: 'PROMOTION',
   },
   {
     type: 'image',
     url: 'https://images.unsplash.com/photo-1587174486073-ae5e5cff23aa?auto=format&fit=crop&w=1080&q=80',
     title: 'Professional 1:1 Lessons',
-    subtitle: 'KPGA/KLPGA 투어 출신 강사진의 고품격 분석 레슨'
+    subtitle: 'KPGA/KLPGA 투어 출신 강사진의 고품격 분석 레슨',
+    tag: 'PROMOTION',
   },
   {
     type: 'image',
     url: 'https://images.unsplash.com/photo-1593111774240-d529f12cf4bb?auto=format&fit=crop&w=1080&q=80',
     title: 'Smart Unattended Operation',
-    subtitle: '24시간 모바일 앱 및 키오스크 연동 무인 자동화 타석 배정'
+    subtitle: '24시간 모바일 앱 및 키오스크 연동 무인 자동화 타석 배정',
+    tag: 'PROMOTION',
   }
 ];
+
+export function resolveIntroBannerImageUrl(rawUrl: string, baseUrl: string): string {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) return '';
+  if (
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('data:')
+  ) {
+    return trimmed;
+  }
+  const serverOrigin = (baseUrl || '').replace(/\/api\/?$/, '');
+  if (trimmed.startsWith('/')) {
+    return `${serverOrigin}${trimmed}`;
+  }
+  return `${serverOrigin}/${trimmed}`;
+}
+
+export function resolveIntroSlides(
+  hqBanners: KioskIntroSlide[],
+  photoUrl?: string,
+  storeName?: string
+): KioskIntroSlide[] {
+  if (Array.isArray(hqBanners) && hqBanners.length > 0) {
+    return hqBanners;
+  }
+  if (photoUrl && photoUrl.trim().length > 0) {
+    return [
+      {
+        type: 'image',
+        url: photoUrl,
+        title: storeName || 'PREMIUM GOLF CLUB',
+        subtitle: '국내 최고 수준의 프리미엄 골프 아카데미',
+        tag: 'PROMOTION',
+      },
+      ...DEFAULT_ADS.slice(1)
+    ];
+  }
+  return DEFAULT_ADS;
+}
 
 export const IntroScreen: React.FC<IntroScreenProps> = ({
   onStart,
@@ -40,21 +91,71 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
 }) => {
   const [currentAdIdx, setCurrentAdIdx] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
-
-  const slides = React.useMemo(() => {
-    if (photoUrl && photoUrl.trim().length > 0) {
-      return [
-        {
-          type: 'image',
-          url: photoUrl,
-          title: storeName || 'PREMIUM GOLF CLUB',
-          subtitle: '국내 최고 수준의 프리미엄 골프 아카데미'
-        },
-        ...DEFAULT_ADS.slice(1)
-      ];
+  const [hqBanners, setHqBanners] = useState<KioskIntroSlide[]>(() => {
+    try {
+      const storeCd = api.getStoreCd();
+      const cached = localStorage.getItem(`LM_KIOSK_INTRO_BANNERS_${storeCd}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore localStorage parse error
     }
-    return DEFAULT_ADS;
-  }, [photoUrl, storeName]);
+    return [];
+  });
+
+  // 본사(HQ) 파트너센터에서 설정한 키오스크 대기화면 배너(KIOSK_INTRO) 동기화
+  useEffect(() => {
+    let mounted = true;
+    const fetchHqIntroBanners = async () => {
+      try {
+        const storeCd = api.getStoreCd();
+        const baseUrl = api.getBaseUrl();
+        const res = await fetch(
+          `${baseUrl}/v1/kiosk/intro-banners?store_cd=${encodeURIComponent(storeCd)}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!Array.isArray(data) || !mounted) return;
+        const mapped: KioskIntroSlide[] = data
+          .filter((item: any) => item && item.image_url)
+          .map((item: any) => ({
+            type: 'image' as const,
+            url: resolveIntroBannerImageUrl(String(item.image_url), baseUrl),
+            title: String(item.title ?? ''),
+            subtitle: item.subtitle ? String(item.subtitle) : '',
+            tag: String(item.tag || 'PROMOTION'),
+          }));
+        setHqBanners(mapped);
+        localStorage.setItem(
+          `LM_KIOSK_INTRO_BANNERS_${storeCd}`,
+          JSON.stringify(mapped)
+        );
+      } catch {
+        // 오프라인 시 localStorage 캐시 유지
+      }
+    };
+    fetchHqIntroBanners();
+    const bannerTimer = setInterval(fetchHqIntroBanners, 60000);
+    window.addEventListener('kiosk-settings-changed', fetchHqIntroBanners);
+    return () => {
+      mounted = false;
+      clearInterval(bannerTimer);
+      window.removeEventListener('kiosk-settings-changed', fetchHqIntroBanners);
+    };
+  }, []);
+
+  const slides = React.useMemo(
+    () => resolveIntroSlides(hqBanners, photoUrl, storeName),
+    [hqBanners, photoUrl, storeName]
+  );
+
+  useEffect(() => {
+    if (currentAdIdx >= slides.length) {
+      setCurrentAdIdx(0);
+    }
+  }, [slides.length, currentAdIdx]);
 
   // 5초 간격으로 상단 FHD 광고 이미지 슬라이드 롤링
   useEffect(() => {
@@ -79,64 +180,100 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
     <div className="kiosk-container" style={{ position: 'relative' }} onClick={onStart}>
       {/* 1. 상단 FHD 광고 영역 (16:9) */}
       <div className="kiosk-ad-area">
-        {slides.map((ad, idx) => (
-          <div
-            key={idx}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              opacity: idx === currentAdIdx ? 1 : 0,
-              transition: 'opacity 1.2s ease-in-out',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'flex-end',
-              background: `linear-gradient(to top, rgba(10, 12, 16, 0.95) 10%, rgba(10,12,16,0.3) 50%, rgba(0,0,0,0) 100%), url(${ad.url}) center/cover no-repeat`
-            }}
-          >
-            <div style={{ padding: '30px 40px', paddingBottom: '50px', width: '100%' }}>
-              <div 
-                style={{ 
-                  background: 'rgba(10, 12, 16, 0.7)',
-                  backdropFilter: 'blur(24px)',
-                  WebkitBackdropFilter: 'blur(24px)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '24px',
-                  padding: '24px 30px',
-                  width: 'fit-content',
-                  maxWidth: '85%',
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.6)'
-                }}
-              >
-                <div 
-                  style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '10px', 
-                    background: 'rgba(16, 185, 129, 0.08)', 
-                    border: '0.5px solid var(--neon-indigo)',
-                    padding: '6px 16px',
-                    borderRadius: '20px',
-                    width: 'fit-content',
-                    marginBottom: '16px',
-                    backdropFilter: 'blur(8px)'
-                  }}
-                >
-                  <Tv size={16} style={{ color: 'var(--neon-indigo)' }} />
-                  <span style={{ fontSize: '14px', fontWeight: 900, letterSpacing: '2px', color: 'var(--text-secondary)' }}>PROMOTION</span>
+        {slides.map((ad, idx) => {
+          const hideTextOverlay =
+            !ad.title ||
+            ad.title.trim() === '' ||
+            ad.title.trim() === '-' ||
+            ad.title.trim().toUpperCase() === 'NONE';
+          return (
+            <div
+              key={idx}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                opacity: idx === currentAdIdx ? 1 : 0,
+                transition: 'opacity 1.2s ease-in-out',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-end',
+                background: hideTextOverlay
+                  ? `url("${ad.url}") center/cover no-repeat`
+                  : `linear-gradient(to top, rgba(10, 12, 16, 0.95) 10%, rgba(10,12,16,0.3) 50%, rgba(0,0,0,0) 100%), url("${ad.url}") center/cover no-repeat`,
+              }}
+            >
+              {!hideTextOverlay && (
+                <div style={{ padding: '30px 40px', paddingBottom: '50px', width: '100%' }}>
+                  <div
+                    style={{
+                      background: 'rgba(10, 12, 16, 0.7)',
+                      backdropFilter: 'blur(24px)',
+                      WebkitBackdropFilter: 'blur(24px)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '24px',
+                      padding: '24px 30px',
+                      width: 'fit-content',
+                      maxWidth: '85%',
+                      boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        background: 'rgba(16, 185, 129, 0.08)',
+                        border: '0.5px solid var(--neon-indigo)',
+                        padding: '6px 16px',
+                        borderRadius: '20px',
+                        width: 'fit-content',
+                        marginBottom: '16px',
+                        backdropFilter: 'blur(8px)',
+                      }}
+                    >
+                      <Tv size={16} style={{ color: 'var(--neon-indigo)' }} />
+                      <span
+                        style={{
+                          fontSize: '14px',
+                          fontWeight: 900,
+                          letterSpacing: '2px',
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        {ad.tag || 'PROMOTION'}
+                      </span>
+                    </div>
+                    <h2
+                      style={{
+                        fontSize: '36px',
+                        fontWeight: 800,
+                        color: '#fff',
+                        marginBottom: ad.subtitle ? '10px' : '0px',
+                        textShadow: '0 2px 8px rgba(0,0,0,0.8)',
+                      }}
+                    >
+                      {ad.title}
+                    </h2>
+                    {ad.subtitle && (
+                      <p
+                        style={{
+                          fontSize: '18px',
+                          color: 'var(--text-secondary)',
+                          textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+                        }}
+                      >
+                        {ad.subtitle}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <h2 style={{ fontSize: '36px', fontWeight: 800, color: '#fff', marginBottom: '10px', textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
-                  {ad.title}
-                </h2>
-                <p style={{ fontSize: '18px', color: 'var(--text-secondary)', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
-                  {ad.subtitle}
-                </p>
-              </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* 2. 하단 본격 키오스크 터치 유도 영역 */}
@@ -261,11 +398,8 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
             </div>
           )}
           <h1 style={{ fontSize: '64px', letterSpacing: '-2px', color: '#fff', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 900, background: 'linear-gradient(135deg, #ffffff 0%, #a7f3d0 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              골포스
-            </span>
-            <span style={{ fontWeight: 600, color: 'rgba(255, 255, 255, 0.85)' }}>
-              {storeName.includes('골포스') ? storeName.replace('골포스', '').trim() : storeName.includes('로컬마스터') ? storeName.replace('로컬마스터', '').trim() : (storeName || '강남 1호점 (체험관)')}
+            <span style={{ fontWeight: 800, color: '#ffffff', letterSpacing: '-1.5px', textShadow: '0 4px 24px rgba(0,0,0,0.5)' }}>
+              {storeName.replace(/^골포스\s*/, '').replace(/^로컬마스터\s*/, '').trim() || '골프 아카데미'}
             </span>
           </h1>
           <p style={{ fontSize: '24px', color: '#86868b', fontWeight: 600, letterSpacing: '-0.5px', marginTop: '14px' }}>
@@ -328,7 +462,7 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
         </div>
 
         {/* 하단 시스템 스태터스 바 (애플의 차분한 풋터 마감) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', borderTop: '0.5px solid rgba(255, 255, 255, 0.08)', paddingTop: '24px', zIndex: 2 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderTop: '0.5px solid rgba(255, 255, 255, 0.08)', paddingTop: '24px', zIndex: 2 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div 
               style={{ 
@@ -343,18 +477,43 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
             <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 600 }}>
               {isOnline ? 'Cloud Sync Online' : 'Hybrid Edge DB Mode (무중단 가동)'}
             </span>
+            {!isOnline && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ff3b30', marginLeft: '12px' }}>
+                <ShieldAlert size={15} />
+                <span style={{ fontSize: '13px', fontWeight: 700 }}>오프라인 모드 작동 중</span>
+              </div>
+            )}
           </div>
-          {!isOnline && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ff3b30' }}>
-              <ShieldAlert size={15} />
-              <span style={{ fontSize: '13px', fontWeight: 700 }}>오프라인 모드 작동 중</span>
+
+          {/* 우측 GOLFOS SYSTEM & 공식 홈페이지 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '12px', 
+                padding: '10px 22px', 
+                borderRadius: '28px', 
+                background: 'rgba(16, 185, 129, 0.08)', 
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                backdropFilter: 'blur(12px)',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)'
+              }}
+            >
+              <span style={{ fontSize: '22px', fontWeight: 900, letterSpacing: '0.8px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                GOLFOS SYSTEM
+              </span>
+              <span style={{ fontSize: '18px', color: 'rgba(255, 255, 255, 0.25)', fontWeight: 300 }}>|</span>
+              <span style={{ fontSize: '20px', color: 'rgba(255, 255, 255, 0.9)', fontWeight: 700, letterSpacing: '0.4px' }}>
+                www.golfos.co.kr
+              </span>
             </div>
-          )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '15px', color: '#86868b' }}>ID: {api.getTerminalId()}</span>
-            <span style={{ fontSize: '11px', color: '#10b981', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'monospace', fontWeight: 700 }}>
-              {__APP_VERSION__}
-            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>ID: {api.getTerminalId()}</span>
+              <span style={{ fontSize: '11px', color: '#10b981', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '1px 6px', borderRadius: '4px', fontFamily: 'monospace', fontWeight: 700 }}>
+                {__APP_VERSION__}
+              </span>
+            </div>
           </div>
         </div>
       </div>

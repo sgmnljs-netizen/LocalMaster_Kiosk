@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { CheckCircle2, Printer, ArrowRight, CreditCard, Calendar, User, ShoppingBag, ShieldCheck, RefreshCw } from 'lucide-react';
 import { TimeMaster } from '../utils/timeMaster';
 import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
+import { printKioskLockerSlip } from '../utils/kioskSlipPrinter';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { api } from '../services/api';
 
@@ -22,6 +23,7 @@ export interface CompletedPurchaseInfo {
   totalCount?: number;
   logicType?: string;
   purchaseType?: 'MEMBERSHIP' | 'LOCKER' | 'PRODUCT';
+  lockerNo?: number | string;
   cardIssuer?: string;
   cardNoMasked?: string;
   terminalId?: string;
@@ -63,6 +65,28 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
   const storeName = settings.deviceName || '골포스 스마트 키오스크';
   const autoPrintReceipt = settings.autoPrintReceipt ?? true;
 
+  // 오늘 날짜 및 유효기간 계산 (TimeMaster SSOT 적용 — 무기한 횟수권은 30일 강제 합성 금지)
+  const ONE_DAY_MS = 86400000;
+  const todayStr = TimeMaster.getKstYmd(new Date());
+  const startDate = propStartDate || purchaseInfo.startDate || todayStr;
+  const rawEndDate = propEndDate ?? purchaseInfo.endDate;
+  const isUnlimitedCountOrLesson =
+    (['COUNT', 'COUPON', 'LESSON'].includes(String(purchaseInfo.logicType || '').toUpperCase()) ||
+      (purchaseInfo.totalCount !== undefined && purchaseInfo.totalCount > 0)) &&
+    (!purchaseInfo.days || purchaseInfo.days <= 0);
+  const computedFallbackEnd =
+    purchaseInfo.days && purchaseInfo.days > 0
+      ? TimeMaster.getKstYmd(new Date(Date.now() + (purchaseInfo.days - 1) * ONE_DAY_MS))
+      : isUnlimitedCountOrLesson
+        ? null
+        : TimeMaster.getKstYmd(new Date(Date.now() + 30 * ONE_DAY_MS));
+  const endDate = rawEndDate || computedFallbackEnd;
+  const countBadgeSuffix =
+    purchaseInfo.totalCount && purchaseInfo.totalCount > 0 ? ` (총 ${purchaseInfo.totalCount}회)` : '';
+  const periodDisplayStr = endDate
+    ? `${startDate} ~ ${endDate}${countBadgeSuffix}`
+    : `${startDate} ~ 무기한${countBadgeSuffix || ' (횟수 소진 시까지)'}`;
+
   useEffect(() => {
     api.getStoreInfo().then((info) => {
       if (info) setStoreInfo(info);
@@ -88,19 +112,25 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
       const info = storeInfo || (await api.getStoreInfo().catch(() => null));
       if (info && !storeInfo) setStoreInfo(info);
 
+      const resolvedStoreInfo = {
+        store_name: info?.store_nm || storeName,
+        biz_no: (info as any)?.biz_no || (info as any)?.biz_reg_no || '',
+        ceo_name: (info as any)?.ceo_name || (info as any)?.owner_name || '',
+        tel: info?.tel || '',
+        address: info?.address || '',
+      };
+
+      const tradeDtStr = purchaseInfo?.tradeDate || TimeMaster.formatKstDateTime(new Date());
+
       const res = await kioskHardwareBridge.printReceipt({
         sale_id: `SALE-${safeApprNo}`,
         receipt_no: `RC-${safeApprNo.slice(-6)}`,
-        trade_dt: purchaseInfo?.tradeDate || TimeMaster.formatKstDateTime(new Date()),
+        trade_dt: tradeDtStr,
+        client_type: 'KIOSK',
         member_name: purchaseInfo?.memberName || '비회원',
-        pay_method: totalAmt > 0 ? 'CARD' : 'SERVICE',
-        store_info: {
-          store_name: info?.store_nm || storeName,
-          biz_no: (info as any)?.biz_no || (info as any)?.biz_reg_no || '',
-          ceo_name: (info as any)?.ceo_name || (info as any)?.owner_name || '',
-          tel: info?.tel || '',
-          address: info?.address || '',
-        },
+        member_no: purchaseInfo?.memberNo,
+        pay_method: totalAmt > 0 ? 'CARD' : 'POINT',
+        store_info: resolvedStoreInfo,
         items: [
           {
             name: purchaseInfo?.productName || '이용권',
@@ -127,14 +157,36 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
           terminal_id: purchaseInfo?.terminalId || settings.terminalId || api.getTerminalId(),
         } : undefined,
         barcode_text: `PUR-${safeApprNo}`,
-        footer_message: '키오스크 결제가 완료되었습니다. (주차 2시간 무료)',
+        footer_message: `유효기간: ${periodDisplayStr}\n키오스크 결제가 완료되었습니다.`,
       });
 
-      setPrintStatus(res.success ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
+      let lockerSlipOk = true;
+      if (purchaseInfo?.purchaseType === 'LOCKER') {
+        const extractedLockerNo =
+          purchaseInfo.lockerNo ||
+          (purchaseInfo.productName ? purchaseInfo.productName.replace(/[^0-9]/g, '') : '') ||
+          '-';
+        const lockerRes = await printKioskLockerSlip({
+          lockerNo: extractedLockerNo,
+          memberName: purchaseInfo.memberName,
+          memberNo: purchaseInfo.memberNo,
+          productName: purchaseInfo.productName,
+          actionLabel: '라카 대여/연장',
+          startDate,
+          endDate: endDate || undefined,
+          days: purchaseInfo.days,
+          storeInfo: resolvedStoreInfo,
+          tradeDt: tradeDtStr,
+        });
+        lockerSlipOk = lockerRes.success;
+      }
+
+      const finalOk = res.success && lockerSlipOk;
+      setPrintStatus(finalOk ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
     } finally {
       setIsPrinting(false);
     }
-  }, [purchaseInfo, propOriginalAmount, propDiscountAmount, propUsedPoints, propVatYn, storeName, storeInfo, settings.terminalId, lang]);
+  }, [purchaseInfo, propOriginalAmount, propDiscountAmount, propUsedPoints, propVatYn, storeName, storeInfo, settings.terminalId, lang, periodDisplayStr, startDate, endDate]);
 
   useEffect(() => {
     if (autoPrintReceipt && !hasAutoPrintedRef.current) {
@@ -164,27 +216,6 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
     };
   }, [onClose, isPrinting]);
 
-  // 오늘 날짜 및 유효기간 계산 (TimeMaster SSOT 적용 — 무기한 횟수권은 30일 강제 합성 금지)
-  const ONE_DAY_MS = 86400000;
-  const todayStr = TimeMaster.getKstYmd(new Date());
-  const startDate = propStartDate || purchaseInfo.startDate || todayStr;
-  const rawEndDate = propEndDate ?? purchaseInfo.endDate;
-  const isUnlimitedCountOrLesson =
-    (['COUNT', 'COUPON', 'LESSON'].includes(String(purchaseInfo.logicType || '').toUpperCase()) ||
-      (purchaseInfo.totalCount !== undefined && purchaseInfo.totalCount > 0)) &&
-    (!purchaseInfo.days || purchaseInfo.days <= 0);
-  const computedFallbackEnd =
-    purchaseInfo.days && purchaseInfo.days > 0
-      ? TimeMaster.getKstYmd(new Date(Date.now() + (purchaseInfo.days - 1) * ONE_DAY_MS))
-      : isUnlimitedCountOrLesson
-        ? null
-        : TimeMaster.getKstYmd(new Date(Date.now() + 30 * ONE_DAY_MS));
-  const endDate = rawEndDate || computedFallbackEnd;
-  const countBadgeSuffix =
-    purchaseInfo.totalCount && purchaseInfo.totalCount > 0 ? ` (총 ${purchaseInfo.totalCount}회)` : '';
-  const periodDisplayStr = endDate
-    ? `${startDate} ~ ${endDate}${countBadgeSuffix}`
-    : `${startDate} ~ 무기한${countBadgeSuffix || ' (횟수 소진 시까지)'}`;
   const isPrinterOffline = !isPrinting && (printStatus === '프린터 미연결' || printStatus === 'Printer Offline');
 
   return (

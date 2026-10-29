@@ -15,24 +15,24 @@ const TRANSLATIONS = {
     subWelcome: '터치 한 번으로 빠르게 회원인증 및 타석을 배정받으실 수 있습니다.',
     recommend: '가장 빠른 예약',
     practiceTeebox: '연습타석 배정',
-    practiceTeeboxSub: '보유 중인 회원 이용권(기간제/횟수제) 또는 일일 타석권을 배정받아 연습을 시작합니다.',
+    practiceTeeboxSub: '보유 중인 회원권 또는 일일 타석권을 배정받아 연습을 시작합니다.',
     par3Course: '파3 코스 배정',
     par3CourseSub: '천연 잔디 파3 연습 라운딩 코스를 간편하게 예약하고 배정받습니다.',
     purchaseMembership: '회원권/상품 구매',
-    purchaseMembershipSub: '1개월/3개월 종일 회원권 등 정기 회원권을 신규 결제 구매합니다.',
+    purchaseMembershipSub: '1개월/3개월 정기 회원권 및 횟수권 상품을 신규 구매합니다.',
     moveBay: '타석 이동',
-    moveBaySub: '현재 이용 중인 타석의 위치를 다른 비어있는 빈 타석으로 변경합니다.',
+    moveBaySub: '현재 이용 중인 타석을 다른 비어있는 빈 타석으로 즉시 변경합니다.',
     lockerExtend: '라카 대여/연장',
     lockerExtendSub: '이용 중인 개인 사물함(라카)의 만료 기간을 즉시 연장 결제합니다.',
     signUp: '회원가입',
-    signUpSub: '아직 회원이 아니신가요? 간편하게 신규 즉석 회원가입 후 혜택을 받아보세요.',
+    signUpSub: '휴대폰 번호로 3초 만에 간편 등록 후 즉시 타석을 배정받으세요.',
   },
   EN: {
     welcome: 'Please select a service',
     subWelcome: 'Quickly authenticate and assign your teebox with a single touch.',
     recommend: 'FASTEST BOOKING',
     practiceTeebox: 'Practice Teebox',
-    practiceTeeboxSub: 'Assign your teebox instantly using active membership Pass or Daily ticket.',
+    practiceTeeboxSub: 'Assign your teebox instantly using active membership pass or daily ticket.',
     par3Course: 'Par-3 Course Booking',
     par3CourseSub: 'Quickly reserve and get assigned for natural grass Par-3 practice roundings.',
     purchaseMembership: 'Purchase Pass',
@@ -136,40 +136,54 @@ export default function KioskMainDashboard({
       !(effectiveOnCheckin && m.menu_id === 'CHECKIN')
   );
 
-  // 서브 메뉴별 전용 3D 스쿼클 테마 컬러 매핑
+  // 서브 메뉴별 전용 3D 스쿼클 테마 컬러 및 액션 문구 매핑
   const getSubMenuTheme = (menuId: string) => {
+    const memberOnlyBadge = {
+      badgeText: lang === 'KO' ? '👤 회원전용' : '👤 MEMBER ONLY',
+      badgeColor: '#334155',
+      badgeBg: '#f1f5f9',
+      badgeBorder: '1px solid #cbd5e1',
+    };
+
     switch (menuId) {
       case 'PAR3':
         return {
           iconBg: 'linear-gradient(145deg, #059669 0%, #047857 100%)',
           iconColor: '#ffffff',
           border: '1px solid rgba(52, 211, 153, 0.4)',
-          badgeText: '⛳ BEST 야외 코스'
+          badgeText: lang === 'KO' ? '⛳ BEST 야외 코스' : '⛳ PAR-3 COURSE',
+          badgeColor: '#ffffff',
+          badgeBg: 'rgba(255, 255, 255, 0.2)',
+          badgeBorder: '1px solid rgba(255, 255, 255, 0.35)',
+          actionLabel: lang === 'KO' ? '파3 배정하기' : 'Book Par 3',
         };
       case 'PURCHASE_PRODUCT':
       case 'PRODUCTS':
       case 'MEMBERSHIP':
         return {
-          iconBg: 'linear-gradient(145deg, #eff6ff 0%, #dbeafe 100%)',
+          iconBg: 'linear-gradient(145deg, #dbeafe 0%, #bfdbfe 100%)',
           iconColor: '#0071e3',
-          border: '1px solid rgba(0, 113, 227, 0.15)',
-          badgeText: ''
+          border: '1px solid rgba(0, 113, 227, 0.2)',
+          ...memberOnlyBadge,
+          actionLabel: lang === 'KO' ? '상품 구매하기' : 'Purchase Pass',
         };
       case 'LOCKER':
         return {
-          iconBg: 'linear-gradient(145deg, #fffbeb 0%, #fef3c7 100%)',
+          iconBg: 'linear-gradient(145deg, #fef3c7 0%, #fde68a 100%)',
           iconColor: '#d97706',
-          border: '1px solid rgba(217, 119, 6, 0.15)',
-          badgeText: ''
+          border: '1px solid rgba(217, 119, 6, 0.22)',
+          ...memberOnlyBadge,
+          actionLabel: lang === 'KO' ? '라카 연장하기' : 'Extend Locker',
         };
       case 'MOVE_BAY':
       case 'CHANGE_BAY':
       default:
         return {
-          iconBg: 'linear-gradient(145deg, #ecfeff 0%, #cffafe 100%)',
+          iconBg: 'linear-gradient(145deg, #cffafe 0%, #a5f3fc 100%)',
           iconColor: '#0891b2',
-          border: '1px solid rgba(8, 145, 178, 0.15)',
-          badgeText: ''
+          border: '1px solid rgba(8, 145, 178, 0.22)',
+          ...memberOnlyBadge,
+          actionLabel: lang === 'KO' ? '타석 이동하기' : 'Change Teebox',
         };
     }
   };
@@ -180,24 +194,25 @@ export default function KioskMainDashboard({
         display: 'flex', 
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '24px',
-        justifyContent: 'center',
+        gap: '20px',
+        justifyContent: 'space-between',
         width: '100%',
-        padding: '10px 20px 30px 20px'
+        flex: 1,
+        padding: '4px 10px 10px 10px'
       }}
     >
-      {/* 헤더 섹션: Apple SF Pro Display Typography */}
-      <div className="animate-fade-up" style={{ textAlign: 'center', margin: '4px 0 6px 0', animationDelay: '0.1s' }}>
-        <h2 style={{ fontSize: '40px', fontWeight: 950, color: '#1d1d1f', marginBottom: '8px', letterSpacing: '-1.5px' }}>
+      {/* 헤더 섹션: Windows ClearType 최적화 고선명 대형 타이포그래피 */}
+      <div className="animate-fade-up" style={{ textAlign: 'center', margin: '2px 0 4px 0', animationDelay: '0.1s' }}>
+        <h2 style={{ fontSize: '46px', fontWeight: 800, color: '#111827', marginBottom: '8px', letterSpacing: '-1px', lineHeight: 1.2 }}>
           {t.welcome}
         </h2>
-        <p style={{ fontSize: '18px', color: '#86868b', fontWeight: 600, letterSpacing: '-0.3px' }}>
+        <p style={{ fontSize: '23px', color: '#4b5563', fontWeight: 600, letterSpacing: '-0.3px', margin: 0 }}>
           {t.subWelcome}
         </p>
       </div>
 
-      {/* 🍱 2026 Tactile Depth Bento Box Grid */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', maxWidth: '1040px' }}>
+      {/* 🍱 2026 High-Visibility Kiosk Bento Box Grid */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', maxWidth: '1040px', flex: 1, justifyContent: 'space-between' }}>
         
         {/* Row 1: 2대 메인 히어로 (좌측: 예약 타석 체크인 / 우측: 1순위 연습타석 배정) */}
         {(effectiveOnCheckin || heroMenu) && (
@@ -210,20 +225,20 @@ export default function KioskMainDashboard({
               gap: '20px' 
             }}
           >
-            {/* 📌 좌측: 예약 타석 체크인 (더 깊고 묵직한 딥 볼드 포레스트 그린 패널) */}
+            {/* 📌 좌측: 예약 타석 체크인 (딥 포레스트 그린 패널) */}
             {effectiveOnCheckin && (
               <div
                 onClick={effectiveOnCheckin}
                 style={{
-                  height: '255px',
+                  minHeight: '295px',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
                   background: 'linear-gradient(145deg, #064e3b 0%, #022c22 100%)',
-                  borderRadius: '28px',
-                  padding: '28px',
-                  border: '1.5px solid rgba(16, 185, 129, 0.4)',
-                  boxShadow: '0 16px 36px rgba(2, 44, 34, 0.3), inset 0 1px 1.5px rgba(255, 255, 255, 0.25)',
+                  borderRadius: '30px',
+                  padding: '30px 32px',
+                  border: '1.5px solid rgba(16, 185, 129, 0.45)',
+                  boxShadow: '0 16px 36px rgba(2, 44, 34, 0.28), inset 0 1px 1.5px rgba(255, 255, 255, 0.25)',
                   cursor: 'pointer',
                   position: 'relative',
                   overflow: 'hidden',
@@ -234,68 +249,68 @@ export default function KioskMainDashboard({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span 
                     style={{ 
-                      fontSize: '12px', 
-                      fontWeight: 900, 
+                      fontSize: '17px', 
+                      fontWeight: 800, 
                       background: 'rgba(16, 185, 129, 0.25)', 
                       color: '#6ee7b7', 
-                      padding: '5px 12px', 
+                      padding: '7px 16px', 
                       borderRadius: '999px',
-                      letterSpacing: '0.3px',
-                      border: '0.5px solid rgba(16, 185, 129, 0.45)'
+                      letterSpacing: '-0.2px',
+                      border: '1px solid rgba(16, 185, 129, 0.45)'
                     }}
                   >
-                    📌 QUICK CHECK-IN
+                    📌 {lang === 'KO' ? '모바일 예약 회원' : 'MOBILE BOOKING'}
                   </span>
-                  <div style={{ width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '50%' }}>
-                    <Play size={18} fill="#ffffff" strokeWidth={0} style={{ color: '#ffffff', marginLeft: '2px' }} />
+                  <div style={{ width: '52px', height: '52px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255, 255, 255, 0.14)', borderRadius: '50%' }}>
+                    <Play size={24} fill="#ffffff" strokeWidth={0} style={{ color: '#ffffff', marginLeft: '2px' }} />
                   </div>
                 </div>
 
                 <div>
-                  <h3 style={{ fontSize: '28px', fontWeight: 950, color: '#ffffff', margin: '0 0 6px 0', letterSpacing: '-0.8px' }}>
+                  <h3 style={{ fontSize: '40px', fontWeight: 800, color: '#ffffff', margin: '0 0 8px 0', letterSpacing: '-0.8px', lineHeight: 1.2 }}>
                     {lang === 'KO' ? '예약 타석 체크인' : 'Reservation Check-in'}
                   </h3>
-                  <p style={{ fontSize: '14px', color: '#a7f3d0', margin: '0 0 16px 0', lineHeight: 1.4, fontWeight: 500 }}>
-                    {lang === 'KO' ? '사전 예약하신 분은 본인 인증 후 체크인을 완료하세요.' : 'Check-in quickly with member verification.'}
+                  <p style={{ fontSize: '20px', color: '#d1fae5', margin: '0 0 20px 0', lineHeight: 1.4, fontWeight: 600, letterSpacing: '-0.5px', wordBreak: 'keep-all' }}>
+                    {lang === 'KO' ? '회원권으로 모바일 예약하신 분은 체크인이 필요합니다.' : 'Check-in required for mobile app reservations.'}
                   </p>
 
-                  {/* 퓨어 화이트 필 액션 버튼 */}
+                  {/* 퓨어 화이트 필 액션 버튼 (특대형) */}
                   <div 
                     style={{
-                      height: '46px',
+                      height: '62px',
                       borderRadius: '999px',
                       background: '#ffffff',
                       color: '#022c22',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '8px',
-                      fontWeight: 950,
-                      fontSize: '15px',
-                      boxShadow: '0 3px 12px rgba(0, 0, 0, 0.25)',
-                      letterSpacing: '-0.3px'
+                      gap: '10px',
+                      fontWeight: 800,
+                      fontSize: '23px',
+                      boxShadow: '0 4px 14px rgba(0, 0, 0, 0.25)',
+                      letterSpacing: '-0.4px'
                     }}
                   >
                     <span>{lang === 'KO' ? '체크인 시작하기' : 'Start Check-in'}</span>
-                    <span style={{ fontSize: '16px' }}>→</span>
+                    <span style={{ fontSize: '24px', fontWeight: 900 }}>→</span>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* 🎯 우측: 1순위 메인! 연습타석 배정 (압도적인 애플 스페이스 블랙 럭셔리 패널) */}
+            {/* 🎯 우측: 1순위 메인! 연습타석 배정 (애플 스페이스 블랙 패널) */}
             {heroMenu && (
               <div
                 onClick={() => handleCardClick(heroMenu.menu_id, heroMenu.zone_ids || [])}
                 style={{
-                  height: '255px',
+                  minHeight: '295px',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
-                  background: 'linear-gradient(145deg, #1f1f21 0%, #161617 100%)',
-                  borderRadius: '28px',
-                  padding: '28px',
-                  border: '1.5px solid rgba(255, 255, 255, 0.16)',
+                  background: 'linear-gradient(145deg, #1f1f21 0%, #141415 100%)',
+                  borderRadius: '30px',
+                  padding: '30px 32px',
+                  border: '1.5px solid rgba(255, 255, 255, 0.18)',
                   boxShadow: '0 16px 36px rgba(0, 0, 0, 0.25), inset 0 1px 1.5px rgba(255, 255, 255, 0.25)',
                   cursor: 'pointer',
                   position: 'relative',
@@ -307,51 +322,51 @@ export default function KioskMainDashboard({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span 
                     style={{ 
-                      fontSize: '12px', 
-                      fontWeight: 950, 
-                      background: 'rgba(255, 255, 255, 0.15)', 
+                      fontSize: '17px', 
+                      fontWeight: 800, 
+                      background: 'rgba(255, 255, 255, 0.16)', 
                       color: '#ffffff', 
-                      padding: '5px 12px', 
+                      padding: '7px 16px', 
                       borderRadius: '999px', 
-                      letterSpacing: '0.3px', 
-                      border: '1px solid rgba(255, 255, 255, 0.25)',
+                      letterSpacing: '-0.2px', 
+                      border: '1px solid rgba(255, 255, 255, 0.28)',
                       boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)'
                     }}
                   >
                     ⚡ {lang === 'KO' ? '빠른 타석 배정' : 'FAST ASSIGN'}
                   </span>
-                  <div style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255, 255, 255, 0.12)', borderRadius: '50%' }}>
-                    <Target size={22} strokeWidth={2.6} style={{ color: '#ffffff' }} />
+                  <div style={{ width: '52px', height: '52px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255, 255, 255, 0.14)', borderRadius: '50%' }}>
+                    <Target size={28} strokeWidth={2.5} style={{ color: '#ffffff' }} />
                   </div>
                 </div>
 
                 <div>
-                  <h3 style={{ fontSize: '30px', fontWeight: 950, color: '#ffffff', margin: '0 0 6px 0', letterSpacing: '-0.8px' }}>
+                  <h3 style={{ fontSize: '40px', fontWeight: 800, color: '#ffffff', margin: '0 0 8px 0', letterSpacing: '-0.8px', lineHeight: 1.2 }}>
                     {heroMenu.menu_name || t.practiceTeebox}
                   </h3>
-                  <p style={{ fontSize: '14px', color: '#a1a1a6', margin: '0 0 16px 0', lineHeight: 1.4, fontWeight: 500 }}>
+                  <p style={{ fontSize: '20px', color: '#e5e7eb', margin: '0 0 20px 0', lineHeight: 1.4, fontWeight: 600, letterSpacing: '-0.5px', wordBreak: 'keep-all' }}>
                     {heroMenu.description || t.practiceTeeboxSub}
                   </p>
 
-                  {/* 🌟 1순위 퓨어 화이트 필 액션 버튼 */}
+                  {/* 🌟 1순위 퓨어 화이트 필 액션 버튼 (특대형) */}
                   <div 
                     style={{
-                      height: '46px',
+                      height: '62px',
                       borderRadius: '999px',
                       background: '#ffffff',
                       color: '#000000',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '8px',
-                      fontWeight: 950,
-                      fontSize: '16px',
+                      gap: '10px',
+                      fontWeight: 800,
+                      fontSize: '23px',
                       boxShadow: '0 4px 14px rgba(0, 0, 0, 0.25)',
-                      letterSpacing: '-0.3px'
+                      letterSpacing: '-0.4px'
                     }}
                   >
                     <span>{lang === 'KO' ? '타석 배정하기' : 'Allocate Teebox'}</span>
-                    <span style={{ fontSize: '18px', fontWeight: 950 }}>→</span>
+                    <span style={{ fontSize: '24px', fontWeight: 900 }}>→</span>
                   </div>
                 </div>
               </div>
@@ -359,7 +374,7 @@ export default function KioskMainDashboard({
           </div>
         )}
 
-        {/* Row 2: 2x2 서브 카드 (2.5D 강화유리 림라이트 + 3D 스쿼클 아이콘 + 마이크로 버튼) */}
+        {/* Row 2: 2x2 서브 카드 (4개 카드 모두 대형 타이틀 34px + 설명 19px + 56px 풀바 버튼 통일) */}
         {gridSubMenus.length > 0 && (
           <div 
             className="animate-fade-up" 
@@ -380,133 +395,93 @@ export default function KioskMainDashboard({
                   key={menu.menu_id || index}
                   onClick={() => handleCardClick(menu.menu_id, menu.zone_ids || [])}
                   style={{
-                    height: '215px',
+                    minHeight: '262px',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
-                    padding: '24px 26px',
+                    padding: '26px 30px',
                     background: isPar3 
                       ? 'linear-gradient(145deg, #059669 0%, #047857 50%, #064e3b 100%)' 
                       : '#ffffff',
-                    borderRadius: '24px',
+                    borderRadius: '28px',
                     border: isPar3 
-                      ? '1.5px solid rgba(52, 211, 153, 0.4)' 
-                      : '1px solid rgba(0, 0, 0, 0.06)',
+                      ? '1.5px solid rgba(52, 211, 153, 0.45)' 
+                      : '1.5px solid rgba(0, 0, 0, 0.08)',
                     boxShadow: isPar3 
                       ? '0 14px 32px rgba(6, 78, 59, 0.22), inset 0 1px 1.5px rgba(255, 255, 255, 0.3)' 
-                      : '0 6px 20px rgba(0, 0, 0, 0.025), inset 0 1px 1.5px rgba(255, 255, 255, 0.9), 0 1px 3px rgba(0, 0, 0, 0.04)',
+                      : '0 8px 24px rgba(0, 0, 0, 0.04), inset 0 1px 1.5px rgba(255, 255, 255, 0.9)',
                     cursor: 'pointer',
                     transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
                   }}
                   className="apple-card-hover"
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    {/* 3D 스쿼클 아이콘 타일 */}
+                    {/* 3D 스쿼클 아이콘 타일 (60x60px 대형화) */}
                     <div 
                       style={{ 
-                        width: '46px', 
-                        height: '46px', 
+                        width: '60px', 
+                        height: '60px', 
                         display: 'flex', 
                         alignItems: 'center', 
                         justifyContent: 'center', 
                         background: isPar3 ? 'rgba(255, 255, 255, 0.18)' : theme.iconBg, 
-                        borderRadius: '14px',
-                        border: isPar3 ? '1px solid rgba(255, 255, 255, 0.3)' : theme.border,
+                        borderRadius: '18px',
+                        border: isPar3 ? '1px solid rgba(255, 255, 255, 0.35)' : theme.border,
                         boxShadow: isPar3 
                           ? '0 3px 8px rgba(0, 0, 0, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.4)' 
-                          : '0 2px 6px rgba(0, 0, 0, 0.04), inset 0 1px 1px rgba(255, 255, 255, 0.6)'
+                          : '0 3px 8px rgba(0, 0, 0, 0.05), inset 0 1px 1px rgba(255, 255, 255, 0.7)'
                       }}
                     >
-                      <IconComp size={22} strokeWidth={2.4} style={{ color: isPar3 ? '#ffffff' : theme.iconColor }} />
+                      <IconComp size={30} strokeWidth={2.4} style={{ color: isPar3 ? '#ffffff' : theme.iconColor }} />
                     </div>
 
-                    {isPar3 ? (
+                    {theme.badgeText && (
                       <span 
                         style={{ 
-                          fontSize: '12px', 
-                          fontWeight: 900, 
-                          color: '#ffffff', 
-                          background: 'rgba(255, 255, 255, 0.2)', 
-                          padding: '5px 12px', 
+                          fontSize: '16px', 
+                          fontWeight: 800, 
+                          color: theme.badgeColor, 
+                          background: theme.badgeBg, 
+                          padding: '6px 14px', 
                           borderRadius: '999px', 
-                          letterSpacing: '0.3px',
-                          border: '0.5px solid rgba(255, 255, 255, 0.35)' 
+                          letterSpacing: '-0.2px',
+                          border: (theme as any).badgeBorder || (isPar3 ? '1px solid rgba(255, 255, 255, 0.35)' : theme.border)
                         }}
                       >
-                        ⛳ BEST 야외 코스
+                        {theme.badgeText}
                       </span>
-                    ) : (
-                      theme.badgeText && (
-                        <span 
-                          style={{ 
-                            fontSize: '12px', 
-                            fontWeight: 800, 
-                            color: '#059669', 
-                            background: 'rgba(5, 150, 105, 0.08)', 
-                            padding: '4px 10px', 
-                            borderRadius: '999px', 
-                            border: '1px solid rgba(5, 150, 105, 0.15)' 
-                          }}
-                        >
-                          {theme.badgeText}
-                        </span>
-                      )
                     )}
                   </div>
 
                   <div>
-                    <h3 style={{ fontSize: '24px', fontWeight: 950, color: isPar3 ? '#ffffff' : '#1d1d1f', marginBottom: '4px', letterSpacing: '-0.5px' }}>
+                    <h3 style={{ fontSize: '34px', fontWeight: 800, color: isPar3 ? '#ffffff' : '#111827', marginBottom: '6px', letterSpacing: '-0.6px', lineHeight: 1.2 }}>
                       {menu.menu_name}
                     </h3>
-                    <p style={{ fontSize: '13px', color: isPar3 ? '#a7f3d0' : '#86868b', fontWeight: isPar3 ? 500 : 600, lineHeight: 1.4, margin: '0 0 12px 0' }}>
+                    <p style={{ fontSize: '19px', color: isPar3 ? '#d1fae5' : '#4b5563', fontWeight: 600, lineHeight: 1.4, margin: '0 0 16px 0', letterSpacing: '-0.3px', wordBreak: 'keep-all' }}>
                       {menu.description}
                     </p>
 
-                    {/* 액션 버튼 */}
-                    {isPar3 ? (
-                      /* 🌟 파3 전용 대형 퓨어 화이트 필 액션 버튼 */
-                      <div 
-                        style={{ 
-                          height: '42px',
-                          borderRadius: '999px',
-                          background: '#ffffff',
-                          color: '#064e3b', 
-                          display: 'flex',
-                          alignItems: 'center', 
-                          justifyContent: 'center',
-                          gap: '6px', 
-                          fontWeight: 950, 
-                          fontSize: '14px',
-                          boxShadow: '0 3px 10px rgba(0, 0, 0, 0.18)',
-                          letterSpacing: '-0.3px'
-                        }}
-                      >
-                        <span>{lang === 'KO' ? '파3 배정하기' : 'Book Par 3'}</span>
-                        <span style={{ fontSize: '16px', fontWeight: 950 }}>→</span>
-                      </div>
-                    ) : (
-                      /* 일반 서브 슬릭 마이크로 알약 버튼 */
-                      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                        <div 
-                          style={{ 
-                            display: 'inline-flex',
-                            alignItems: 'center', 
-                            gap: '4px', 
-                            background: '#f5f5f7',
-                            color: '#1d1d1f', 
-                            padding: '5px 12px',
-                            borderRadius: '999px',
-                            fontWeight: 800, 
-                            fontSize: '13px',
-                            border: '1px solid rgba(0, 0, 0, 0.04)',
-                            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.02)'
-                          }}
-                        >
-                          <span>{lang === 'KO' ? '바로가기' : 'Explore'}</span>
-                          <span style={{ fontSize: '14px', marginLeft: '2px' }}>›</span>
-                        </div>
-                      </div>
-                    )}
+                    {/* 통일된 56px 대형 액션 필 버튼 */}
+                    <div 
+                      style={{ 
+                        height: '56px',
+                        borderRadius: '999px',
+                        background: isPar3 ? '#ffffff' : '#f3f4f6',
+                        color: isPar3 ? '#064e3b' : '#111827', 
+                        border: isPar3 ? 'none' : '1px solid rgba(0, 0, 0, 0.08)',
+                        display: 'flex',
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        gap: '8px', 
+                        fontWeight: 800, 
+                        fontSize: '20px',
+                        boxShadow: isPar3 ? '0 3px 10px rgba(0, 0, 0, 0.18)' : '0 2px 6px rgba(0, 0, 0, 0.03)',
+                        letterSpacing: '-0.3px'
+                      }}
+                    >
+                      <span>{theme.actionLabel}</span>
+                      <span style={{ fontSize: '21px', fontWeight: 900 }}>→</span>
+                    </div>
                   </div>
                 </div>
               );
@@ -514,84 +489,84 @@ export default function KioskMainDashboard({
           </div>
         )}
 
-        {/* Row 3: 하단 독립형 플로팅 신규 회원가입 배너 (is_active ON일 때만 노출, 메뉴명/설명 동적 바인딩) */}
+        {/* Row 3: 하단 독립형 플로팅 신규 회원가입 배너 (124px 대형화 + 딥 차콜 반전 버튼) */}
         {signupMenu && (
           <div 
             className="animate-fade-up apple-card-hover"
             onClick={() => handleCardClick(signupMenu.menu_id, signupMenu.zone_ids || [])}
             style={{ 
               animationDelay: '0.4s',
-              height: '96px',
+              minHeight: '124px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              padding: '0 32px',
-              background: 'linear-gradient(145deg, #ffffff 0%, #fbfbfc 100%)',
-              borderRadius: '26px',
-              border: '1px solid rgba(0, 0, 0, 0.08)',
-              boxShadow: '0 10px 28px rgba(0, 0, 0, 0.035), inset 0 1px 1.5px rgba(255, 255, 255, 0.9), 0 1px 3px rgba(0, 0, 0, 0.04)',
+              padding: '20px 34px',
+              background: '#ffffff',
+              borderRadius: '28px',
+              border: '1.5px solid rgba(0, 0, 0, 0.09)',
+              boxShadow: '0 10px 28px rgba(0, 0, 0, 0.04), inset 0 1px 1.5px rgba(255, 255, 255, 0.9)',
               cursor: 'pointer'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
               <div 
                 style={{ 
-                  width: '52px', 
-                  height: '52px', 
-                  borderRadius: '16px', 
-                  background: 'linear-gradient(145deg, #f5f5f7 0%, #e5e5ea 100%)', 
+                  width: '66px', 
+                  height: '66px', 
+                  borderRadius: '20px', 
+                  background: 'linear-gradient(145deg, #eff6ff 0%, #dbeafe 100%)', 
                   display: 'flex', 
                   alignItems: 'center', 
                   justifyContent: 'center',
-                  border: '1px solid rgba(0, 0, 0, 0.06)',
-                  boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04), inset 0 1px 1px rgba(255, 255, 255, 0.8)'
+                  border: '1px solid rgba(0, 113, 227, 0.2)',
+                  boxShadow: '0 3px 8px rgba(0, 113, 227, 0.08)'
                 }}
               >
-                <UserPlus size={26} strokeWidth={2.4} style={{ color: '#1d1d1f' }} />
+                <UserPlus size={34} strokeWidth={2.4} style={{ color: '#0071e3' }} />
               </div>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
-                  <span style={{ fontSize: '20px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
-                    {lang === 'KO' ? (signupMenu.menu_name || '신규 회원이신가요?') : 'New Member?'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '30px', fontWeight: 800, color: '#111827', letterSpacing: '-0.6px' }}>
+                    {lang === 'KO' ? (signupMenu.menu_name || '신규 회원가입') : 'New Member Sign Up'}
                   </span>
                   <span 
                     style={{ 
-                      fontSize: '11px', 
-                      fontWeight: 900, 
+                      fontSize: '16px', 
+                      fontWeight: 800, 
                       color: '#0071e3', 
-                      background: 'rgba(0, 113, 227, 0.08)', 
-                      padding: '3px 8px', 
+                      background: 'rgba(0, 113, 227, 0.1)', 
+                      padding: '5px 12px', 
                       borderRadius: '999px',
-                      border: '1px solid rgba(0, 113, 227, 0.15)'
+                      border: '1px solid rgba(0, 113, 227, 0.2)'
                     }}
                   >
                     {lang === 'KO' ? '⚡ 3초 간편등록' : 'Quick Join'}
                   </span>
                 </div>
-                <p style={{ fontSize: '14px', color: '#86868b', fontWeight: 600, margin: 0 }}>
-                  {lang === 'KO' ? (signupMenu.description || '휴대폰 번호로 3초 만에 간편 등록 후 즉시 타석을 배정받으세요.') : 'Register in 3 seconds to assign your teebox.'}
+                <p style={{ fontSize: '19px', color: '#4b5563', fontWeight: 600, margin: 0 }}>
+                  {lang === 'KO' ? (signupMenu.description || '휴대폰 번호 인증으로 손쉽게 신규 회원 등록합니다.') : 'Register in 3 seconds to assign your teebox.'}
                 </p>
               </div>
             </div>
 
             <div 
               style={{ 
-                height: '48px',
-                padding: '0 22px',
+                height: '62px',
+                padding: '0 28px',
                 borderRadius: '999px',
-                background: '#f5f5f7',
-                color: '#1d1d1f',
+                background: '#1d1d1f',
+                color: '#ffffff',
                 display: 'flex', 
                 alignItems: 'center', 
-                gap: '6px', 
-                fontWeight: 900, 
-                fontSize: '15px',
-                border: '1px solid rgba(0, 0, 0, 0.08)',
-                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04)'
+                gap: '8px', 
+                fontWeight: 800, 
+                fontSize: '21px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.18)',
+                flexShrink: 0
               }}
             >
               <span>{lang === 'KO' ? '회원가입 시작하기' : 'Sign Up'}</span>
-              <span style={{ fontSize: '16px', fontWeight: 900 }}>↗</span>
+              <span style={{ fontSize: '22px', fontWeight: 900 }}>→</span>
             </div>
           </div>
         )}

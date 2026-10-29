@@ -38,9 +38,9 @@
   --neon-cyan: #30d158; /* iOS Available Green */
   --neon-cyan-glow: rgba(48, 209, 88, 0.15);
 
-  /* Typography - Webfonts */
-  --font-primary: 'Outfit', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif;
-  --font-display: 'Outfit', 'Pretendard', sans-serif;
+  /* Typography - Windows ClearType & Korean Legibility Optimized */
+  --font-primary: 'Pretendard Variable', 'Pretendard', 'Segoe UI', 'Malgun Gothic', '맑은 고딕', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif;
+  --font-display: 'Pretendard Variable', 'Pretendard', 'Outfit', 'Segoe UI', 'Malgun Gothic', '맑은 고딕', sans-serif;
 
   /* Spacing */
   --space-xs: 4px;
@@ -72,6 +72,11 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-primary);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
   overflow: hidden;
   width: 1080px;
   height: 1920px;
@@ -175,7 +180,6 @@ body {
   -webkit-backdrop-filter: blur(40px) saturate(180%);
   border-radius: 32px;
   box-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.03);
-  transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
   z-index: 1;
 }
 
@@ -191,9 +195,16 @@ body {
   z-index: 1;
 }
 
-.premium-glass-card:active {
-  transform: scale(0.97);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.02);
+/* Zero-Wobble Keypad Solid Feedback */
+.keypad-num-btn {
+  transition: background-color 0.06s ease, border-color 0.06s ease;
+  transform: none !important;
+}
+
+.keypad-num-btn:active {
+  background-color: #e2e8f0 !important;
+  border-color: #94a3b8 !important;
+  transform: none !important;
 }
 
 /* Neon Typography & Glowing */

@@ -1,10 +1,36 @@
-import React, { useState, useEffect } from 'react';
-import { Delete, Globe, Smile } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Delete, Globe, Smile, RotateCcw } from 'lucide-react';
 
 interface VirtualKeyboardProps {
   value: string;
   onChange: (val: string) => void;
   onClose: () => void;
+  anchorSelector?: string;
+  docked?: boolean;
+}
+
+export interface VirtualKeyboardPlacementInput {
+  anchorBottomPx: number;
+  viewportHeightPx: number;
+  keyboardHeightPx?: number;
+  bottomNavReservePx?: number;
+  minGapPx?: number;
+}
+
+/**
+ * 입력창(anchorBottomPx)을 절대 가리지 않으면서 하단 네비게이션 바(KioskBottomBar, bottom: 24px + height: 84px = 108px)
+ * 위에 최소 16px 이상의 여백(기본 124px)을 두고 가상 키보드를 배치하는 안전 top 좌표를 산출합니다.
+ */
+export function computeVirtualKeyboardTop({
+  anchorBottomPx,
+  viewportHeightPx,
+  keyboardHeightPx = 395,
+  bottomNavReservePx = 124,
+  minGapPx = 14,
+}: VirtualKeyboardPlacementInput): number {
+  const minSafeTop = Math.max(16, Math.round(anchorBottomPx + minGapPx));
+  const defaultBottomTop = Math.round(viewportHeightPx - bottomNavReservePx - keyboardHeightPx);
+  return Math.max(minSafeTop, defaultBottomTop);
 }
 
 // 초성 19자
@@ -20,7 +46,7 @@ const JONG = [
   '', 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
 ];
 
-function assembleHangul(chars: string[]): string {
+export function assembleHangul(chars: string[]): string {
   let result = '';
   let state = 0; // 0: 빈 상태, 1: 자음 입력, 2: 모음 입력, 3: 자음 입력
   
@@ -180,7 +206,7 @@ function splitJung(j: string): string[] {
   return [j];
 }
 
-const Hangul = {
+export const Hangul = {
   disassemble(str: string): string[] {
     const out: string[] = [];
     for (const ch of str) {
@@ -212,10 +238,18 @@ function flushHangul(cho: number, jung: number, jong: number): string {
   return String.fromCharCode(code);
 }
 
-export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChange, onClose }) => {
+export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
+  value,
+  onChange,
+  onClose,
+  anchorSelector = '[data-testid="member-name-input"]',
+  docked = true,
+}) => {
   const [lang, setLang] = useState<'KO' | 'EN'>('KO');
   const [isShift, setIsShift] = useState(false);
   const [inputBuffer, setInputBuffer] = useState<string[]>(() => Hangul.disassemble(value || ''));
+  const keyboardRef = useRef<HTMLDivElement | null>(null);
+  const [computedTopPx, setComputedTopPx] = useState<number | null>(null);
 
   useEffect(() => {
     const currentAssembled = assembleHangul(inputBuffer);
@@ -223,6 +257,53 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
       setInputBuffer(value ? Hangul.disassemble(value) : []);
     }
   }, [value]);
+
+  const recalcKeyboardPosition = useCallback(() => {
+    if (docked) return;
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+    const kbEl = keyboardRef.current;
+    if (!kbEl) return;
+
+    const parentEl = (kbEl.offsetParent as HTMLElement | null) || document.documentElement;
+    const parentRect = parentEl.getBoundingClientRect();
+    const viewportHeightPx = parentEl.clientHeight || window.innerHeight || 1080;
+    const scale = viewportHeightPx > 0 && parentRect.height > 0 ? parentRect.height / viewportHeightPx : 1;
+
+    const anchorEl = anchorSelector
+      ? (document.querySelector(anchorSelector) as HTMLElement | null)
+      : null;
+
+    let anchorBottomPx = 280;
+    if (anchorEl) {
+      const anchorRect = anchorEl.getBoundingClientRect();
+      anchorBottomPx = (anchorRect.bottom - parentRect.top) / (scale || 1);
+    }
+
+    const keyboardHeightPx = kbEl.offsetHeight || 395;
+    const safeTop = computeVirtualKeyboardTop({
+      anchorBottomPx,
+      viewportHeightPx,
+      keyboardHeightPx,
+      bottomNavReservePx: 124,
+      minGapPx: 14,
+    });
+    setComputedTopPx(safeTop);
+  }, [anchorSelector, docked]);
+
+  useEffect(() => {
+    if (docked) return;
+    recalcKeyboardPosition();
+    const rafId = window.requestAnimationFrame(recalcKeyboardPosition);
+    const t1 = window.setTimeout(recalcKeyboardPosition, 120);
+    const t2 = window.setTimeout(recalcKeyboardPosition, 280);
+    window.addEventListener('resize', recalcKeyboardPosition);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.removeEventListener('resize', recalcKeyboardPosition);
+    };
+  }, [recalcKeyboardPosition, docked]);
 
   const handleKeyClick = (key: string) => {
     let finalKey = key;
@@ -252,6 +333,11 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
     updateValue(newBuffer);
   };
 
+  const handleClear = () => {
+    setInputBuffer([]);
+    onChange('');
+  };
+
   const updateValue = (buf: string[]) => {
     onChange(assembleHangul(buf));
   };
@@ -274,40 +360,158 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
 
   return (
     <div 
+      ref={keyboardRef}
       data-virtual-keyboard="true"
       style={{
-        position: 'absolute',
-        bottom: '100px', // 하단 플로팅 바(KioskBottomBar, bottom: 24px, height: 60px)와 중첩되지 않도록 여백 확보
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: '920px',
+        ...(docked
+          ? {
+              position: 'relative',
+              width: '1000px',
+              maxWidth: '100%',
+              margin: '0 auto',
+              animation: 'vkSlideDown 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
+            }
+          : {
+              position: 'absolute',
+              ...(computedTopPx !== null
+                ? { top: `${computedTopPx}px`, bottom: 'auto' }
+                : { bottom: '124px' }),
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: '920px',
+              maxWidth: 'calc(100% - 32px)',
+              transition: 'top 0.2s cubic-bezier(0.22, 1, 0.36, 1)',
+            }),
         boxSizing: 'border-box',
         background: 'rgba(255, 255, 255, 0.98)',
         backdropFilter: 'blur(30px)',
         WebkitBackdropFilter: 'blur(30px)',
         border: '1.5px solid #e5e5ea',
         borderRadius: '28px',
-        padding: '20px 24px',
-        boxShadow: '0 24px 60px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.06)',
+        padding: '18px 24px 20px',
+        boxShadow: '0 24px 60px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.06)',
         zIndex: 99999,
         display: 'flex',
         flexDirection: 'column',
-        gap: '12px'
+        gap: '12px',
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* 텍스트 입력 가이드 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 6px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#f5f5f7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Smile size={20} style={{ color: '#1d1d1f' }} />
+      <style>{`
+        @keyframes vkCursorBlink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0; }
+        }
+        @keyframes vkSlideDown {
+          from {
+            opacity: 0;
+            transform: translateY(-12px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
+      {/* 실시간 타이핑 미리보기 바 (Live Input Echo Bar) + 입력 완료 버튼 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '0 2px' }}>
+        <div
+          data-testid="virtual-keyboard-preview"
+          style={{
+            flex: 1,
+            minHeight: '52px',
+            borderRadius: '16px',
+            background: '#f5f5f7',
+            border: value ? '1.5px solid #059669' : '1px solid rgba(0, 0, 0, 0.08)',
+            padding: '6px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            boxSizing: 'border-box'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+            <div style={{
+              padding: '5px 10px',
+              borderRadius: '10px',
+              background: value ? 'rgba(5, 150, 105, 0.12)' : '#e8e8ed',
+              color: value ? '#047857' : '#515154',
+              fontSize: '13px',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              flexShrink: 0
+            }}>
+              <Smile size={15} />
+              <span>{lang === 'EN' ? 'NAME' : '입력 중인 이름'}</span>
+            </div>
+
+            {value ? (
+              <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+                <span style={{
+                  fontSize: '22px',
+                  color: '#1d1d1f',
+                  fontWeight: 900,
+                  letterSpacing: '0.4px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}>
+                  {value}
+                </span>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: 'inline-block',
+                    width: '2.5px',
+                    height: '24px',
+                    background: '#059669',
+                    marginLeft: '3px',
+                    borderRadius: '2px',
+                    animation: 'vkCursorBlink 1s infinite'
+                  }}
+                />
+              </div>
+            ) : (
+              <span style={{ fontSize: '16px', color: '#86868b', fontWeight: 700 }}>
+                {lang === 'EN' ? 'Touch keys below to enter your name' : '가상 자판을 터치하여 이름을 입력하세요'}
+              </span>
+            )}
           </div>
-          <span style={{ fontSize: '17px', color: '#515154', fontWeight: 700 }}>가상 자판을 터치하여 입력하세요</span>
+
+          {value && (
+            <button
+              type="button"
+              data-testid="virtual-keyboard-clear"
+              onClick={handleClear}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '999px',
+                border: '1px solid rgba(0, 0, 0, 0.08)',
+                background: '#ffffff',
+                color: '#515154',
+                fontSize: '13px',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: 'pointer',
+                flexShrink: 0
+              }}
+            >
+              <RotateCcw size={13} />
+              <span>{lang === 'EN' ? 'Clear' : '초기화'}</span>
+            </button>
+          )}
         </div>
+
         <button 
           type="button"
           style={{
-            padding: '10px 28px',
+            height: '52px',
+            padding: '0 28px',
             fontSize: '16px',
             fontWeight: 800,
             borderRadius: '999px',
@@ -315,11 +519,12 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChang
             color: '#ffffff',
             border: 'none',
             cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.14)'
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.14)',
+            flexShrink: 0
           }}
           onClick={onClose}
         >
-          입력 완료
+          {lang === 'EN' ? 'Done' : '입력 완료'}
         </button>
       </div>
 

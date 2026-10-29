@@ -47,6 +47,20 @@ export interface ReceiptCashData {
   approval_no: string;
 }
 
+export interface ReceiptSlipMeta {
+  title?: string;
+  badge_text?: string;
+  target_label?: string;
+  action_label?: string;
+  product_name?: string;
+  time_range?: string;
+  duration_label?: string;
+  remain_info?: string;
+  start_date?: string;
+  end_date?: string;
+  extra_note?: string;
+}
+
 export interface ReceiptPrintData {
   sale_id: string;
   receipt_no: string;
@@ -67,12 +81,14 @@ export interface ReceiptPrintData {
   tax_summary: ReceiptTaxData;
   card_info?: ReceiptCardData | null;
   cash_receipt_info?: ReceiptCashData | null;
+  slip_meta?: ReceiptSlipMeta | null;
   barcode_text?: string;
   header_message?: string;
   footer_message?: string;
   print_mode?: 'AUTO' | 'PROMPT' | 'NONE';
   open_cash_drawer?: boolean;
   copies?: number;
+  client_type?: 'POS' | 'KIOSK';
 }
 
 export interface HardwareConfig {
