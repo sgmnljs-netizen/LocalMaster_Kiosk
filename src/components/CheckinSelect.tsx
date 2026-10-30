@@ -29,7 +29,8 @@ interface CheckinSelectProps {
     startTime?: string,
     endTime?: string,
     message?: string,
-    checkinMode?: string
+    checkinMode?: string,
+    hardwareSuccess?: boolean
   ) => void;
   onCancel: () => void;
 }
@@ -125,7 +126,8 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
           formatResTime(res.start_time ?? targetRes?.start_time) || (res.start_time ?? targetRes?.start_time),
           formatResTime(res.end_time ?? targetRes?.end_time) || (res.end_time ?? targetRes?.end_time),
           res.message,
-          res.checkin_mode
+          res.checkin_mode,
+          res.hardware_success
         );
       } else {
         // [BUG-C03] 백엔드 거부(점검 중 409, 미결제 400 등) 시 CHK 상태라도 에러를 삼키지 않고 즉시 표시

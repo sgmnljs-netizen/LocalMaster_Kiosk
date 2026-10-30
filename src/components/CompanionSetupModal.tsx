@@ -69,6 +69,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   const [searchHp, setSearchHp] = useState<string>('');
   const [searchLoading, setSearchLoading] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string>('');
+  const [companionCandidates, setCompanionCandidates] = useState<Member[]>([]);
   const [dailyPrice, setDailyPrice] = useState<number>(defaultDailyPrice || 15000);
   const [companionMembers, setCompanionMembers] = useState<Record<number, Member>>({});
 
@@ -197,65 +198,101 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
     });
   };
 
-  // 동반자 회원 검색 (정규화 헬퍼 및 409 중복 뒷번호 대응 적용)
+  // 동반자 회원 검색 (010- 자동 고정 + 뒷 8자리 필수 입력 및 409 중복 후보 대응)
+  const extractCompanionSuffix8 = (raw: string): string => {
+    const d = raw.replace(/[^0-9]/g, '');
+    return d.startsWith('010') ? d.slice(3, 11) : d.slice(0, 8);
+  };
+
+  const formatCompanionHpDisplay = (raw: string): string => {
+    const suffix = extractCompanionSuffix8(raw);
+    if (!suffix) return '';
+    if (suffix.length <= 4) return `010-${suffix}`;
+    return `010-${suffix.slice(0, 4)}-${suffix.slice(4, 8)}`;
+  };
+
+  const applyResolvedCompanionMember = (member: Member) => {
+    const slotBayNo = targets[activeBayIdx]?.bayNo;
+    const targetBay = bays.find(b => b.bay_no === slotBayNo);
+    if (slotBayNo !== undefined) {
+      setCompanionMembers(prev => ({ ...prev, [slotBayNo]: member }));
+    }
+    const memberHpClean = (member.hp || '').replace(/[^0-9]/g, '');
+    const alreadyAssignedSlot = targets.find(
+      (t, i) =>
+        i !== activeBayIdx &&
+        (t.memberNo === member.member_no ||
+          (!t.memberNo && memberHpClean && (t.hp || '').replace(/[^0-9]/g, '') === memberHpClean))
+    );
+    const validAsset = getFirstAssignableAsset(member, targetBay);
+    const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
+    const assetLogic = String((validAsset as any)?.logic_type || '').toUpperCase();
+    const assetRemCnt = Number(validAsset?.rem_count ?? (validAsset as any)?.remain_cnt ?? 0);
+    const isCountAsset = (assetLogic === 'COUNT' || assetLogic === 'COUPON') || assetRemCnt > 0;
+
+    // 동일 회원이 이미 다른 슬롯에 등록되어 있고 횟수권 다회 보유자가 아닌 경우 회원권 중복 차감 차단
+    const usedCountForSameAsset = parsedId
+      ? targets.filter((t, i) => i !== activeBayIdx && t.ticketType === 'MEMBERSHIP' && t.memberItemId === parsedId).length
+      : 0;
+    const canUseMembership = Boolean(
+      validAsset &&
+      parsedId &&
+      (!alreadyAssignedSlot || (isCountAsset && assetRemCnt > usedCountForSameAsset))
+    );
+    const companionAssetDur = Number((validAsset as any)?.duration_min);
+    const resolvedCompanionDur =
+      canUseMembership && companionAssetDur > 0 ? companionAssetDur : effectiveDurationMin;
+
+    updateTarget(activeBayIdx, {
+      isGuest: false,
+      memberNo: member.member_no,
+      memberName: member.member_name,
+      hp: member.hp,
+      ticketType: canUseMembership ? 'MEMBERSHIP' : 'DAILY',
+      memberItemId: canUseMembership ? parsedId : undefined,
+      ticketName: canUseMembership && validAsset ? resolveAssetTicketName(validAsset) : `일일 타석권 ${resolvedCompanionDur}분`,
+      durationMin: resolvedCompanionDur,
+      price: canUseMembership ? 0 : dailyPrice
+    });
+    if (alreadyAssignedSlot && !canUseMembership) {
+      setSearchError(lang === 'KO' ? '이미 다른 타석에 선택된 회원권이므로 일일 타석권 결제로 자동 설정되었습니다.' : 'Membership already used in another slot; set to Daily Pass.');
+    }
+    setCompanionCandidates([]);
+    setSearchHp('');
+  };
+
+  const handleSelectCompanionCandidate = async (candidate: Member) => {
+    setSearchError('');
+    setSearchLoading(true);
+    try {
+      const fullMember = await api.getMember(candidate.member_no);
+      applyResolvedCompanionMember(fullMember || candidate);
+    } catch (err: any) {
+      setSearchError(err?.message || '동반 회원 선택 처리 중 오류가 발생했습니다.');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
   const handleSearchCompanion = async () => {
-    const cleanHp = searchHp.replace(/[^0-9]/g, '');
-    if (!cleanHp || (cleanHp.length !== 4 && cleanHp.length < 10)) {
-      setSearchError(lang === 'KO' ? '휴대폰 번호 뒷 4자리 또는 전체 11자리를 입력해주세요.' : 'Enter 4-digit suffix or full 11-digit phone number.');
+    const suffix8 = extractCompanionSuffix8(searchHp);
+    if (suffix8.length < 8) {
+      setSearchError(
+        lang === 'KO'
+          ? '휴대폰 번호 뒷 8자리(010 제외)를 모두 입력해주세요.'
+          : 'Enter full 8-digit phone number (without 010).'
+      );
       return;
     }
+    const cleanHp = `010${suffix8}`;
     setSearchError('');
+    setCompanionCandidates([]);
     setSearchLoading(true);
 
     try {
       const member = await api.getMemberByHp(cleanHp);
       if (member) {
-        const slotBayNo = targets[activeBayIdx]?.bayNo;
-        const targetBay = bays.find(b => b.bay_no === slotBayNo);
-        if (slotBayNo !== undefined) {
-          setCompanionMembers(prev => ({ ...prev, [slotBayNo]: member }));
-        }
-        const memberHpClean = (member.hp || '').replace(/[^0-9]/g, '');
-        const alreadyAssignedSlot = targets.find(
-          (t, i) =>
-            i !== activeBayIdx &&
-            (t.memberNo === member.member_no ||
-              (!t.memberNo && memberHpClean && (t.hp || '').replace(/[^0-9]/g, '') === memberHpClean))
-        );
-        const validAsset = getFirstAssignableAsset(member, targetBay);
-        const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
-        const assetLogic = String((validAsset as any)?.logic_type || '').toUpperCase();
-        const assetRemCnt = Number(validAsset?.rem_count ?? (validAsset as any)?.remain_cnt ?? 0);
-        const isCountAsset = (assetLogic === 'COUNT' || assetLogic === 'COUPON') || assetRemCnt > 0;
-
-        // 동일 회원이 이미 다른 슬롯에 등록되어 있고 횟수권 다회 보유자가 아닌 경우 회원권 중복 차감 차단
-        const usedCountForSameAsset = parsedId
-          ? targets.filter((t, i) => i !== activeBayIdx && t.ticketType === 'MEMBERSHIP' && t.memberItemId === parsedId).length
-          : 0;
-        const canUseMembership = Boolean(
-          validAsset &&
-          parsedId &&
-          (!alreadyAssignedSlot || (isCountAsset && assetRemCnt > usedCountForSameAsset))
-        );
-        const companionAssetDur = Number((validAsset as any)?.duration_min);
-        const resolvedCompanionDur =
-          canUseMembership && companionAssetDur > 0 ? companionAssetDur : effectiveDurationMin;
-
-        updateTarget(activeBayIdx, {
-          isGuest: false,
-          memberNo: member.member_no,
-          memberName: member.member_name,
-          hp: member.hp,
-          ticketType: canUseMembership ? 'MEMBERSHIP' : 'DAILY',
-          memberItemId: canUseMembership ? parsedId : undefined,
-          ticketName: canUseMembership && validAsset ? resolveAssetTicketName(validAsset) : `일일 타석권 ${resolvedCompanionDur}분`,
-          durationMin: resolvedCompanionDur,
-          price: canUseMembership ? 0 : dailyPrice
-        });
-        if (alreadyAssignedSlot && !canUseMembership) {
-          setSearchError(lang === 'KO' ? '이미 다른 타석에 선택된 회원권이므로 일일 타석권 결제로 자동 설정되었습니다.' : 'Membership already used in another slot; set to Daily Pass.');
-        }
-        setSearchHp('');
+        applyResolvedCompanionMember(member);
       } else {
         setSearchError(lang === 'KO' ? '일치하는 회원을 찾을 수 없습니다. 번호를 다시 확인하거나 비회원으로 진행해주세요.' : 'Member not found.');
       }
@@ -263,7 +300,13 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       if (err?.inactive || err?.status === 403) {
         setSearchError(err.message || '현재 휴면 또는 이용 제한(일시정지/탈퇴) 상태인 회원입니다.');
       } else if (err?.duplicate || err?.status === 409) {
-        setSearchError(err.message || '동일한 뒷번호 회원이 2명 이상 존재합니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
+        const cands = err?.candidates || err?.response?.data?.candidates;
+        if (Array.isArray(cands) && cands.length > 0) {
+          setCompanionCandidates(cands);
+          setSearchError('동일 번호로 등록된 가족/다중 회원이 있습니다. 아래에서 동반 회원을 선택해 주세요.');
+        } else {
+          setSearchError(err.message || '동일한 번호를 사용하는 회원이 2명 이상 존재합니다.');
+        }
       } else {
         setSearchError(err?.message || (lang === 'KO' ? '회원 검색 중 오류가 발생했습니다.' : 'Failed to search member.'));
       }
@@ -527,15 +570,15 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                     <input 
                       type="text"
                       readOnly
-                      placeholder={lang === 'KO' ? '휴대폰 번호 뒷 4자리 또는 11자리 터치 입력' : 'Tap 4 or 11 digits'}
-                      value={searchHp}
+                      placeholder={lang === 'KO' ? '010- 뒷 8자리 터치 입력 (예: 1234-5678)' : '010- Tap 8 digits'}
+                      value={formatCompanionHpDisplay(searchHp)}
                       style={{ flex: 1, padding: '12px 16px', borderRadius: '12px', border: '1.5px solid #1d1d1f', fontSize: '20px', fontWeight: 900, letterSpacing: '2px', color: '#1d1d1f', background: '#f5f5f7' }}
                     />
                     <button
                       type="button"
                       onClick={handleSearchCompanion}
-                      disabled={searchLoading}
-                      style={{ padding: '14px 28px', background: '#1d1d1f', color: '#fff', border: 'none', borderRadius: '999px', fontSize: '16px', fontWeight: 900, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      disabled={searchLoading || extractCompanionSuffix8(searchHp).length < 8}
+                      style={{ padding: '14px 28px', background: extractCompanionSuffix8(searchHp).length === 8 ? '#1d1d1f' : '#cbd5e1', color: '#fff', border: 'none', borderRadius: '999px', fontSize: '16px', fontWeight: 900, cursor: extractCompanionSuffix8(searchHp).length === 8 ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}
                     >
                       {searchLoading ? '검색 중...' : '회원 조회'}
                     </button>
@@ -549,9 +592,17 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                         type="button"
                         onClick={() => {
                           setSearchError('');
+                          setCompanionCandidates([]);
                           if (key === '초기화') setSearchHp('');
-                          else if (key === '←') setSearchHp((prev) => prev.slice(0, -1));
-                          else if (searchHp.length < 11) setSearchHp((prev) => prev + key);
+                          else if (key === '←') setSearchHp((prev) => extractCompanionSuffix8(prev).slice(0, -1));
+                          else {
+                            setSearchHp((prev) => {
+                              const currSuffix = extractCompanionSuffix8(prev);
+                              if (currSuffix.length >= 8) return currSuffix;
+                              const next = currSuffix + key;
+                              return next === '010' ? '' : next;
+                            });
+                          }
                         }}
                         style={{
                           height: '46px',
@@ -568,6 +619,30 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                       </button>
                     ))}
                   </div>
+
+                  {companionCandidates.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {companionCandidates.map((cand) => (
+                        <button
+                          key={cand.member_no}
+                          type="button"
+                          onClick={() => handleSelectCompanionCandidate(cand)}
+                          style={{
+                            padding: '10px 16px',
+                            borderRadius: '10px',
+                            border: '1.5px solid #064e3b',
+                            background: '#ecfdf5',
+                            color: '#065f46',
+                            fontSize: '14px',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          👤 {cand.masked_name || cand.member_name} ({cand.member_no}) 선택
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   {currentTarget.memberNo && (
                     <div style={{ fontSize: '14px', fontWeight: 800, color: '#1d1d1f', background: '#f5f5f7', border: '1px solid #d2d2d7', padding: '10px 14px', borderRadius: '12px' }}>

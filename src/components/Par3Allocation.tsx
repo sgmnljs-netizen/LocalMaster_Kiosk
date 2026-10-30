@@ -5,6 +5,7 @@ import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
 import { MemberAuth } from './MemberAuth';
 import { TimeMaster } from '../utils/timeMaster';
 import { kioskVanClient } from '../services/van/van_client';
+import { PaymentOutboxManager } from '../services/paymentResilience';
 import { useKioskSettings } from '../stores/kioskSettings';
 
 interface Par3AllocationProps {
@@ -83,17 +84,19 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   // 0. 활성화된 구역(Zone) 목록 및 상품, 상점 정보 로드
   const [categoryUuid, setCategoryUuid] = useState<string>(''); // 실제 백엔드 카테고리 UUID 저장
 
-  // [BUG-P3-04] 자체 VAN 카드 결제 진행 중 KioskApp 전역 Idle Timer 동작 차단
+  // [BUG-P3-04 & 7순위] 자체 VAN 카드 결제 진행 중 및 완료 영수증(ReceiptPrinter) 표출 중 KioskApp 전역 Idle Timer 동작 차단
   useEffect(() => {
     const isBusy =
       paymentState === 'INSERT_WAIT' ||
       paymentState === 'READING' ||
-      paymentState === 'DISPATCHING';
+      paymentState === 'DISPATCHING' ||
+      paymentState === 'DONE' ||
+      createdReceipt !== null;
     onVanBusyChange?.(isBusy);
     return () => {
       onVanBusyChange?.(false);
     };
-  }, [paymentState, onVanBusyChange]);
+  }, [paymentState, createdReceipt, onVanBusyChange]);
 
   useEffect(() => {
     const initData = async () => {
@@ -774,6 +777,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           reversalErrorReason: revReason,
           error_reason: `${backendReason} / Cancel failed: ${revReason}`
         });
+      } else {
+        PaymentOutboxManager.removeByAuthCode(vanResult.auth_code);
       }
     } catch (cancelErr: any) {
       const backendReason = reason || `Par3 webhook failed (resId=${resId})`;

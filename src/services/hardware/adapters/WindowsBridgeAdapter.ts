@@ -87,8 +87,14 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
       });
 
       if (res.ok) {
-        const json = await res.json();
-        return { success: true, message: json.message || '영수증 출력 완료' };
+        const json = await res.json().catch(() => ({ success: true }));
+        if (json && json.success === false) {
+          return {
+            success: false,
+            message: json.message || '프린터 브릿지 출력 실패',
+          };
+        }
+        return { success: true, message: json?.message || '영수증 출력 완료' };
       }
       const errJson = await res.json().catch(() => null);
       return {

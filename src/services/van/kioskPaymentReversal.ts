@@ -8,6 +8,7 @@
 
 import { kioskVanClient } from './van_client';
 import { api } from '../api';
+import { PaymentOutboxManager } from '../paymentResilience';
 import { TimeMaster } from '../../utils/timeMaster';
 import type { CardApprovalResult } from './van_types';
 
@@ -68,6 +69,7 @@ export async function executeKioskAutoReversal(
     });
 
     if (cancelRes.success) {
+      PaymentOutboxManager.removeByAuthCode(cardApproval.auth_code);
       return {
         success: true,
         reversalAttempted: true,

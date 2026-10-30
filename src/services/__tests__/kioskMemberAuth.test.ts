@@ -124,19 +124,54 @@ describe('Kiosk Member Authentication Audit Fixes (BUG-M01 ~ BUG-M08)', () => {
     });
   });
 
-  it('BUG-M02 & BUG-M04: EdgeDB offline fallback normalizes prefixes and prioritizes exact member_no match', async () => {
+  it('BUG-M02 & BUG-M04: EdgeDB offline fallback normalizes prefixes, prioritizes exact member_no match, ignores soft-deleted duplicates, and enforces 8-digit phone lookup while rejecting 4-digit queries', async () => {
     vi.spyOn(api, 'checkConnection').mockResolvedValue(false);
     localStorage.setItem(
       'LM_MEMBERS',
       JSON.stringify([
-        { member_no: 'M1001', member_name: '이천일', hp: '010-1000-1001' },
-        { member_no: 'M100', member_name: '김일백', hp: '010-1000-0100' },
+        { member_no: 'M1001', member_name: '이천일', hp: '010-1000-1001', status_cd: '10', use_yn: 'Y' },
+        { member_no: 'M1001_DEL', member_name: '구탈퇴자', hp: '010-1000-1001', status_cd: '90', use_yn: 'N', deleted_at: 1700000000 },
+        { member_no: 'M100', member_name: '김일백', hp: '010-1000-0100', status_cd: '10', use_yn: 'Y' },
+        { member_no: '10505', member_name: '정지숫자회원', hp: '010-9090-8080', status_cd: '20', use_yn: 'N' },
       ])
     );
 
     const exact = await api.getMember('GOLFOS_MEMBER_M100');
     expect(exact?.member_no).toBe('M100');
     expect(exact?.member_name).toBe('김일백');
+
+    // 8-digit phone suffix lookup succeeds in offline fallback and ignores soft-deleted duplicate M1001_DEL
+    const by8Digits = await api.getMember('10001001');
+    expect(by8Digits?.member_no).toBe('M1001');
+
+    // 11-digit full phone lookup succeeds in offline fallback
+    const by11Digits = await api.getMember('01010000100');
+    expect(by11Digits?.member_no).toBe('M100');
+
+    // Numeric member_no of suspended member (5 digits) throws 403 inactive instead of 400 short phone
+    await expect(api.getMember('10505')).rejects.toMatchObject({
+      status: 403,
+      inactive: true,
+    });
+
+    // 4-digit lookup throws 400 error (hijack prevention)
+    await expect(api.getMember('1001')).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it('PHONE_KEYPAD 8-digit security: getMember propagates HTTP 400 when fewer than 8 phone digits are queried online', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        detail: '보안을 위해 휴대폰 번호 8자리(010 제외) 또는 전체 번호를 입력해 주세요.',
+      }),
+    }) as any;
+
+    await expect(api.getMember('1234')).rejects.toMatchObject({
+      status: 400,
+    });
   });
 
   it('BUG-M08 & BUG-R03: enrollMemberFace rejects empty/mock base64 and does not mask backend failure in online mode', async () => {

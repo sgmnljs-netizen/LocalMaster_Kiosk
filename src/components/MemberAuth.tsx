@@ -112,17 +112,19 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     setErrorMsg('');
     setDuplicateCandidates([]);
     try {
-      const isShortPhone = /^[0-9]{4}$/.test(tokenOrUid.trim());
-      const member = !isShortPhone && (api as any).authenticateSmartTag
-        ? await (api as any).authenticateSmartTag(tokenOrUid, rssi, authType)
-        : await api.getMember(tokenOrUid);
+      const cleanToken = tokenOrUid.trim();
+      const normalizedQuery = /^[0-9]{8}$/.test(cleanToken) ? `010${cleanToken}` : cleanToken;
+      const isDirectKeypadPhone = /^[0-9]{8,11}$/.test(cleanToken) && !authType;
+      const member = !isDirectKeypadPhone && (api as any).authenticateSmartTag
+        ? await (api as any).authenticateSmartTag(normalizedQuery, rssi, authType)
+        : await api.getMember(normalizedQuery);
       if (Array.isArray(member) && member.length > 1) {
         setDuplicateCandidates(member);
       } else if ((member as any)?.candidates && Array.isArray((member as any).candidates) && (member as any).candidates.length > 0) {
         setDuplicateCandidates((member as any).candidates);
       } else if ((member as any)?.duplicate || (member as any)?.error === 'DUPLICATE_PHONE') {
         setPhoneDigits('');
-        setErrorMsg('동일한 뒷번호 회원이 여러 명 있습니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
+        setErrorMsg('동일한 번호를 사용하는 회원이 여러 명 있습니다. 프런트 데스크에 문의해 주세요.');
       } else if (member) {
         const resolved = Array.isArray(member) ? member[0] : member;
         if (!resolved.masked_name && resolved.member_name) {
@@ -145,7 +147,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         setErrorMsg('');
       } else if (status === 409 || err?.duplicate || detail.includes('DUPLICATE') || detail.includes('중복') || detail.includes('여러 명')) {
         setPhoneDigits('');
-        setErrorMsg(detail || '동일한 뒷번호 회원이 여러 명 있습니다. 휴대폰 번호 전체(11자리)를 입력해 주세요.');
+        setErrorMsg(detail || '동일한 번호를 사용하는 회원이 여러 명 있습니다. 본인 계정을 선택해 주세요.');
       } else if (status === 400) {
         setErrorMsg(detail || '유효하지 않은 인증 정보입니다.');
       } else if (fallbackMember) {
@@ -254,10 +256,30 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     handleSmartTagDetected,
   ]);
 
+  // 🛡️ [방안 B: 010- 상시 고정 + 뒷 8자리 입력 & 습관적 010 입력 자동 흡수]
+  const extractPhoneSuffix8 = (raw: string): string => {
+    const digitsOnly = raw.replace(/[^0-9]/g, '');
+    if (digitsOnly.startsWith('010')) {
+      return digitsOnly.slice(3, 11);
+    }
+    return digitsOnly.slice(0, 8);
+  };
+
+  const effectiveSuffix8 = extractPhoneSuffix8(phoneDigits);
+  const isPhoneReadyToSubmit = effectiveSuffix8.length === 8;
+
   // 전화번호 키패드 입력 제어 핸들러
   const handleKeypadDigit = (digit: string) => {
-    if (phoneDigits.length >= 11) return;
-    setPhoneDigits(prev => prev + digit);
+    setPhoneDigits((prev) => {
+      const currSuffix = extractPhoneSuffix8(prev);
+      if (currSuffix.length >= 8) return currSuffix;
+      const next = currSuffix + digit;
+      // 고객이 화면의 '010-' 고정 표시를 보지 못하고 습관적으로 '0','1','0'을 먼저 친 경우 자동 흡수
+      if (next === '010') {
+        return '';
+      }
+      return next;
+    });
     setErrorMsg('');
   };
 
@@ -267,25 +289,27 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   };
 
   const handleKeypadBackspace = () => {
-    setPhoneDigits(prev => prev.slice(0, -1));
+    setPhoneDigits((prev) => extractPhoneSuffix8(prev).slice(0, -1));
     setErrorMsg('');
   };
 
   const handleKeypadSubmit = async () => {
-    if (phoneDigits.length < 4) {
-      setErrorMsg('휴대폰 번호 4자리 이상을 입력해 주세요.');
+    if (effectiveSuffix8.length < 8) {
+      setErrorMsg('휴대폰 번호 뒷 8자리(010 제외)를 모두 입력해 주세요.');
       return;
     }
-    await handleSmartTagDetected(phoneDigits);
+    await handleSmartTagDetected(`010${effectiveSuffix8}`);
   };
 
   const formatHpDisplay = (raw: string) => {
-    if (!raw.startsWith('01') && raw.length <= 4) {
-      return raw;
+    const suffix = extractPhoneSuffix8(raw);
+    if (!suffix) {
+      return '010-';
     }
-    if (raw.length <= 3) return raw;
-    if (raw.length <= 7) return `${raw.slice(0, 3)}-${raw.slice(3)}`;
-    return `${raw.slice(0, 3)}-${raw.slice(3, 7)}-${raw.slice(7, 11)}`;
+    if (suffix.length <= 4) {
+      return `010-${suffix}`;
+    }
+    return `010-${suffix.slice(0, 4)}-${suffix.slice(4, 8)}`;
   };
 
   // 안면 인식 트리거 (15초 대기 타이머 & 백엔드 안면 식별 API 동기 연동)
@@ -985,9 +1009,9 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <span style={{ fontSize: '22px', color: '#475569', fontWeight: 800 }}>
-                휴대폰 번호 (뒷 4자리 또는 전체)
+                휴대폰 번호 (010 제외 8자리)
               </span>
-              {phoneDigits.length >= 4 && (
+              {isPhoneReadyToSubmit && (
                 <span style={{
                   background: '#d1fae5',
                   color: '#065f46',
@@ -996,19 +1020,30 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   padding: '5px 12px',
                   borderRadius: '999px',
                 }}>
-                  {phoneDigits.length === 4 && !phoneDigits.startsWith('01') ? '뒷 4자리 조회 가능' : '조회 가능'}
+                  조회 가능
                 </span>
               )}
             </div>
             <span style={{
-              fontSize: phoneDigits ? '42px' : '26px',
+              fontSize: '42px',
               fontWeight: 900,
-              color: phoneDigits ? '#111827' : '#94a3b8',
-              letterSpacing: phoneDigits ? '2px' : '-0.3px',
+              color: '#111827',
+              letterSpacing: '2px',
               fontVariantNumeric: 'tabular-nums',
               lineHeight: 1,
+              display: 'inline-flex',
+              alignItems: 'center',
             }}>
-              {phoneDigits ? formatHpDisplay(phoneDigits) : '번호를 입력해 주세요'}
+              {effectiveSuffix8 ? (
+                formatHpDisplay(phoneDigits)
+              ) : (
+                <>
+                  <span>010-</span>
+                  <span style={{ fontSize: '26px', color: '#94a3b8', letterSpacing: '-0.3px', marginLeft: '6px' }}>
+                    뒷 8자리 입력
+                  </span>
+                </>
+              )}
             </span>
           </div>
 
@@ -1054,18 +1089,18 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           <button
             type="button"
             onClick={handleKeypadSubmit}
-            disabled={isSearching || phoneDigits.length < 4}
+            disabled={isSearching || !isPhoneReadyToSubmit}
             style={{
               width: '100%',
               height: '84px',
               borderRadius: '22px',
-              background: phoneDigits.length >= 4 ? '#064e3b' : '#cbd5e1',
+              background: isPhoneReadyToSubmit ? '#064e3b' : '#cbd5e1',
               color: '#ffffff',
               fontSize: '26px',
               fontWeight: 800,
               border: 'none',
-              cursor: phoneDigits.length >= 4 ? 'pointer' : 'not-allowed',
-              boxShadow: phoneDigits.length >= 4 ? '0 10px 24px rgba(6, 78, 59, 0.25)' : 'none',
+              cursor: isPhoneReadyToSubmit ? 'pointer' : 'not-allowed',
+              boxShadow: isPhoneReadyToSubmit ? '0 10px 24px rgba(6, 78, 59, 0.25)' : 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

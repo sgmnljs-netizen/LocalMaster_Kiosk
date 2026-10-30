@@ -248,10 +248,8 @@ describe('Kiosk Checkin Core Scenarios Simulation (C01 ~ C05)', () => {
 
       const now = new Date();
       const todayStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-      
-      // 1시간 전 만료된 예약
-      const pastEndHour = String(Math.max(0, now.getHours() - 1)).padStart(2, '0');
-      const pastEndMin = String(now.getMinutes()).padStart(2, '0');
+      const expiredStartStr = '0000';
+      const expiredEndStr = '0001';
 
       storageMap.set(
         'LM_RESERVATIONS',
@@ -261,8 +259,8 @@ describe('Kiosk Checkin Core Scenarios Simulation (C01 ~ C05)', () => {
             member_no: 'M_C04_OFFLINE',
             status_cd: 'RSV',
             res_date: todayStr,
-            start_time: `${String(Math.max(0, now.getHours() - 2)).padStart(2, '0')}${pastEndMin}`,
-            end_time: `${pastEndHour}${pastEndMin}`,
+            start_time: expiredStartStr,
+            end_time: expiredEndStr,
             resource_type: 'BAY',
           },
         ])

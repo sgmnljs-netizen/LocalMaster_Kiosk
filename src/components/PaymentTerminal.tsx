@@ -9,6 +9,11 @@ import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanne
 
 
 import { TimeMaster } from '../utils/timeMaster';
+import {
+  PaymentOutboxManager,
+  subscribePaymentRetryStatus,
+  type PaymentRetryStatus,
+} from '../services/paymentResilience';
 
 export const MIN_INSTALLMENT_AMOUNT = 50000;
 export const INSTALLMENT_MONTH_OPTIONS = [0, 2, 3, 4, 5, 6, 12] as const;
@@ -82,10 +87,20 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const [cardIssuer, setCardIssuer] = useState('');
   const [maskedCard, setMaskedCard] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [webhookRetryStatus, setWebhookRetryStatus] = useState<PaymentRetryStatus>({
+    active: false,
+    attempt: 0,
+    maxAttempts: 3,
+    label: '',
+  });
   const isPayRequested = useRef(false);
   const isSilentCancelRef = useRef(false);
   const hasCompletedRef = useRef(false);
   const lastPayResultRef = useRef<any>(null);
+
+  useEffect(() => {
+    return subscribePaymentRetryStatus((st) => setWebhookRetryStatus(st));
+  }, []);
 
   // [BUG-07 FIX] 언마운트 시 서브 가맹점/프로 TID 오버라이드를 메인 매장 기본 설정으로 즉시 원복
   useEffect(() => {
@@ -427,6 +442,26 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     setPayStep('INSERT_CARD');
     setErrorMsg('');
 
+    // 🛡️ [Layer 1: Pre-Flight Gate]
+    // 유료 카드 결제 시 VAN 단말기를 깨우기 직전 백엔드 생존 여부를 사전 검증합니다.
+    // 서버가 완전히 죽어있는 상태에서 카드를 먼저 긁게 하여 사후 망취소/DLQ가 발생하는 사고를 사전 차단합니다.
+    if (typeof (api as any).verifyBackendReadyForPayment === 'function') {
+      try {
+        const preflight = await api.verifyBackendReadyForPayment();
+        if (preflight && preflight.ready === false) {
+          setErrorMsg(
+            preflight.message ||
+              '현재 매장 서버와 통신이 원활하지 않아 결제를 시작할 수 없습니다. 잠시 후 다시 시도해 주세요.'
+          );
+          setPayStep('INSERT_CARD');
+          isPayRequested.current = false;
+          return;
+        }
+      } catch {
+        // Pre-flight check exception ignored if non-fatal
+      }
+    }
+
     // 🏛️ 서브 가맹점 / 소속 프로 TID 라우팅 검증 (Fail-Fast)
     const unitUpper = String(businessUnitType || 'MAIN').toUpperCase();
     const isSubMerchant =
@@ -485,6 +520,28 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     });
 
     if (res.success) {
+      // 🛡️ [Layer 4: WAL 선기록] 실물 카드 승인이 떨어지는 즉시 로컬 Outbox에 원거래 WAL 기록
+      // 정전/강제종료(장비 OFF)가 800ms 대기 또는 백엔드 전산 등록 도중 발생하더라도 재기동 시 유실 없이 추적 가능
+      if (res.auth_code && actualPayAmt > 0) {
+        PaymentOutboxManager.recordWalInFlight({
+          storeCd: STORE_CODE,
+          terminalId: res.terminal_id || activeTerminalId || settings.terminalId || '',
+          authCode: res.auth_code,
+          vanTrNo: res.van_tr_no,
+          amount: actualPayAmt,
+          purpose: resId ? 'WEBHOOK_CONFIRM' : 'CARD_APPROVED_PENDING_COMMIT',
+          endpoint: resId ? '/v1/kiosk/payment-webhook' : undefined,
+          payload: {
+            res_id: resId || null,
+            member_no: memberNo || null,
+            product_name: productName,
+            issuer_name: res.issuer_name || '',
+            card_no_masked: res.card_no_masked || '',
+            approved_at: res.approved_at || '',
+          },
+        });
+      }
+
       setAppNo(res.auth_code);
       setReceiptDate(res.approved_at);
       setCardIssuer(res.issuer_name || '신용카드');
@@ -504,6 +561,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           if (!webhookRes.success) {
             throw new Error(webhookRes.message);
           }
+          PaymentOutboxManager.removeByAuthCode(res.auth_code);
         } else {
           await new Promise((resolve) => setTimeout(resolve, 800));
         }
@@ -563,6 +621,8 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               reversalErrorReason: revReason,
               error_reason: `${backendReason} / Cancel failed: ${revReason}`
             });
+          } else {
+            PaymentOutboxManager.removeByAuthCode(res.auth_code);
           }
           setErrorMsg('타석 배정 처리 실패로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 회수해 주세요.');
         } catch (cancelErr: any) {
@@ -1791,10 +1851,14 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           />
           <div style={{ textAlign: 'center' }}>
             <h2 style={{ fontSize: '26px', fontWeight: 900, color: '#1d1d1f', margin: '0 0 8px 0' }}>
-              신용카드 결제 승인 중입니다
+              {webhookRetryStatus.active
+                ? `결제 완료 확인 및 전산 등록 중입니다... (재시도 ${webhookRetryStatus.attempt}/${webhookRetryStatus.maxAttempts})`
+                : '신용카드 결제 승인 확인 및 전산 등록 중입니다'}
             </h2>
-            <p style={{ fontSize: '16px', color: '#ff3b30', fontWeight: 800, margin: 0 }}>
-              금융사 네트워크 승인을 요청하고 있습니다. 카드를 절대 빼지 마세요!
+            <p style={{ fontSize: '16px', color: webhookRetryStatus.active ? '#2563eb' : '#ff3b30', fontWeight: 800, margin: 0 }}>
+              {webhookRetryStatus.active
+                ? '일시적 네트워크 지연으로 서버 재연결을 시도하고 있습니다. 잠시만 기다려 주세요.'
+                : '전산 등록을 진행하고 있습니다. 잠시만 기다려 주세요!'}
             </p>
           </div>
         </div>

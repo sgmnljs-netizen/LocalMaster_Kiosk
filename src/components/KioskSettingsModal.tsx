@@ -43,7 +43,7 @@ const STANDARD_KIOSK_MENUS = [
 
 const AUTH_METHOD_ITEMS: { key: KioskAuthModeKey; label: string; desc: string; emoji: string }[] = [
   { key: 'SMART_TAG', label: '앱 스마트 체크인', desc: '골포스 모바일 앱 스마트 체크인 무선 연동', emoji: '📱' },
-  { key: 'PHONE_KEYPAD', label: '전화번호 입력 (키패드)', desc: '휴대폰 뒷 4자리 / 전체 번호 키패드 조회', emoji: '🔢' },
+  { key: 'PHONE_KEYPAD', label: '전화번호 입력 (키패드)', desc: '휴대폰 번호 8자리(010 자동 고정) 키패드 조회', emoji: '🔢' },
   { key: 'QR_SCAN', label: '출입 QR / 바코드 스캔', desc: '하드웨어 리더기로 모바일/알림톡 QR 인식', emoji: '📷' },
   { key: 'FACE', label: 'AI 안면 인식 (카메라)', desc: '전면 카메라 비접촉 안면 인증 및 등록', emoji: '🙂' },
 ];

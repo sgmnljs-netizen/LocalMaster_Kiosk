@@ -43,7 +43,63 @@ foreach ($baseDir in @($electronProfile, $edgeKioskProfile)) {
     }
 }
 
-# 3. Relaunch Kiosk in interactive desktop session via Scheduled Task
+# 3. Restart GolfOS Unified Hardware/VCAT Bridge (vcat_bridge.py on :8090 / :18080)
+$bridgeScript = "C:\GolfOS\bin\vcat_bridge.py"
+$bridgeOnline = $false
+if (Test-Path $bridgeScript) {
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'vcat_bridge\.py' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Milliseconds 400
+
+    $bridgeTask = Get-ScheduledTask -TaskName "GolfOS_VCAT_Bridge" -ErrorAction SilentlyContinue
+    if ($bridgeTask) {
+        Start-ScheduledTask -TaskName "GolfOS_VCAT_Bridge" -ErrorAction SilentlyContinue
+    } else {
+        schtasks /run /tn "GolfOS_VCAT_Bridge" 2>$null | Out-Null
+    }
+
+    for ($b = 0; $b -lt 3; $b++) {
+        Start-Sleep -Milliseconds 500
+        try {
+            $resp = Invoke-RestMethod -Uri "http://127.0.0.1:18080/health" -TimeoutSec 1 -ErrorAction Stop
+            if ($resp.status -eq "ONLINE") { $bridgeOnline = $true; break }
+        } catch {}
+    }
+
+    if (-not $bridgeOnline) {
+        $pyCandidates = @(
+            "C:\GolfOS\runtime\python\pythonw.exe",
+            "C:\GolfOS\venv\Scripts\pythonw.exe",
+            "C:\Python312\pythonw.exe",
+            "C:\Python311\pythonw.exe",
+            "C:\Python310\pythonw.exe",
+            "C:\Program Files\Python312\pythonw.exe",
+            "C:\Program Files\Python311\pythonw.exe",
+            "C:\Program Files\Python310\pythonw.exe",
+            "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python312\pythonw.exe",
+            "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python311\pythonw.exe",
+            "pythonw.exe",
+            "python.exe"
+        )
+        foreach ($pyCandidate in $pyCandidates) {
+            $cmdInfo = Get-Command $pyCandidate -ErrorAction SilentlyContinue
+            if ($cmdInfo -and ($cmdInfo.Source -notmatch 'WindowsApps')) {
+                Start-Process -FilePath $cmdInfo.Source -ArgumentList "`"$bridgeScript`"" -WorkingDirectory "C:\GolfOS\bin" -WindowStyle Hidden -ErrorAction SilentlyContinue
+                break
+            }
+        }
+        for ($b = 0; $b -lt 6; $b++) {
+            Start-Sleep -Milliseconds 500
+            try {
+                $resp = Invoke-RestMethod -Uri "http://127.0.0.1:18080/health" -TimeoutSec 1 -ErrorAction Stop
+                if ($resp.status -eq "ONLINE") { $bridgeOnline = $true; break }
+            } catch {}
+        }
+    }
+}
+
+# 4. Relaunch Kiosk in interactive desktop session via Scheduled Task
 $taskObj = Get-ScheduledTask -TaskName "LaunchGolfosKiosk" -ErrorAction SilentlyContinue
 if ($taskObj) {
     Start-ScheduledTask -TaskName "LaunchGolfosKiosk" -ErrorAction SilentlyContinue
@@ -51,7 +107,7 @@ if ($taskObj) {
     schtasks /run /tn "LaunchGolfosKiosk" 2>$null | Out-Null
 }
 
-# 4. Poll up to 8 seconds strictly for electron or msedge (exclude msedgewebview2)
+# 5. Poll up to 8 seconds strictly for electron or msedge (exclude msedgewebview2)
 $kioskProc = $null
 for ($i = 0; $i -lt 8; $i++) {
     Start-Sleep -Seconds 1
@@ -72,6 +128,7 @@ if ($kioskProc) {
         process_name = $first.ProcessName
         pid = $first.Id
         responding = $first.Responding
+        bridge_online = $bridgeOnline
         server_ip = $ServerIp
     } | ConvertTo-Json -Compress
     Write-Output $json
@@ -80,6 +137,7 @@ if ($kioskProc) {
         status = "FAIL"
         elapsed_sec = $elapsed
         device_type = "KIOSK"
+        bridge_online = $bridgeOnline
         message = "Kiosk process (electron/msedge) did not start within 8s."
         server_ip = $ServerIp
     } | ConvertTo-Json -Compress

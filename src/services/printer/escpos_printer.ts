@@ -287,13 +287,26 @@ export class KioskEscPosPrinterService {
           method: 'POST',
           headers: { 'Content-Type': 'application/octet-stream' },
           body: buffer as unknown as BodyInit,
-          signal: AbortSignal.timeout(1500),
+          signal: AbortSignal.timeout(3000),
         });
         if (res.ok) {
+          const okJson = await res.json().catch(() => ({ success: true }));
+          if (okJson && okJson.success === false) {
+            return { success: false, message: okJson.message || `프린터 출력 실패 (포트 ${port})` };
+          }
           return { success: true, message: `키오스크 서멀 프린터 출력 완료 (포트 ${port})` };
         }
-      } catch {
-        // 다음 포트 시도
+        // 브릿지 데몬이 응답했으나 용지 소진/커버 열림/오프라인(HTTP 500)인 경우 중복 재전송 없이 즉시 사유 반환
+        const errJson = await res.json().catch(() => null);
+        if (errJson?.message) {
+          return { success: false, message: errJson.message };
+        }
+        return { success: false, message: `프린터 출력 실패 (HTTP ${res.status})` };
+      } catch (err: any) {
+        if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+          return { success: false, message: '프린터 출력 응답 대기 시간 초과' };
+        }
+        // 연결 거부(데몬 미구동 포트)인 경우에만 다음 포트 시도
       }
     }
 

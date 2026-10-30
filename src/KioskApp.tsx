@@ -33,6 +33,10 @@ import { KioskSettingsModal } from './components/KioskSettingsModal';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 import { useKioskHardwareHeartbeat } from './hooks/useKioskHardwareHeartbeat';
 import { recordKioskBlackBox } from './utils/kioskBlackBox';
+import {
+  subscribePaymentRetryStatus,
+  type PaymentRetryStatus,
+} from './services/paymentResilience';
 
 type KioskStep = 
   | 'INTRO' 
@@ -138,6 +142,33 @@ export default function KioskApp() {
   // 이중 클릭 및 중복 API 호출 방어 락 Ref
   const isAllocatingRef = useRef(false);
 
+  // 🛡️ [Layer 2 & 4] 결제 승인 후 백엔드 전송 재시도 대기 상태 및 미전송 Outbox 자동 동기화
+  const [paymentRetryStatus, setPaymentRetryStatus] = useState<PaymentRetryStatus>({
+    active: false,
+    attempt: 0,
+    maxAttempts: 3,
+    label: '',
+  });
+
+  useEffect(() => {
+    const unsubscribe = subscribePaymentRetryStatus((status) => {
+      setPaymentRetryStatus(status);
+    });
+    const flushOutbox = () => {
+      if (typeof (api as any).flushPendingPaymentOutbox === 'function') {
+        void api.flushPendingPaymentOutbox().catch(() => {});
+      }
+    };
+    flushOutbox();
+    window.addEventListener('online', flushOutbox);
+    const intervalId = window.setInterval(flushOutbox, 15000);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', flushOutbox);
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   // 세션 정보
   const [authMember, setAuthMember] = useState<Member | null>(null);
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(null);
@@ -181,6 +212,23 @@ export default function KioskApp() {
   const [storeCloseTime, setStoreCloseTime] = useState<string>('24:00');
   const [checkinPolicy, setCheckinPolicy] = useState<string>('CHECKIN_REQUIRED');
   const [hwFailAlert, setHwFailAlert] = useState<{ bayNo: number; resId: string } | null>(null);
+  const [hwFailCountdown, setHwFailCountdown] = useState<number>(10);
+
+  useEffect(() => {
+    if (!hwFailAlert) return;
+    setHwFailCountdown(10);
+    const timer = setInterval(() => {
+      setHwFailCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setHwFailAlert(null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [hwFailAlert]);
   const [closingPromptModal, setClosingPromptModal] = useState<{
     isVisible: boolean;
     maxMin: number;
@@ -439,8 +487,8 @@ export default function KioskApp() {
     setToast({ message, success });
   };
 
-  // 회원 로그아웃/초기화
-  const handleLogout = () => {
+  // 회원 로그아웃 및 세션 원자적 초기화 (INTRO 또는 MAIN_DASHBOARD 복귀 시 100% 대칭 클린업 보장)
+  const resetKioskSessionState = (targetStep: 'INTRO' | 'MAIN_DASHBOARD') => {
     if (authMember) {
       api.writeKioskLog('SESSION_CLOSE', `${authMember.member_name} 회원 세션 정상 종료`, authMember.member_no);
     }
@@ -451,7 +499,7 @@ export default function KioskApp() {
       currentHoldResIdRef.current = null;
     }
     setCheckinResId(null);
-    // 선점된 타석이 있다면 해제 (메모리 누수 방지)
+    // 선점된 타석이 있다면 해제 (메모리 누수 및 좀비 선점 방지)
     const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
     if (bayToRelease !== null) {
       api.releaseBay(bayToRelease).catch(console.error);
@@ -463,6 +511,8 @@ export default function KioskApp() {
     selectedBayNoRef.current = null;
     selectedBayNosRef.current = [];
     authReturnStepRef.current = null;
+    keepAuthAfterPurchaseRef.current = false;
+    isVanBusyRef.current = false;
     cancelFeedbackCountdown();
     setAuthMember(null);
     setSelectedBayNo(null);
@@ -470,6 +520,7 @@ export default function KioskApp() {
     setCompanionTargets([]);
     setShowCompanionModal(false);
     setSelectedLockerNo(null);
+    setSelectedLockerDisplayNo(null);
     setSelectedProduct(null);
     setSelectedAssetId(null);
     setCompletedAllocationInfo(null);
@@ -484,13 +535,19 @@ export default function KioskApp() {
     setPurpose(null);
     setErrorMasterCard(null);
     setClosingPromptModal(null);
-    setInactivityCountdown(null);
-    setStep('INTRO');
+    setInitialAuthMode('SMART_TAG');
+    setStep(targetStep);
+  };
+
+  const handleLogout = () => {
+    resetKioskSessionState('INTRO');
   };
 
   const handleLogoutRef = useRef(handleLogout);
   handleLogoutRef.current = handleLogout;
   const isVanBusyRef = useRef(false);
+  const paymentRetryActiveRef = useRef(false);
+  paymentRetryActiveRef.current = paymentRetryStatus.active;
   const isAdminPinOpenRef = useRef(isAdminPinOpen);
   isAdminPinOpenRef.current = isAdminPinOpen;
   const isSettingsOpenRef = useRef(isSettingsOpen);
@@ -528,6 +585,7 @@ export default function KioskApp() {
         if (
           isAllocatingRef.current ||
           isVanBusyRef.current ||
+          paymentRetryActiveRef.current ||
           isAdminPinOpenRef.current ||
           isSettingsOpenRef.current ||
           completedAllocationInfoRef.current !== null ||
@@ -546,6 +604,7 @@ export default function KioskApp() {
         if (
           isAllocatingRef.current ||
           isVanBusyRef.current ||
+          paymentRetryActiveRef.current ||
           isAdminPinOpenRef.current ||
           isSettingsOpenRef.current ||
           completedAllocationInfoRef.current !== null ||
@@ -571,24 +630,32 @@ export default function KioskApp() {
     };
   }, [step, lang]);
 
-  // 2-1. 결제·회원가입·상품/이용권 선택 대기 중 선점 타석(Soft-Lock) 만료 방지를 위한 25초 주기 Heartbeat 연장
+  // 2-1. 타석 선택·회원인증·결제·회원가입·상품/이용권 선택 대기 중 선점 타석(Soft-Lock) 만료 방지를 위한 25초 주기 Heartbeat 연장
   useEffect(() => {
     if (step !== 'PAYMENT') {
       isVanBusyRef.current = false;
     }
-    if (step !== 'PAYMENT' && step !== 'MEMBER_REGISTER' && step !== 'PRODUCT_SHOP' && step !== 'ASSET_SELECT') {
+    if (
+      step !== 'PRACTICE_SELECT' &&
+      step !== 'MEMBER_AUTH' &&
+      step !== 'PAYMENT' &&
+      step !== 'MEMBER_REGISTER' &&
+      step !== 'PRODUCT_SHOP' &&
+      step !== 'ASSET_SELECT'
+    ) {
       return;
     }
     const heartbeatInterval = setInterval(() => {
-      const singleBay = selectedBayNo ?? selectedBayNoRef.current;
-      if (singleBay !== null) {
-        api.preoccupyBay(singleBay).catch(() => {});
-      }
       const multiBays = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
-      if (multiBays.length > 0) {
-        multiBays.forEach(bNo => {
-          api.preoccupyBay(bNo).catch(() => {});
-        });
+      const singleBay = selectedBayNo ?? selectedBayNoRef.current;
+      const targetBays =
+        multiBays.length > 0
+          ? multiBays
+          : singleBay !== null
+          ? [singleBay]
+          : [];
+      if (targetBays.length > 0) {
+        api.preoccupyBays(targetBays).catch(() => {});
       }
     }, 25000);
     return () => clearInterval(heartbeatInterval);
@@ -596,49 +663,7 @@ export default function KioskApp() {
 
   // 행위 완료 후 메인화면(MAIN_DASHBOARD)으로 세션 초기화 복귀
   const handleLogoutToHome = () => {
-    if (authMember) {
-      api.writeKioskLog('SESSION_CLOSE', `${authMember.member_name} 회원 세션 정상 종료`, authMember.member_no);
-    }
-    const holdId = currentHoldResId || currentHoldResIdRef.current;
-    if (holdId) {
-      api.cancelHoldReservation(holdId).catch(console.error);
-      setCurrentHoldResId(null);
-      currentHoldResIdRef.current = null;
-    }
-    setCheckinResId(null);
-    const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
-    if (bayToRelease !== null) {
-      api.releaseBay(bayToRelease).catch(console.error);
-    }
-    const baysToRelease = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
-    if (baysToRelease.length > 0) {
-      api.releaseBays(baysToRelease).catch(console.error);
-    }
-    selectedBayNoRef.current = null;
-    selectedBayNosRef.current = [];
-    authReturnStepRef.current = null;
-    cancelFeedbackCountdown();
-    setAuthMember(null);
-    setSelectedBayNo(null);
-    setSelectedBayNos([]);
-    setCompanionTargets([]);
-    setShowCompanionModal(false);
-    setSelectedLockerNo(null);
-    setSelectedProduct(null);
-    setSelectedAssetId(null);
-    setCompletedAllocationInfo(null);
-    setCompletedPurchaseInfo(null);
-    setInactivityCountdown(null);
-    setSelectedZoneIds([]);
-    setIsAdminPinOpen(false);
-    setIsSettingsOpen(false);
-    setCustomMenuNotice(null);
-    setErrorModal(prev => ({ ...prev, isVisible: false }));
-    setHwFailAlert(null);
-    setPurpose(null);
-    setErrorMasterCard(null);
-    setClosingPromptModal(null);
-    setStep('MAIN_DASHBOARD');
+    resetKioskSessionState('MAIN_DASHBOARD');
   };
 
   // 실시간 미니 모니터 타석 클릭 단축키
@@ -697,50 +722,7 @@ export default function KioskApp() {
 
   // 메인 대시보드로 복귀 (세부 프로세스 중단 및 가상 락 정리)
   const handleGoHome = () => {
-    if (authMember) {
-      api.writeKioskLog('SESSION_CLOSE', `${authMember.member_name} 회원 세션 정상 종료`, authMember.member_no);
-    }
-    const holdId = currentHoldResId || currentHoldResIdRef.current;
-    if (holdId) {
-      api.cancelHoldReservation(holdId).catch(console.error);
-      setCurrentHoldResId(null);
-      currentHoldResIdRef.current = null;
-    }
-    setCheckinResId(null);
-    // [BugFix] 고객이 중도 취소/처음으로 복귀 시 선점 락 100% 해제 (결제 진행 중 상주 현상 방지)
-    const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
-    if (bayToRelease !== null) {
-      api.releaseBay(bayToRelease).catch(console.error);
-    }
-    const baysToRelease = selectedBayNos.length > 0 ? selectedBayNos : selectedBayNosRef.current;
-    if (baysToRelease.length > 0) {
-      api.releaseBays(baysToRelease).catch(console.error);
-    }
-    selectedBayNoRef.current = null;
-    selectedBayNosRef.current = [];
-    authReturnStepRef.current = null;
-    setAuthMember(null); // 메인화면 복귀 시 로그인 세션 즉시 파기 (공용 키오스크 보안 강화)
-    setSelectedBayNo(null);
-    setSelectedBayNos([]);
-    setCompanionTargets([]);
-    setShowCompanionModal(false);
-    setSelectedLockerNo(null);
-    setSelectedLockerDisplayNo(null);
-    setSelectedProduct(null);
-    setPurpose(null);
-    setErrorMasterCard(null);
-    setClosingPromptModal(null);
-    
-    // 🔒 [4차 방어막] 이탈/타임아웃 시 잔존 배정 상태 100% 클리어
-    setSelectedAssetId(null);
-    setCompletedAllocationInfo(null);
-    setCompletedPurchaseInfo(null);
-    setInactivityCountdown(null);
-    setSelectedZoneIds([]);
-    setIsAdminPinOpen(false);
-    setIsSettingsOpen(false);
-    
-    setStep('MAIN_DASHBOARD');
+    resetKioskSessionState('MAIN_DASHBOARD');
   };
 
   // 직전 화면 단계로 복귀 핸들러
@@ -1102,7 +1084,8 @@ export default function KioskApp() {
           await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId}, ${effectiveDur}분)`, authMember.member_no);
           await loadBays();
           if (res.hardware_success === false) {
-            showErrorModal(`${selectedBayNo}번 타석 배정은 완료되었으나, 센서/타석 기기 시작에 실패했습니다. 직원을 호출해 주세요.`, '타석 기기 가동 미완료', true);
+            api.writeKioskLog('HW_START_ERROR', `[타석 기기 자동 재가동] ${selectedBayNo}번 타석 배정 완료 후 초기 기동 지연 (res_id=${res.res_id || ''})`, authMember.member_no).catch(() => {});
+            setHwFailAlert({ bayNo: selectedBayNo, resId: res.res_id || '' });
           }
           
           const allocatedBayNo = selectedBayNo;
@@ -1528,7 +1511,6 @@ export default function KioskApp() {
   }) => {
     if (isAllocatingRef.current) return;
     isAllocatingRef.current = true;
-    showToast('모든 처리가 안전하게 완료되었습니다. 이용권을 챙겨주세요!');
     
     let hasCustomModal = false;
     try {
@@ -1587,8 +1569,8 @@ export default function KioskApp() {
               return;
             } else {
               if (allocResult.hardware_success === false) {
+                api.writeKioskLog('HW_START_ERROR', `[타석 기기 자동 재가동] ${selectedBayNo}번 타석 일일권 결제 완료 후 초기 기동 지연 (res_id=${allocResult.res_id || ''})`, authMember?.member_no).catch(() => {});
                 setHwFailAlert({ bayNo: selectedBayNo, resId: allocResult.res_id || '' });
-                showErrorModal(`${selectedBayNo}번 타석 결제는 완료되었으나 센서 기기 가동에 실패했습니다. 직원을 호출해주세요.`, '타석 기기 시작 확인 필요', true);
               }
               
               const allocatedBayNo = selectedBayNo;
@@ -1901,11 +1883,15 @@ export default function KioskApp() {
         }
       }
 
-      // 성공적으로 배정된 타석 변수 초기화 (중복 release 락 해제 방지)
+      // 성공적으로 배정/결제된 변수 초기화 (중복 release 락 해제 및 후속 세션 라카/상품 잔상 오염 방지)
+      showToast('모든 처리가 안전하게 완료되었습니다. 이용권을 챙겨주세요!');
       setSelectedBayNo(null);
       setSelectedBayNos([]);
       selectedBayNoRef.current = null;
       selectedBayNosRef.current = [];
+      setSelectedLockerNo(null);
+      setSelectedLockerDisplayNo(null);
+      setSelectedProduct(null);
 
       // 최신 타석 상태 재조회
       await loadBays();
@@ -1931,33 +1917,107 @@ export default function KioskApp() {
         </div>
       )}
 
-      {/* [Fix-5] 하드웨어 가동 실패 — 직원 호출 전체 화면 알림 */}
+      {/* 🛡️ [Layer 2] 결제 승인 후 백엔드 매출/배정 전송 재시도 대기 오버레이 */}
+      {paymentRetryStatus.active && (
+        <div
+          data-testid="payment-retry-overlay"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 100000,
+            background: 'rgba(15, 23, 42, 0.72)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '32px',
+              padding: '40px 36px',
+              maxWidth: '540px',
+              width: '100%',
+              textAlign: 'center',
+              boxShadow: '0 32px 80px rgba(0, 0, 0, 0.35)',
+              border: '2px solid #2563eb',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '16px',
+            }}
+          >
+            <div
+              style={{
+                width: '72px',
+                height: '72px',
+                borderRadius: '50%',
+                background: '#eff6ff',
+                color: '#2563eb',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid #bfdbfe',
+              }}
+            >
+              <RefreshCw size={36} className="animate-spin" />
+            </div>
+            <h3 style={{ fontSize: '25px', fontWeight: 900, color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
+              카드 승인 완료 · 전산 등록 중입니다
+            </h3>
+            <p style={{ fontSize: '17px', color: '#334155', fontWeight: 600, margin: 0, lineHeight: 1.55 }}>
+              일시적인 네트워크 지연으로 서버 재연결을 시도하고 있습니다.
+              <br />
+              <strong>절대 자리를 뜨거나 카드를 다시 긁지 마시고 잠시만 기다려 주세요.</strong>
+            </p>
+            <div
+              style={{
+                marginTop: '6px',
+                padding: '10px 20px',
+                borderRadius: '999px',
+                background: '#f1f5f9',
+                color: '#1e40af',
+                fontSize: '15px',
+                fontWeight: 800,
+              }}
+            >
+              {paymentRetryStatus.label || '전산 등록'} 자동 재시도 중 ({paymentRetryStatus.attempt}/{paymentRetryStatus.maxAttempts})
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* [Fix-5] 하드웨어 가동 지연 — 백그라운드 자동 재가동 안내 및 10초 자동 닫힘 */}
       {hwFailAlert && (
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 9999,
+          position: 'fixed', inset: 0, zIndex: 10050,
           background: 'rgba(0,0,0,0.85)',
           display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 24
         }}>
-          <ShieldAlert size={72} color="#ef4444" />
+          <ShieldAlert size={72} color="#f59e0b" />
           <h2 style={{ color: '#fff', fontSize: 28, fontWeight: 800, textAlign: 'center' }}>
-            {hwFailAlert.bayNo}번 타석 기기 가동 실패
+            {hwFailAlert.bayNo}번 타석 기기 전원 자동 연결 중
           </h2>
-          <p style={{ color: '#fca5a5', fontSize: 18, textAlign: 'center', maxWidth: 480 }}>
-            결제 및 배정은 완료되었습니다.<br />
-            직원을 호출하여 타석 기기를 수동으로 가동해 주세요.
+          <p style={{ color: '#fde68a', fontSize: 18, textAlign: 'center', maxWidth: 520, lineHeight: 1.6 }}>
+            결제 및 타석 배정은 정상 완료되었습니다.<br />
+            타석 기기 전원 신호를 자동 재전송 중이오니 타석으로 이동해 주세요.<br />
+            <span style={{ color: '#fca5a5', fontSize: 15 }}>(타석 도착 후에도 화면이 켜지지 않으면 카운터에 문의해 주세요)</span>
           </p>
           <p style={{ color: '#9ca3af', fontSize: 14 }}>예약번호: {hwFailAlert.resId}</p>
           <button
-            onClick={() => { setHwFailAlert(null); handleLogoutToHome(); }}
+            onClick={() => { setHwFailAlert(null); }}
             style={{
               marginTop: 12, padding: '16px 48px',
-              background: '#ef4444', color: '#fff',
+              background: '#f59e0b', color: '#111827',
               border: 'none', borderRadius: 12,
-              fontSize: 20, fontWeight: 700, cursor: 'pointer'
+              fontSize: 20, fontWeight: 800, cursor: 'pointer'
             }}
           >
-            직원 확인 완료
+            확인 ({hwFailCountdown}초 후 자동 닫힘)
           </button>
         </div>
       )}
@@ -2251,12 +2311,18 @@ export default function KioskApp() {
                     startTime?: string,
                     endTime?: string,
                     message?: string,
-                    checkinMode?: string
+                    checkinMode?: string,
+                    hardwareSuccess?: boolean
                   ) => {
                     const numericBay = typeof bayNo === 'number' ? bayNo : (parseInt(String(bayNo).replace(/[^0-9]/g, ''), 10) || 1);
                     const targetBayObj = bays.find(b => Number(b.bay_no) === Number(numericBay));
-                    setSelectedBayNo(numericBay);
-                    setCheckinResId(resId);
+                    if (hardwareSuccess === false) {
+                      api.writeKioskLog('HW_START_ERROR', `[타석 기기 자동 재가동] ${numericBay}번 타석 체크인 완료 후 초기 기동 지연 (res_id=${resId})`, authMember?.member_no).catch(() => {});
+                      setHwFailAlert({ bayNo: numericBay, resId });
+                    }
+                    setSelectedBayNo(null);
+                    selectedBayNoRef.current = null;
+                    setCheckinResId(null);
                     setPurpose('CHECKIN_RESERVATION');
                     showToast(message || (lang === 'KO' ? `${bayNo}번 타석 체크인이 완료되었습니다.` : `Bay ${bayNo} check-in completed.`));
                     setCompletedAllocationInfo({
@@ -2855,14 +2921,8 @@ export default function KioskApp() {
       {/* 🟢 타석 배정 완료 안내 팝업 (5초 자동 카운트다운 & 닫기 ➔ 기존 타석 선택 화면 제자리에서 5초 활성화 확인) */}
       {completedAllocationInfo && (
         <AllocationCompleteModal
-          {...(completedAllocationInfo as any)}
-          bayNo={completedAllocationInfo.bayNo}
-          durationMin={completedAllocationInfo.durationMin}
-          startTime={completedAllocationInfo.startTime}
-          endTime={completedAllocationInfo.endTime}
-          resId={completedAllocationInfo.resId}
-          memberName={completedAllocationInfo.memberName}
-          payAmount={completedAllocationInfo.payAmount}
+          {...completedAllocationInfo}
+          pauseCountdown={Boolean(hwFailAlert)}
           lang={lang}
           onClose={() => {
             // 🔒 [3차 방어막] 배정 완료 모달이 닫히면 (외부 클릭 등 강제 종료 시도 포함) 즉시 키오스크 세션 완전 파기 (Race Condition 차단)
@@ -2890,6 +2950,9 @@ export default function KioskApp() {
               ? async () => {
                   const targetMemberNo = completedPurchaseInfo.memberNo!;
                   setCompletedPurchaseInfo(null);
+                  setSelectedProduct(null);
+                  setSelectedLockerNo(null);
+                  setSelectedLockerDisplayNo(null);
                   try {
                     const refreshedMember = await api.getMember(targetMemberNo);
                     if (refreshedMember) {

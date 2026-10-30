@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Printer, CheckCircle, XCircle } from 'lucide-react';
 import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
 import { printKioskBayAllocationSlip } from '../utils/kioskSlipPrinter';
@@ -30,71 +30,95 @@ interface ReceiptPrinterProps {
 
 export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onClose }) => {
   const [isPrinting, setIsPrinting] = useState(true);
+  const [hasPrintError, setHasPrintError] = useState(false);
+  const [printStatusMsg, setPrintStatusMsg] = useState<string>('');
+  const [countdown, setCountdown] = useState(10);
   const [ownerNm, setOwnerNm] = useState(receiptData.ownerNm || '대표자');
+  const hasAutoPrintedRef = useRef(false);
+  const isPrintingRef = useRef(false);
+  const cardReceiptDoneRef = useRef(false);
+  const slipDoneRef = useRef(false);
 
-  useEffect(() => {
-    let mounted = true;
-    const triggerHardwarePrint = async () => {
-      try {
-        const storeInfo = await api.getStoreInfo().catch(() => null);
-        const resolvedOwner = receiptData.ownerNm || storeInfo?.owner_nm || storeInfo?.ceo_nm || (storeInfo as any)?.ceo_name || '';
-        if (mounted && resolvedOwner) {
-          setOwnerNm(resolvedOwner);
-        }
-        const isTaxFree = receiptData.vatYn === 'N';
-        const supplyAmt = isTaxFree ? 0 : Math.round(receiptData.totalAmount / 1.1);
-        const vatAmt = isTaxFree ? 0 : receiptData.totalAmount - supplyAmt;
-        const taxFreeAmt = isTaxFree ? receiptData.totalAmount : 0;
+  const handlePrint = useCallback(async () => {
+    if (isPrintingRef.current) return;
+    isPrintingRef.current = true;
+    setIsPrinting(true);
+    setHasPrintError(false);
+    let finalOk = false;
+    let errDetail = '';
 
-        const resolvedStoreInfo = {
-          store_name: receiptData.branchNm || storeInfo?.store_nm || 'GOLFOS',
-          biz_no: receiptData.bizNo || storeInfo?.biz_no || (storeInfo as any)?.biz_reg_no || '',
-          ceo_name: resolvedOwner,
-          tel: receiptData.tel || storeInfo?.tel || storeInfo?.tel_no || '',
-          address: receiptData.address || storeInfo?.address || '',
-        };
+    try {
+      const storeInfo = await api.getStoreInfo().catch(() => null);
+      const resolvedOwner = receiptData.ownerNm || storeInfo?.owner_nm || storeInfo?.ceo_nm || (storeInfo as any)?.ceo_name || '';
+      if (resolvedOwner) {
+        setOwnerNm(resolvedOwner);
+      }
+      const isTaxFree = receiptData.vatYn === 'N';
+      const supplyAmt = isTaxFree ? 0 : Math.round(receiptData.totalAmount / 1.1);
+      const vatAmt = isTaxFree ? 0 : receiptData.totalAmount - supplyAmt;
+      const taxFreeAmt = isTaxFree ? receiptData.totalAmount : 0;
 
-        const tradeDtStr = receiptData.tradeDate || new Date().toLocaleString('ko-KR');
+      const resolvedStoreInfo = {
+        store_name: receiptData.branchNm || storeInfo?.store_nm || 'GOLFOS',
+        biz_no: receiptData.bizNo || storeInfo?.biz_no || (storeInfo as any)?.biz_reg_no || '',
+        ceo_name: resolvedOwner,
+        tel: receiptData.tel || storeInfo?.tel || storeInfo?.tel_no || '',
+        address: receiptData.address || storeInfo?.address || '',
+      };
 
-        if (receiptData.totalAmount > 0) {
-          await kioskHardwareBridge.printReceipt({
-            sale_id: receiptData.resId || `SALE-${Date.now()}`,
-            receipt_no: receiptData.resId || `REC-${Date.now()}`,
-            trade_dt: tradeDtStr,
-            client_type: 'KIOSK',
-            pay_method: 'CARD',
-            store_info: resolvedStoreInfo,
-            tax_summary: {
-              supply_amt: supplyAmt,
-              tax_amt: vatAmt,
-              tax_free_amt: taxFreeAmt,
-              total_amt: receiptData.totalAmount,
-              discount_amt: 0,
-              pay_amt: receiptData.totalAmount,
+      const tradeDtStr = receiptData.tradeDate || new Date().toLocaleString('ko-KR');
+
+      const bothPreviouslySucceeded = (receiptData.totalAmount <= 0 || cardReceiptDoneRef.current) && slipDoneRef.current;
+      const shouldPrintCardReceipt = receiptData.totalAmount > 0 && (bothPreviouslySucceeded || !cardReceiptDoneRef.current);
+      const shouldPrintSlip = bothPreviouslySucceeded || !slipDoneRef.current;
+
+      let cardOk = receiptData.totalAmount <= 0 || cardReceiptDoneRef.current;
+      if (shouldPrintCardReceipt) {
+        const cardRes = await kioskHardwareBridge.printReceipt({
+          sale_id: receiptData.resId || `SALE-${Date.now()}`,
+          receipt_no: receiptData.resId || `REC-${Date.now()}`,
+          trade_dt: tradeDtStr,
+          client_type: 'KIOSK',
+          pay_method: 'CARD',
+          store_info: resolvedStoreInfo,
+          tax_summary: {
+            supply_amt: supplyAmt,
+            tax_amt: vatAmt,
+            tax_free_amt: taxFreeAmt,
+            total_amt: receiptData.totalAmount,
+            discount_amt: 0,
+            pay_amt: receiptData.totalAmount,
+          },
+          card_info: {
+            issuer_name: receiptData.cardIssuer || '신용카드',
+            card_no_masked: receiptData.cardNo || '신용카드',
+            approval_no: receiptData.apprNo || '-',
+            installment_months: receiptData.installmentMonths ?? 0,
+            approval_dt: tradeDtStr,
+            terminal_id: receiptData.terminalId || localStorage.getItem('LM_KIOSK_TERMINAL_ID') || api.getTerminalId(),
+          },
+          items: [
+            {
+              name: receiptData.prodNm,
+              qty: receiptData.partySize || 1,
+              unit_price: receiptData.totalAmount,
+              amount: receiptData.totalAmount,
+              is_tax_free: isTaxFree,
             },
-            card_info: {
-              issuer_name: receiptData.cardIssuer || '신용카드',
-              card_no_masked: receiptData.cardNo || '신용카드',
-              approval_no: receiptData.apprNo || '-',
-              installment_months: receiptData.installmentMonths ?? 0,
-              approval_dt: tradeDtStr,
-              terminal_id: receiptData.terminalId || localStorage.getItem('LM_KIOSK_TERMINAL_ID') || api.getTerminalId(),
-            },
-            items: [
-              {
-                name: receiptData.prodNm,
-                qty: receiptData.partySize || 1,
-                unit_price: receiptData.totalAmount,
-                amount: receiptData.totalAmount,
-                is_tax_free: isTaxFree,
-              },
-            ],
-            header_message: '[ 신용카드 매출전표 ]',
-            footer_message: '파3 라운딩 결제가 완료되었습니다. 이어서 라운딩 배정표가 출력됩니다.',
-          });
+          ],
+          header_message: '[ 신용카드 매출전표 ]',
+          footer_message: '파3 라운딩 결제가 완료되었습니다. 이어서 라운딩 배정표가 출력됩니다.',
+        });
+        cardOk = Boolean(cardRes?.success);
+        cardReceiptDoneRef.current = cardOk;
+        if (!cardOk && cardRes?.message) {
+          errDetail = cardRes.message;
         }
+      }
 
-        await printKioskBayAllocationSlip({
+      let slipOk = slipDoneRef.current;
+      if (shouldPrintSlip) {
+        const slipRes = await printKioskBayAllocationSlip({
           bayNo: receiptData.prodNm || '파3 라운딩',
           resId: receiptData.resId,
           memberName: `파3 고객 (${receiptData.partySize || 1}명)`,
@@ -104,22 +128,55 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
           storeInfo: resolvedStoreInfo,
           tradeDt: tradeDtStr,
         });
-      } catch (err) {
-        console.warn('[ReceiptPrinter] Hardware print fallback:', err);
+        slipOk = Boolean(slipRes?.success);
+        slipDoneRef.current = slipOk;
+        if (!slipOk && slipRes?.message && !errDetail) {
+          errDetail = slipRes.message;
+        }
       }
-    };
 
-    triggerHardwarePrint();
-
-    // 3초간 영수증 지지직 인쇄 모션 작동
-    const timer = setTimeout(() => {
-      if (mounted) setIsPrinting(false);
-    }, 3000);
-    return () => {
-      mounted = false;
-      clearTimeout(timer);
-    };
+      finalOk = cardOk && slipOk;
+    } catch (err) {
+      console.warn('[ReceiptPrinter] Hardware print fallback:', err);
+      finalOk = false;
+    } finally {
+      setHasPrintError(!finalOk);
+      setPrintStatusMsg(
+        finalOk
+          ? '발행된 영수증과 배정표를 받아 가시기 바랍니다.'
+          : errDetail && errDetail.includes('용지')
+            ? '프린터 용지가 부족하여 영수증이 출력되지 않았습니다. 아래 내역을 확인하시거나 [영수증 재출력]을 눌러주세요.'
+            : errDetail && errDetail.includes('커버')
+              ? '프린터 커버가 열려 있어 영수증이 출력되지 않았습니다. 아래 내역을 확인하시거나 [영수증 재출력]을 눌러주세요.'
+              : '프린터 연결 지연으로 영수증이 출력되지 않았습니다. 결제는 정상 완료되었으니 [영수증 재출력]을 눌러주세요.'
+      );
+      setCountdown(finalOk ? 10 : 20);
+      isPrintingRef.current = false;
+      setIsPrinting(false);
+    }
   }, [receiptData]);
+
+  useEffect(() => {
+    if (!hasAutoPrintedRef.current) {
+      hasAutoPrintedRef.current = true;
+      handlePrint();
+    }
+  }, [handlePrint]);
+
+  useEffect(() => {
+    if (isPrinting) return;
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          onClose();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isPrinting, onClose]);
 
   const formatAmount = (num: number) => {
     return num.toLocaleString();
@@ -162,8 +219,12 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
           width: '76px',
           height: '76px',
           borderRadius: '50%',
-          background: isPrinting ? 'rgba(255, 255, 255, 0.12)' : 'rgba(16, 185, 129, 0.15)',
-          border: `2px solid ${isPrinting ? '#ffffff' : '#10b981'}`,
+          background: isPrinting
+            ? 'rgba(255, 255, 255, 0.12)'
+            : hasPrintError
+              ? 'rgba(239, 68, 68, 0.18)'
+              : 'rgba(16, 185, 129, 0.15)',
+          border: `2px solid ${isPrinting ? '#ffffff' : hasPrintError ? '#ef4444' : '#10b981'}`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -171,16 +232,24 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
         }}>
           {isPrinting ? (
             <Printer size={38} style={{ color: '#ffffff', animation: 'wiggle 0.5s infinite' }} />
+          ) : hasPrintError ? (
+            <XCircle size={44} style={{ color: '#ef4444' }} />
           ) : (
             <CheckCircle size={44} style={{ color: '#10b981' }} />
           )}
         </div>
         
         <h3 style={{ fontSize: '28px', fontWeight: 900, color: '#fff', margin: 0 }}>
-          {isPrinting ? '지지직... 영수증 인쇄 중...' : '결제 완료 및 영수증 발행 성공!'}
+          {isPrinting
+            ? '지지직... 영수증 인쇄 중...'
+            : hasPrintError
+              ? '결제 완료 (영수증 인쇄 지연 안내)'
+              : '결제 완료 및 영수증 발행 성공!'}
         </h3>
-        <p style={{ fontSize: '18px', color: '#c8c8cd', margin: 0 }}>
-          {isPrinting ? '영수증이 나올 때까지 잠시만 기다려 주십시오.' : '발행된 영수증을 받아 가시기 바랍니다.'}
+        <p style={{ fontSize: '18px', color: hasPrintError ? '#fca5a5' : '#c8c8cd', margin: 0, maxWidth: '560px', lineHeight: 1.4 }}>
+          {isPrinting
+            ? '영수증이 나올 때까지 잠시만 기다려 주십시오.'
+            : printStatusMsg || '발행된 영수증을 받아 가시기 바랍니다.'}
         </p>
       </div>
 
@@ -332,30 +401,62 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
         <div className="zigzag-bottom" />
       </div>
 
-      {/* 완료 확인 버튼 (인쇄 완료 후에만 터치 가능하도록 노출) */}
+      {/* 완료 확인 및 재출력 버튼 (인쇄 완료 후에만 터치 가능하도록 노출) */}
       {!isPrinting && (
-        <button
-          type="button"
-          onClick={onClose}
-          className="kiosk-btn"
+        <div
           style={{
             marginTop: '32px',
-            height: '72px',
-            fontSize: '22px',
-            fontWeight: 900,
-            padding: '0 64px',
-            borderRadius: '999px',
-            background: '#1d1d1f',
-            color: '#ffffff',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            boxShadow: '0 14px 32px rgba(0, 0, 0, 0.35)',
-            cursor: 'pointer',
+            display: 'flex',
+            gap: '16px',
+            alignItems: 'center',
             zIndex: 3,
             animation: 'slideUp 0.3s ease-in-out'
           }}
         >
-          확인 (처음으로)
-        </button>
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="kiosk-btn"
+            style={{
+              height: '72px',
+              fontSize: '20px',
+              fontWeight: 800,
+              padding: '0 36px',
+              borderRadius: '999px',
+              background: '#f5f5f7',
+              color: '#1d1d1f',
+              border: '1px solid #d2d2d7',
+              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.25)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}
+          >
+            <Printer size={22} style={{ color: '#0071e3' }} />
+            <span>영수증 재출력</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="kiosk-btn"
+            style={{
+              height: '72px',
+              fontSize: '22px',
+              fontWeight: 900,
+              padding: '0 52px',
+              borderRadius: '999px',
+              background: '#1d1d1f',
+              color: '#ffffff',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.35)',
+              cursor: 'pointer'
+            }}
+          >
+            {`확인 (처음으로) (${countdown}s)`}
+          </button>
+        </div>
       )}
 
       {/* 키프레임 및 영수증 롤아웃 인젝션 스타일 */}

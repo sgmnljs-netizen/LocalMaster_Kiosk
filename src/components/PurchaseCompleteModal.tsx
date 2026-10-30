@@ -59,8 +59,12 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
   const [countdown, setCountdown] = useState(10);
   const [isPrinting, setIsPrinting] = useState(true);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
+  const [hasPrintError, setHasPrintError] = useState(false);
   const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string; biz_no?: string; ceo_name?: string } | null>(null);
   const hasAutoPrintedRef = useRef(false);
+  const isPrintingRef = useRef(false);
+  const receiptDoneRef = useRef(false);
+  const lockerSlipDoneRef = useRef(false);
   const { settings } = useKioskSettings();
   const storeName = settings.deviceName || '골포스 스마트 키오스크';
   const autoPrintReceipt = settings.autoPrintReceipt ?? true;
@@ -94,7 +98,10 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
   }, []);
 
   const handlePrint = useCallback(async () => {
+    if (isPrintingRef.current) return;
+    isPrintingRef.current = true;
     setIsPrinting(true);
+    setHasPrintError(false);
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
     try {
       const safeApprNo = purchaseInfo?.apprNo || '00000000';
@@ -121,47 +128,60 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
       };
 
       const tradeDtStr = purchaseInfo?.tradeDate || TimeMaster.formatKstDateTime(new Date());
+      const isLockerPurchase = purchaseInfo?.purchaseType === 'LOCKER';
+      const bothPreviouslySucceeded = receiptDoneRef.current && (!isLockerPurchase || lockerSlipDoneRef.current);
+      const shouldPrintReceipt = bothPreviouslySucceeded || !receiptDoneRef.current;
+      const shouldPrintLockerSlip = isLockerPurchase && (bothPreviouslySucceeded || !lockerSlipDoneRef.current);
 
-      const res = await kioskHardwareBridge.printReceipt({
-        sale_id: `SALE-${safeApprNo}`,
-        receipt_no: `RC-${safeApprNo.slice(-6)}`,
-        trade_dt: tradeDtStr,
-        client_type: 'KIOSK',
-        member_name: purchaseInfo?.memberName || '비회원',
-        member_no: purchaseInfo?.memberNo,
-        pay_method: totalAmt > 0 ? 'CARD' : 'POINT',
-        store_info: resolvedStoreInfo,
-        items: [
-          {
-            name: purchaseInfo?.productName || '이용권',
-            qty: 1,
-            unit_price: resolvedUnitPrice,
-            amount: totalAmt,
+      let receiptOk = receiptDoneRef.current;
+      let errDetail = '';
+      if (shouldPrintReceipt) {
+        const res = await kioskHardwareBridge.printReceipt({
+          sale_id: `SALE-${safeApprNo}`,
+          receipt_no: `RC-${safeApprNo.slice(-6)}`,
+          trade_dt: tradeDtStr,
+          client_type: 'KIOSK',
+          member_name: purchaseInfo?.memberName || '비회원',
+          member_no: purchaseInfo?.memberNo,
+          pay_method: totalAmt > 0 ? 'CARD' : 'POINT',
+          store_info: resolvedStoreInfo,
+          items: [
+            {
+              name: purchaseInfo?.productName || '이용권',
+              qty: 1,
+              unit_price: resolvedUnitPrice,
+              amount: totalAmt,
+              discount_amt: resolvedDiscount,
+              is_tax_free: isTaxFree,
+            },
+          ],
+          tax_summary: {
+            supply_amt: supply,
+            tax_amt: vat,
+            tax_free_amt: taxFreeAmt,
+            total_amt: resolvedUnitPrice,
             discount_amt: resolvedDiscount,
-            is_tax_free: isTaxFree,
+            pay_amt: totalAmt,
           },
-        ],
-        tax_summary: {
-          supply_amt: supply,
-          tax_amt: vat,
-          tax_free_amt: taxFreeAmt,
-          total_amt: resolvedUnitPrice,
-          discount_amt: resolvedDiscount,
-          pay_amt: totalAmt,
-        },
-        card_info: totalAmt > 0 ? {
-          issuer_name: purchaseInfo?.cardIssuer || '신용카드',
-          card_no_masked: purchaseInfo?.cardNoMasked || '신용카드',
-          approval_no: safeApprNo,
-          installment_months: purchaseInfo?.installmentMonths ?? 0,
-          terminal_id: purchaseInfo?.terminalId || settings.terminalId || api.getTerminalId(),
-        } : undefined,
-        barcode_text: `PUR-${safeApprNo}`,
-        footer_message: `유효기간: ${periodDisplayStr}\n키오스크 결제가 완료되었습니다.`,
-      });
+          card_info: totalAmt > 0 ? {
+            issuer_name: purchaseInfo?.cardIssuer || '신용카드',
+            card_no_masked: purchaseInfo?.cardNoMasked || '신용카드',
+            approval_no: safeApprNo,
+            installment_months: purchaseInfo?.installmentMonths ?? 0,
+            terminal_id: purchaseInfo?.terminalId || settings.terminalId || api.getTerminalId(),
+          } : undefined,
+          barcode_text: `PUR-${safeApprNo}`,
+          footer_message: `유효기간: ${periodDisplayStr}\n키오스크 결제가 완료되었습니다.`,
+        });
+        receiptOk = Boolean(res?.success);
+        receiptDoneRef.current = receiptOk;
+        if (!receiptOk && res?.message) {
+          errDetail = res.message;
+        }
+      }
 
-      let lockerSlipOk = true;
-      if (purchaseInfo?.purchaseType === 'LOCKER') {
+      let lockerSlipOk = !isLockerPurchase || lockerSlipDoneRef.current;
+      if (shouldPrintLockerSlip) {
         const extractedLockerNo =
           purchaseInfo.lockerNo ||
           (purchaseInfo.productName ? purchaseInfo.productName.replace(/[^0-9]/g, '') : '') ||
@@ -178,12 +198,34 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
           storeInfo: resolvedStoreInfo,
           tradeDt: tradeDtStr,
         });
-        lockerSlipOk = lockerRes.success;
+        lockerSlipOk = Boolean(lockerRes?.success);
+        lockerSlipDoneRef.current = lockerSlipOk;
+        if (!lockerSlipOk && lockerRes?.message && !errDetail) {
+          errDetail = lockerRes.message;
+        }
       }
 
-      const finalOk = res.success && lockerSlipOk;
-      setPrintStatus(finalOk ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
+      const finalOk = receiptOk && lockerSlipOk;
+      setHasPrintError(!finalOk);
+      if (finalOk) {
+        setPrintStatus(lang === 'KO' ? '출력 완료' : 'Printed');
+        setCountdown((prev) => Math.max(prev, 10));
+      } else {
+        setPrintStatus(
+          errDetail && errDetail.includes('용지')
+            ? (lang === 'KO' ? '프린터 용지 부족' : 'Paper Out')
+            : errDetail && errDetail.includes('커버')
+              ? (lang === 'KO' ? '프린터 커버 열림' : 'Cover Open')
+              : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline')
+        );
+        setCountdown(20);
+      }
+    } catch {
+      setHasPrintError(true);
+      setPrintStatus(lang === 'KO' ? '프린터 미연결' : 'Printer Offline');
+      setCountdown(20);
     } finally {
+      isPrintingRef.current = false;
       setIsPrinting(false);
     }
   }, [purchaseInfo, propOriginalAmount, propDiscountAmount, propUsedPoints, propVatYn, storeName, storeInfo, settings.terminalId, lang, periodDisplayStr, startDate, endDate]);
@@ -199,7 +241,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
 
   useEffect(() => {
     if (isPrinting) return;
-    // 10초 카운트다운 타이머 (인쇄 중에는 대기)
+    // 10초 카운트다운 타이머 (인쇄 중에는 대기, 실패 시 20초)
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -216,7 +258,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
     };
   }, [onClose, isPrinting]);
 
-  const isPrinterOffline = !isPrinting && (printStatus === '프린터 미연결' || printStatus === 'Printer Offline');
+  const isPrinterOffline = !isPrinting && (hasPrintError || printStatus === '프린터 미연결' || printStatus === 'Printer Offline' || printStatus === '프린터 용지 부족' || printStatus === 'Paper Out');
 
   return (
     <div
@@ -429,6 +471,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
         <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
           <button
             onClick={handlePrint}
+            disabled={isPrinting}
             style={{
               flex: '1',
               height: '64px',
@@ -438,7 +481,8 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
               border: '1px solid #e5e5ea',
               fontSize: '18px',
               fontWeight: 800,
-              cursor: 'pointer',
+              cursor: isPrinting ? 'not-allowed' : 'pointer',
+              opacity: isPrinting ? 0.55 : 1,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

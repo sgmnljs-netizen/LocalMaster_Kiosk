@@ -392,14 +392,26 @@ describe('Kiosk Fail-Safe & Hardware Device Error Handling QA (F03, F04, F06, F0
       errorMsg = '';
       expect(authMode).toBe('PHONE_KEYPAD');
 
-      // 2. 키패드 숫자 터치 시뮬레이션
+      // 2. 키패드 숫자 터치 시뮬레이션 (010- 자동 고정 + 습관적 010 타이핑 자동 흡수 + 8자리 입력)
+      const extractPhoneSuffix8 = (raw: string): string => {
+        const clean = raw.replace(/[^0-9]/g, '');
+        if (clean.startsWith('010')) return clean.slice(3, 11);
+        return clean.slice(0, 8);
+      };
+
       const handleKeypadDigit = (digit: string) => {
-        if (phoneDigits.length >= 11) return;
-        phoneDigits += digit;
+        const next = phoneDigits + digit;
+        if (next === '010') {
+          phoneDigits = '';
+          return;
+        }
+        const suffix = extractPhoneSuffix8(phoneDigits);
+        if (suffix.length >= 8) return;
+        phoneDigits = suffix + digit;
       };
 
       const handleKeypadBackspace = () => {
-        phoneDigits = phoneDigits.slice(0, -1);
+        phoneDigits = extractPhoneSuffix8(phoneDigits).slice(0, -1);
       };
 
       const handleKeypadClear = () => {
@@ -407,28 +419,30 @@ describe('Kiosk Fail-Safe & Hardware Device Error Handling QA (F03, F04, F06, F0
       };
 
       const formatHpDisplay = (raw: string) => {
-        if (raw.length <= 3) return raw;
-        if (raw.length <= 7) return `${raw.slice(0, 3)}-${raw.slice(3)}`;
-        return `${raw.slice(0, 3)}-${raw.slice(3, 7)}-${raw.slice(7, 11)}`;
+        const suffix = extractPhoneSuffix8(raw);
+        if (suffix.length === 0) return '010-';
+        if (suffix.length <= 4) return `010-${suffix}`;
+        return `010-${suffix.slice(0, 4)}-${suffix.slice(4, 8)}`;
       };
 
-      // 01012345678 입력
+      // 습관적으로 0, 1, 0을 먼저 눌러도 자동 흡수되고 뒷 8자리(12345678)만 깔끔하게 유지됨
       ['0', '1', '0', '1', '2', '3', '4', '5', '6', '7', '8'].forEach(handleKeypadDigit);
-      expect(phoneDigits).toBe('01012345678');
+      expect(phoneDigits).toBe('12345678');
       expect(formatHpDisplay(phoneDigits)).toBe('010-1234-5678');
 
       // Backspace 동작
       handleKeypadBackspace();
-      expect(phoneDigits).toBe('0101234567');
+      expect(phoneDigits).toBe('1234567');
       expect(formatHpDisplay(phoneDigits)).toBe('010-1234-567');
 
       // 재입력
       handleKeypadDigit('8');
-      expect(phoneDigits).toBe('01012345678');
+      expect(phoneDigits).toBe('12345678');
 
       // Clear 동작
       handleKeypadClear();
       expect(phoneDigits).toBe('');
+      expect(formatHpDisplay(phoneDigits)).toBe('010-');
     });
 
     it('F06-3: 전화번호 키패드 인증 제출 시 회원 조회 성공 및 이름 마스킹(홍*동) 본인확인 모달 유도', async () => {

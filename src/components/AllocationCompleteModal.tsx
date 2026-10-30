@@ -31,6 +31,7 @@ interface AllocationCompleteModalProps {
   installmentMonths?: number;
   checkinMode?: string;
   noticeMessage?: string;
+  pauseCountdown?: boolean;
   lang?: 'KO' | 'EN';
   onClose: () => void;
 }
@@ -60,6 +61,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   installmentMonths = 0,
   checkinMode,
   noticeMessage,
+  pauseCountdown = false,
   lang = 'KO',
   onClose
 }) => {
@@ -69,8 +71,12 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   const [countdown, setCountdown] = useState(6);
   const [isPrinting, setIsPrinting] = useState<boolean>(autoPrintReceipt);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
+  const [hasPrintError, setHasPrintError] = useState<boolean>(false);
   const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string; biz_no?: string; ceo_name?: string } | null>(null);
   const hasAutoPrintedRef = useRef(false);
+  const isPrintingRef = useRef(false);
+  const cardReceiptDoneRef = useRef(false);
+  const slipDoneRef = useRef(false);
 
   useEffect(() => {
     api.getStoreInfo().then((info) => {
@@ -79,7 +85,10 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   }, []);
 
   const handlePrint = useCallback(async () => {
+    if (isPrintingRef.current) return;
+    isPrintingRef.current = true;
     setIsPrinting(true);
+    setHasPrintError(false);
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
     try {
       const nowStr = TimeMaster.formatKstDateTime(new Date());
@@ -102,8 +111,14 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
         address: info?.address || '',
       };
 
-      let cardReceiptOk = true;
-      if (payAmount > 0) {
+      // 이전 시도에서 두 항목 모두 성공했었다면 수동 전체 재출력으로 간주하고, 부분 실패 상태였다면 미완료 항목만 선별 재출력
+      const bothPreviouslySucceeded = (payAmount <= 0 || cardReceiptDoneRef.current) && slipDoneRef.current;
+      const shouldPrintCardReceipt = payAmount > 0 && (bothPreviouslySucceeded || !cardReceiptDoneRef.current);
+      const shouldPrintSlip = bothPreviouslySucceeded || !slipDoneRef.current;
+
+      let cardReceiptOk = payAmount <= 0 || cardReceiptDoneRef.current;
+      let failureDetail = '';
+      if (shouldPrintCardReceipt) {
         const cardRes = await kioskHardwareBridge.printReceipt({
           sale_id: resId || `ALLOC-${Date.now()}`,
           receipt_no: resId ? `RC-${resId.slice(-6)}` : `RC-${Date.now().toString().slice(-6)}`,
@@ -148,31 +163,62 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
           },
           header_message: '[ 신용카드 매출전표 ]',
         });
-        cardReceiptOk = cardRes.success;
+        cardReceiptOk = Boolean(cardRes?.success);
+        cardReceiptDoneRef.current = cardReceiptOk;
+        if (!cardReceiptOk && cardRes?.message) {
+          failureDetail = cardRes.message;
+        }
       }
 
-      const slipRes = await printKioskBayAllocationSlip({
-        bayNo,
-        oldBayNo,
-        floor,
-        resId,
-        memberName: memberName || (payAmount > 0 ? '일일타석 고객' : '회원'),
-        memberNo,
-        productName: productName || (payAmount > 0 ? `일일타석 (${durationMin}분)` : '회원권/쿠폰 타석 이용'),
-        actionLabel,
-        checkinMode,
-        durationMin,
-        startTime: startStr,
-        endTime,
-        remainInfo,
-        extraNote: noticeMessage,
-        storeInfo: resolvedStoreInfo,
-        tradeDt: nowStr,
-      });
+      let slipOk = slipDoneRef.current;
+      if (shouldPrintSlip) {
+        const slipRes = await printKioskBayAllocationSlip({
+          bayNo,
+          oldBayNo,
+          floor,
+          resId,
+          memberName: memberName || (payAmount > 0 ? '일일타석 고객' : '회원'),
+          memberNo,
+          productName: productName || (payAmount > 0 ? `일일타석 (${durationMin}분)` : '회원권/쿠폰 타석 이용'),
+          actionLabel,
+          checkinMode,
+          durationMin,
+          startTime: startStr,
+          endTime,
+          remainInfo,
+          extraNote: noticeMessage,
+          storeInfo: resolvedStoreInfo,
+          tradeDt: nowStr,
+        });
+        slipOk = Boolean(slipRes?.success);
+        slipDoneRef.current = slipOk;
+        if (!slipOk && slipRes?.message && !failureDetail) {
+          failureDetail = slipRes.message;
+        }
+      }
 
-      const finalOk = cardReceiptOk && slipRes.success;
-      setPrintStatus(finalOk ? (lang === 'KO' ? '출력 완료' : 'Printed') : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline'));
+      const finalOk = cardReceiptOk && slipOk;
+      setHasPrintError(!finalOk);
+      if (finalOk) {
+        setPrintStatus(lang === 'KO' ? '출력 완료' : 'Printed');
+        setCountdown((prev) => Math.max(prev, 6));
+      } else {
+        setPrintStatus(
+          failureDetail && failureDetail.includes('용지')
+            ? (lang === 'KO' ? '프린터 용지 부족' : 'Paper Out')
+            : failureDetail && failureDetail.includes('커버')
+              ? (lang === 'KO' ? '프린터 커버 열림' : 'Cover Open')
+              : (lang === 'KO' ? '프린터 미연결' : 'Printer Offline')
+        );
+        // 프린터 출력 실패 시 고객이 화면의 타석 번호를 확인하거나 재출력을 누를 수 있도록 20초로 자동 연장
+        setCountdown(20);
+      }
+    } catch {
+      setHasPrintError(true);
+      setPrintStatus(lang === 'KO' ? '프린터 미연결' : 'Printer Offline');
+      setCountdown(20);
     } finally {
+      isPrintingRef.current = false;
       setIsPrinting(false);
     }
   }, [bayNo, oldBayNo, floor, durationMin, startTime, endTime, resId, memberName, memberNo, productName, actionLabel, remainInfo, payAmount, originalAmount, discountAmount, usedPoints, vatYn, cardIssuer, cardNoMasked, terminalId, authNo, installmentMonths, checkinMode, noticeMessage, lang, storeName, storeInfo, settings.terminalId]);
@@ -187,9 +233,9 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
     }
   }, [autoPrintReceipt, handlePrint]);
 
-  // 6초 자동 카운트다운 (인쇄 진행 중에는 대기)
+  // 6초 자동 카운트다운 (인쇄 진행 중이거나 상위 하드웨어 재가동 안내 배너 표출 중에는 대기)
   useEffect(() => {
-    if (isPrinting) return;
+    if (isPrinting || pauseCountdown) return;
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -202,7 +248,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [onClose, isPrinting]);
+  }, [onClose, isPrinting, pauseCountdown]);
 
   // 시각 포맷팅 (HH:mm)
   const formatTime = (timeStr?: string) => {
@@ -231,9 +277,11 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   const startDisplay = formatTime(startTime);
   let endDisplay = formatTime(endTime) || '종료시';
 
+  const isPrinterOffline = !isPrinting && hasPrintError;
+
   return (
     <div 
-      onClick={onClose}
+      data-testid="allocation-complete-backdrop"
       style={{
         position: 'fixed',
         top: 0,
@@ -247,8 +295,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 9999,
-        padding: '24px',
-        cursor: 'pointer'
+        padding: '24px'
       }}
     >
       {/* Apple Snow White Ticket Card */}
@@ -303,14 +350,52 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
             : (lang === 'KO' ? '골프 타석 배정표' : 'Golf Bay Assignment Ticket')}
         </h2>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#86868b', fontSize: '16px', fontWeight: 500, marginBottom: noticeMessage ? '16px' : '32px', letterSpacing: '-0.3px' }}>
-          <Printer size={18} style={{ color: '#0071e3' }} />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: isPrinting ? '#eff6ff' : isPrinterOffline ? '#fef2f2' : '#f0fdf4',
+            border: `1px solid ${isPrinting ? '#bfdbfe' : isPrinterOffline ? '#fecdd3' : '#bbf7d0'}`,
+            padding: '8px 18px',
+            borderRadius: '999px',
+            color: isPrinting ? '#1d4ed8' : isPrinterOffline ? '#dc2626' : '#15803d',
+            fontSize: '15px',
+            fontWeight: 700,
+            marginBottom: isPrinterOffline ? '12px' : (noticeMessage ? '16px' : '28px'),
+            letterSpacing: '-0.3px'
+          }}
+        >
+          <Printer size={18} style={{ color: isPrinting ? '#0071e3' : isPrinterOffline ? '#dc2626' : '#15803d' }} />
           <span>
             {printStatus 
               ? `${lang === 'KO' ? '영수증 인쇄 상태' : 'Print Status'}: ${printStatus}` 
               : (lang === 'KO' ? '영수증 및 확인표가 현장에서 출력 중입니다.' : 'Printing receipt and confirmation ticket...')}
           </span>
         </div>
+
+        {isPrinterOffline && (
+          <div
+            data-testid="printer-offline-warning"
+            style={{
+              width: '100%',
+              background: '#fff1f2',
+              border: '1px solid #fecdd3',
+              borderRadius: '16px',
+              padding: '12px 16px',
+              marginBottom: noticeMessage ? '12px' : '20px',
+              fontSize: '14px',
+              fontWeight: 700,
+              color: '#be123c',
+              lineHeight: 1.45,
+              textAlign: 'center'
+            }}
+          >
+            {lang === 'KO'
+              ? '⚠️ 프린터 용지 부족 또는 연결 지연으로 확인표가 출력되지 않았습니다. 타석 배정은 정상 완료되었으니 아래 배정 타석 번호를 확인하신 뒤 바로 입장하시거나 [영수증 재출력]을 눌러주세요.'
+              : '⚠️ Ticket printing failed due to paper shortage or printer offline. Your bay is assigned—please check your bay number below or tap [Reprint].'}
+          </div>
+        )}
 
         {noticeMessage && (
           <div style={{
@@ -394,6 +479,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
         <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
           <button
             onClick={handlePrint}
+            disabled={isPrinting}
             style={{
               flex: '1',
               height: '64px',
@@ -403,7 +489,8 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
               border: '1px solid #d2d2d7',
               fontSize: '18px',
               fontWeight: 700,
-              cursor: 'pointer',
+              cursor: isPrinting ? 'not-allowed' : 'pointer',
+              opacity: isPrinting ? 0.55 : 1,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
