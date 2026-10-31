@@ -1,6 +1,8 @@
 import React from 'react';
 import { UserCheck, Check, X, AlertTriangle, CreditCard, Hand, Clock, Calendar, RefreshCw } from 'lucide-react';
 import { Member, MemberAsset, Bay } from '../services/api';
+import { TimeMaster } from '../utils/timeMaster';
+import { normalizeYmdDigits } from '../utils/kioskPurchaseEligibility';
 
 const DEFAULT_SESSION_MIN = 60;
 
@@ -50,9 +52,13 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
   const bayMaxMin = currentBayObj?.max_assignable_min;
   const nextResStartStr = currentBayObj?.next_limit_res_start_time || '예정';
 
-  // 1. 유효 배정 가능 이용권 필터링 (SSOT logic_type / access_rules)
+  const todayDigits = normalizeYmdDigits(TimeMaster.getKstYmd(TimeMaster.getSyncedDate()));
+
+  // 1. 유효 배정 가능 이용권 필터링 (SSOT logic_type / access_rules / 미래 개시일 이중 방어)
   const validAssets = (authMember.assets || []).filter(asset => {
     if (asset.is_assignable === false) return false;
+    const startDigits = normalizeYmdDigits(asset.start_date);
+    if (todayDigits && startDigits && startDigits > todayDigits) return false;
     const logicType = (asset.logic_type || 'PERIOD').toUpperCase();
     if (logicType === 'COUNT' || logicType === 'COUPON') {
       const cnt = asset.remain_cnt ?? asset.rem_count ?? 0;

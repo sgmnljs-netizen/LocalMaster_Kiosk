@@ -265,9 +265,10 @@ export class TimeMaster {
     return `${ymd} ${hh}:${mm}:${ss}`;
   }
 
-  /** 매장 마감시각까지 남은 분(minute) 산출 (심야 익일 마감 06:00~05:00 및 주간 마감 정밀 구분) */
+  /** 매장 마감시각까지 남은 분(minute) 산출 (심야 익일 마감 06:00~05:00 및 자정 00:00 마감 정밀 구분) */
   static getMinutesUntilClose(storeCloseTime?: string | null, now: Date = TimeMaster.getSyncedDate()): number {
-    const cleanClose = (storeCloseTime || '24:00').replace(':', '').padStart(4, '0');
+    const rawClean = (storeCloseTime || '24:00').replace(':', '').padStart(4, '0');
+    const cleanClose = rawClean === '0000' ? '2400' : rawClean;
     const closeH = parseInt(cleanClose.slice(0, 2), 10);
     const closeM = parseInt(cleanClose.slice(2, 4), 10);
     const isOvernightClose = closeH === 24 || closeH < 6 || (closeH === 6 && closeM === 0);

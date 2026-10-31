@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Wrench, RefreshCw, X } from 'lucide-react';
 
 export interface ErrorModalData {
@@ -17,6 +17,13 @@ interface ErrorMessageModalProps {
   onRetry?: () => void;
 }
 
+export const buildErrorModalTimerSessionKey = (
+  data: Pick<ErrorModalData, 'isVisible' | 'title' | 'message'>
+): string => {
+  if (!data.isVisible) return '';
+  return `${data.title || ''}::${data.message}`;
+};
+
 export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
   data,
   onClose,
@@ -29,21 +36,26 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
     onClose();
   };
 
+  const handleCloseRef = useRef(handleClose);
+  handleCloseRef.current = handleClose;
+
   const handleRetry = () => {
     data.onRetryCallback?.();
     if (onRetry) onRetry();
     onClose();
   };
 
+  const timerSessionKey = buildErrorModalTimerSessionKey(data);
+
   useEffect(() => {
-    if (!data.isVisible) return;
+    if (!timerSessionKey) return;
     setCountdown(12);
 
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          handleClose();
+          handleCloseRef.current();
           return 0;
         }
         return prev - 1;
@@ -51,7 +63,7 @@ export const ErrorMessageModal: React.FC<ErrorMessageModalProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [data.isVisible, onClose]);
+  }, [timerSessionKey]);
 
   if (!data.isVisible) return null;
 

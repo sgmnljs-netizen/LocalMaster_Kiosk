@@ -3,6 +3,7 @@ import { Printer, CheckCircle, XCircle } from 'lucide-react';
 import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
 import { printKioskBayAllocationSlip } from '../utils/kioskSlipPrinter';
 import { api } from '../services/api';
+import { Code128BarcodeSvg } from './common/Code128BarcodeSvg';
 
 export interface ReceiptData {
   branchNm: string;
@@ -356,41 +357,17 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
           </div>
         </div>
 
-        {/* 하단 바코드 & QR 시각 렌더러 (입입장용 바코드 셰이프 SVG) */}
+        {/* 하단 표준 Code128B 스캔 바코드 렌더러 (게이트 출입 및 예약 확인용) */}
         <div style={{ textAlign: 'center', paddingTop: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#555555' }}>[ 게이트 출입 및 타석 배정용 QR ]</span>
-          
-          <svg width="220" height="74" viewBox="0 0 220 74" style={{ background: '#ffffff', padding: '6px', borderRadius: '6px', border: '1px solid #dcdcd8' }}>
-            {/* 모의 1D 바코드 SVG 드로잉 */}
-            <g fill="#111111">
-              <rect x="15" y="5" width="4" height="46" />
-              <rect x="23" y="5" width="2" height="46" />
-              <rect x="27" y="5" width="6" height="46" />
-              <rect x="37" y="5" width="2" height="46" />
-              <rect x="43" y="5" width="8" height="46" />
-              <rect x="55" y="5" width="4" height="46" />
-              <rect x="63" y="5" width="2" height="46" />
-              <rect x="69" y="5" width="6" height="46" />
-              <rect x="79" y="5" width="4" height="46" />
-              <rect x="87" y="5" width="8" height="46" />
-              <rect x="99" y="5" width="2" height="46" />
-              <rect x="105" y="5" width="6" height="46" />
-              <rect x="115" y="5" width="4" height="46" />
-              <rect x="123" y="5" width="2" height="46" />
-              <rect x="129" y="5" width="8" height="46" />
-              <rect x="141" y="5" width="4" height="46" />
-              <rect x="149" y="5" width="6" height="46" />
-              <rect x="159" y="5" width="2" height="46" />
-              <rect x="165" y="5" width="8" height="46" />
-              <rect x="177" y="5" width="4" height="46" />
-              <rect x="185" y="5" width="6" height="46" />
-              <rect x="195" y="5" width="2" height="46" />
-              <rect x="201" y="5" width="4" height="46" />
-            </g>
-            <text x="110" y="65" textAnchor="middle" fontSize="10" fontWeight="bold" fill="#111111">
-              {receiptData.resId.slice(0, 16)}
-            </text>
-          </svg>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: '#555555' }}>[ 게이트 출입 및 타석 확인용 바코드 ]</span>
+
+          <Code128BarcodeSvg
+            value={String(receiptData.resId || receiptData.apprNo || 'GOLFOS').slice(0, 24)}
+            width={220}
+            barHeight={46}
+            labelText={String(receiptData.resId || receiptData.apprNo || '').slice(0, 20)}
+            testId="receipt-printer-barcode"
+          />
 
           <span style={{ fontSize: '11px', color: '#777777', marginTop: '4px' }}>
             * 타석 입장 및 파3 코스 입장 시 바코드를 스캔해 주십시오.

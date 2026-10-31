@@ -2,7 +2,12 @@
  * [키오스크 NICE 단말기 어댑터]
  */
 
-import { BaseVanAdapter } from './BaseVanAdapter';
+import {
+  BaseVanAdapter,
+  KIOSK_VAN_APPROVAL_TIMEOUT_SEC,
+  KIOSK_VAN_CANCEL_TIMEOUT_MS,
+  formatKstIsoTimestamp,
+} from './BaseVanAdapter';
 import type {
   VanPaymentState,
   CardPaymentRequestParams,
@@ -53,19 +58,21 @@ export class NiceVanAdapter extends BaseVanAdapter {
   ): Promise<CardApprovalResult> {
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
+    const effectiveTerminalId = params.terminalId || this.config.terminalId;
 
     onStateChange?.('READY');
 
     try {
       onStateChange?.('WAITING_CARD');
 
-      const vat = params.vatAmount ?? Math.round(params.amount / 11);
+      const vat = params.isTaxFree ? 0 : (params.vatAmount ?? Math.round(params.amount / 11));
+      const timeoutSec = params.timeoutSeconds || this.config.timeoutSeconds || KIOSK_VAN_APPROVAL_TIMEOUT_SEC;
       const payload = {
         TRAN_TYPE: 'CREDIT_APPROVE',
         TOTAL_AMOUNT: params.amount,
         TAX_AMOUNT: vat,
         INSTALLMENT: params.installmentMonths || 0,
-        TERMINAL_ID: this.config.terminalId,
+        TERMINAL_ID: effectiveTerminalId,
         ORDER_NO: params.orderId || `ORD-${Date.now()}`,
       };
 
@@ -75,7 +82,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout((params.timeoutSeconds || 30) * 1000)]) : signal,
+        signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(timeoutSec * 1000)]) : signal,
       });
 
       if (!res.ok) {
@@ -90,13 +97,13 @@ export class NiceVanAdapter extends BaseVanAdapter {
         return {
           success: true,
           auth_code: data.AUTH_NO || data.auth_no || data.auth_code,
-          approved_at: data.AUTH_DATE || data.auth_date || new Date().toISOString(),
+          approved_at: data.AUTH_DATE || data.auth_date || formatKstIsoTimestamp(),
           card_no_masked: data.CARD_NO || data.card_no || '****-****-****-****',
           issuer_code: data.ISSUER_CD || data.issuer_cd,
           issuer_name: data.ISSUER_NM || data.issuer_nm || '신용카드',
           acquirer_code: data.ACQUIRER_CD || data.acquirer_cd,
           acquirer_name: data.ACQUIRER_NM || data.acquirer_nm || '신용카드',
-          terminal_id: data.TERMINAL_ID || this.config.terminalId,
+          terminal_id: data.TERMINAL_ID || effectiveTerminalId,
           merchant_no: data.MERCHANT_NO || data.merchant_no,
           amount: params.amount,
           installment_months: params.installmentMonths || 0,
@@ -149,14 +156,14 @@ export class NiceVanAdapter extends BaseVanAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(KIOSK_VAN_CANCEL_TIMEOUT_MS),
       });
 
       if (!res.ok) {
         return {
           success: false,
           canceled_amount: 0,
-          canceled_at: new Date().toISOString(),
+          canceled_at: formatKstIsoTimestamp(),
           error_code: 'E_NETWORK_ERROR',
           error_message: `NICE 취소 응답 오류 (HTTP ${res.status})`,
         };
@@ -167,7 +174,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
         return {
           success: true,
           cancel_auth_code: data.AUTH_NO || data.auth_no,
-          canceled_at: data.AUTH_DATE || new Date().toISOString(),
+          canceled_at: data.AUTH_DATE || formatKstIsoTimestamp(),
           canceled_amount: params.amount,
           raw_response: data,
         };
@@ -175,7 +182,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         canceled_amount: 0,
-        canceled_at: new Date().toISOString(),
+        canceled_at: formatKstIsoTimestamp(),
         error_code: 'E_UNKNOWN',
         error_message: data.RES_MSG || data.res_msg || 'NICE 취소 실패',
         raw_response: data,
@@ -184,7 +191,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         canceled_amount: 0,
-        canceled_at: new Date().toISOString(),
+        canceled_at: formatKstIsoTimestamp(),
         error_code: 'E_TIMEOUT',
         error_message: err instanceof Error ? err.message : 'NICE 단말기 통신 오류',
       };
@@ -224,7 +231,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
         return {
           success: true,
           auth_code: data.AUTH_NO || data.auth_no,
-          approved_at: data.AUTH_DATE || new Date().toISOString(),
+          approved_at: data.AUTH_DATE || formatKstIsoTimestamp(),
           receipt_type: params.receiptType,
           identity_no_masked: data.IDENTITY_NO_MASKED || '010-****-****',
           amount: params.amount,
@@ -236,7 +243,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         auth_code: '',
-        approved_at: new Date().toISOString(),
+        approved_at: formatKstIsoTimestamp(),
         receipt_type: params.receiptType,
         identity_no_masked: '',
         amount: params.amount,
@@ -252,7 +259,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         auth_code: '',
-        approved_at: new Date().toISOString(),
+        approved_at: formatKstIsoTimestamp(),
         receipt_type: params.receiptType,
         identity_no_masked: '',
         amount: params.amount,
@@ -293,7 +300,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
         return {
           success: true,
           auth_code: data.AUTH_NO || data.auth_no,
-          approved_at: data.AUTH_DATE || new Date().toISOString(),
+          approved_at: data.AUTH_DATE || formatKstIsoTimestamp(),
           receipt_type: 'PERSONAL',
           identity_no_masked: '010-****-****',
           amount: params.amount,
@@ -304,7 +311,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         auth_code: '',
-        approved_at: new Date().toISOString(),
+        approved_at: formatKstIsoTimestamp(),
         receipt_type: 'PERSONAL',
         identity_no_masked: '',
         amount: params.amount,
@@ -315,7 +322,7 @@ export class NiceVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         auth_code: '',
-        approved_at: new Date().toISOString(),
+        approved_at: formatKstIsoTimestamp(),
         receipt_type: 'PERSONAL',
         identity_no_masked: '',
         amount: params.amount,

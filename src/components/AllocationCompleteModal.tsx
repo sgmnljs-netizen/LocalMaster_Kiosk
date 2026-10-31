@@ -5,6 +5,7 @@ import { printKioskBayAllocationSlip } from '../utils/kioskSlipPrinter';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { TimeMaster } from '../utils/timeMaster';
 import { api } from '../services/api';
+import { Code128BarcodeSvg } from './common/Code128BarcodeSvg';
 
 interface AllocationCompleteModalProps {
   bayNo: number | string;
@@ -388,12 +389,24 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
               fontWeight: 700,
               color: '#be123c',
               lineHeight: 1.45,
-              textAlign: 'center'
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '10px',
             }}
           >
-            {lang === 'KO'
-              ? '⚠️ 프린터 용지 부족 또는 연결 지연으로 확인표가 출력되지 않았습니다. 타석 배정은 정상 완료되었으니 아래 배정 타석 번호를 확인하신 뒤 바로 입장하시거나 [영수증 재출력]을 눌러주세요.'
-              : '⚠️ Ticket printing failed due to paper shortage or printer offline. Your bay is assigned—please check your bay number below or tap [Reprint].'}
+            <span>
+              {lang === 'KO'
+                ? '⚠️ 프린터 용지 부족 또는 연결 지연으로 확인표가 출력되지 않았습니다. 타석 배정은 정상 완료되었으니 아래 배정 타석 번호를 확인하신 뒤 바로 입장하시거나 [영수증 재출력]을 눌러주세요.'
+                : '⚠️ Ticket printing failed due to paper shortage or printer offline. Your bay is assigned—please check your bay number below or tap [Reprint].'}
+            </span>
+            <Code128BarcodeSvg
+              value={String(resId || `BAY-${bayNo}`).slice(0, 24)}
+              width={210}
+              barHeight={42}
+              testId="allocation-offline-barcode"
+            />
           </div>
         )}
 

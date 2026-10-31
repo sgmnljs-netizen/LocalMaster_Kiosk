@@ -2,7 +2,12 @@
  * [키오스크 SMARTRO 단말기 어댑터]
  */
 
-import { BaseVanAdapter } from './BaseVanAdapter';
+import {
+  BaseVanAdapter,
+  KIOSK_VAN_APPROVAL_TIMEOUT_SEC,
+  KIOSK_VAN_CANCEL_TIMEOUT_MS,
+  formatKstIsoTimestamp,
+} from './BaseVanAdapter';
 import type {
   VanPaymentState,
   CardPaymentRequestParams,
@@ -53,19 +58,21 @@ export class SmartroVanAdapter extends BaseVanAdapter {
   ): Promise<CardApprovalResult> {
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
+    const effectiveTerminalId = params.terminalId || this.config.terminalId;
 
     onStateChange?.('READY');
 
     try {
       onStateChange?.('WAITING_CARD');
 
-      const vat = params.vatAmount ?? Math.round(params.amount / 11);
+      const vat = params.isTaxFree ? 0 : (params.vatAmount ?? Math.round(params.amount / 11));
+      const timeoutSec = params.timeoutSeconds || this.config.timeoutSeconds || KIOSK_VAN_APPROVAL_TIMEOUT_SEC;
       const payload = {
         service: 'CREDIT_APPROVAL',
         total_amount: params.amount,
         tax: vat,
         installment: String(params.installmentMonths || 0).padStart(2, '0'),
-        cat_id: this.config.terminalId,
+        cat_id: effectiveTerminalId,
         order_id: params.orderId || `ORD-${Date.now()}`,
       };
 
@@ -75,7 +82,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout((params.timeoutSeconds || 30) * 1000)]) : signal,
+        signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(timeoutSec * 1000)]) : signal,
       });
 
       if (!res.ok) {
@@ -90,13 +97,13 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         return {
           success: true,
           auth_code: data.auth_no || data.approval_no || data.auth_code,
-          approved_at: data.auth_date || data.trans_date || new Date().toISOString(),
+          approved_at: data.auth_date || data.trans_date || formatKstIsoTimestamp(),
           card_no_masked: data.card_no || '****-****-****-****',
           issuer_code: data.issuer_code || data.card_code,
           issuer_name: data.issuer_name || data.card_name || '신용카드',
           acquirer_code: data.acquirer_code || data.purchase_code,
           acquirer_name: data.acquirer_name || data.purchase_name || '신용카드',
-          terminal_id: data.cat_id || this.config.terminalId,
+          terminal_id: data.cat_id || effectiveTerminalId,
           merchant_no: data.merchant_no,
           amount: params.amount,
           installment_months: params.installmentMonths || 0,
@@ -148,14 +155,14 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(KIOSK_VAN_CANCEL_TIMEOUT_MS),
       });
 
       if (!res.ok) {
         return {
           success: false,
           canceled_amount: 0,
-          canceled_at: new Date().toISOString(),
+          canceled_at: formatKstIsoTimestamp(),
           error_code: 'E_NETWORK_ERROR',
           error_message: `SMARTRO 취소 응답 오류 (HTTP ${res.status})`,
         };
@@ -166,7 +173,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         return {
           success: true,
           cancel_auth_code: data.auth_no || data.approval_no,
-          canceled_at: data.auth_date || new Date().toISOString(),
+          canceled_at: data.auth_date || formatKstIsoTimestamp(),
           canceled_amount: params.amount,
           raw_response: data,
         };
@@ -174,7 +181,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         canceled_amount: 0,
-        canceled_at: new Date().toISOString(),
+        canceled_at: formatKstIsoTimestamp(),
         error_code: 'E_UNKNOWN',
         error_message: data.reply_msg || 'SMARTRO 취소 실패',
         raw_response: data,
@@ -183,7 +190,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         canceled_amount: 0,
-        canceled_at: new Date().toISOString(),
+        canceled_at: formatKstIsoTimestamp(),
         error_code: 'E_TIMEOUT',
         error_message: err instanceof Error ? err.message : 'SMARTRO 단말기 통신 오류',
       };
@@ -223,7 +230,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         return {
           success: true,
           auth_code: data.auth_no || data.approval_no,
-          approved_at: data.auth_date || new Date().toISOString(),
+          approved_at: data.auth_date || formatKstIsoTimestamp(),
           receipt_type: params.receiptType,
           identity_no_masked: data.identity_no_masked || '010-****-****',
           amount: params.amount,
@@ -235,7 +242,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         auth_code: '',
-        approved_at: new Date().toISOString(),
+        approved_at: formatKstIsoTimestamp(),
         receipt_type: params.receiptType,
         identity_no_masked: '',
         amount: params.amount,
@@ -251,7 +258,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         auth_code: '',
-        approved_at: new Date().toISOString(),
+        approved_at: formatKstIsoTimestamp(),
         receipt_type: params.receiptType,
         identity_no_masked: '',
         amount: params.amount,
@@ -292,7 +299,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
         return {
           success: true,
           auth_code: data.auth_no || data.approval_no,
-          approved_at: data.auth_date || new Date().toISOString(),
+          approved_at: data.auth_date || formatKstIsoTimestamp(),
           receipt_type: 'PERSONAL',
           identity_no_masked: '010-****-****',
           amount: params.amount,
@@ -303,7 +310,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         auth_code: '',
-        approved_at: new Date().toISOString(),
+        approved_at: formatKstIsoTimestamp(),
         receipt_type: 'PERSONAL',
         identity_no_masked: '',
         amount: params.amount,
@@ -314,7 +321,7 @@ export class SmartroVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         auth_code: '',
-        approved_at: new Date().toISOString(),
+        approved_at: formatKstIsoTimestamp(),
         receipt_type: 'PERSONAL',
         identity_no_masked: '',
         amount: params.amount,

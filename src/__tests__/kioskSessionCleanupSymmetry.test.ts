@@ -12,11 +12,21 @@ describe('7순위: Kiosk Session Reset 3-Way Symmetry (handleLogout / handleLogo
     'utf-8'
   );
 
-  it('1. handleLogout, handleLogoutToHome, and handleGoHome all delegate to atomic resetKioskSessionState()', () => {
+  it('1. handleLogout, handleLogoutToHome, and handleGoHome all delegate to atomic resetKioskSessionState() (with C-4 mid-payment lock guard)', () => {
     expect(kioskAppSrc).toContain("const resetKioskSessionState = (targetStep: 'INTRO' | 'MAIN_DASHBOARD') =>");
-    expect(kioskAppSrc).toContain("const handleLogout = () => {\n    resetKioskSessionState('INTRO');\n  };");
+    const logoutBlock = kioskAppSrc.slice(
+      kioskAppSrc.indexOf('const handleLogout = () => {'),
+      kioskAppSrc.indexOf('const handleLogoutRef =')
+    );
+    expect(logoutBlock).toContain('if (isCriticalPaymentLocked())');
+    expect(logoutBlock).toContain("resetKioskSessionState('INTRO');");
     expect(kioskAppSrc).toContain("const handleLogoutToHome = () => {\n    resetKioskSessionState('MAIN_DASHBOARD');\n  };");
-    expect(kioskAppSrc).toContain("const handleGoHome = () => {\n    resetKioskSessionState('MAIN_DASHBOARD');\n  };");
+    const goHomeBlock = kioskAppSrc.slice(
+      kioskAppSrc.indexOf('const handleGoHome = () => {'),
+      kioskAppSrc.indexOf('const handleGoBack = () => {')
+    );
+    expect(goHomeBlock).toContain('if (isCriticalPaymentLocked())');
+    expect(goHomeBlock).toContain("resetKioskSessionState('MAIN_DASHBOARD');");
 
     // Extract resetKioskSessionState body and verify all critical state/ref/timer cleanups
     const startIdx = kioskAppSrc.indexOf("const resetKioskSessionState = (targetStep: 'INTRO' | 'MAIN_DASHBOARD') =>");

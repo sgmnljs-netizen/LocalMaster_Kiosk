@@ -7,9 +7,9 @@
  */
 
 import { kioskVanClient } from './van_client';
+import { extractKstYyyyMmDd } from './adapters/BaseVanAdapter';
 import { api } from '../api';
 import { PaymentOutboxManager } from '../paymentResilience';
-import { TimeMaster } from '../../utils/timeMaster';
 import type { CardApprovalResult } from './van_types';
 
 export interface ExecuteAutoReversalParams {
@@ -54,9 +54,7 @@ export async function executeKioskAutoReversal(
 
   // 2. VAN 단말기 망취소 시도 (2-Phase Commit 보상 트랜잭션)
   try {
-    const orgDate =
-      (cardApproval.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) ||
-      TimeMaster.getKstYmd(new Date()).replace(/-/g, '');
+    const orgDate = extractKstYyyyMmDd(cardApproval.approved_at);
     const cancelRes = await kioskVanClient.cancelCardPayment({
       amount: payAmount || cardApproval.amount,
       orgAuthCode: cardApproval.auth_code,

@@ -2,7 +2,7 @@
  * [키오스크 가상 단말기 시뮬레이터 (MockVanAdapter)]
  */
 
-import { BaseVanAdapter } from './BaseVanAdapter';
+import { BaseVanAdapter, formatKstIsoTimestamp } from './BaseVanAdapter';
 import type {
   VanPaymentState,
   CardPaymentRequestParams,
@@ -90,13 +90,13 @@ export class MockVanAdapter extends BaseVanAdapter {
     return {
       success: true,
       auth_code: authCode,
-      approved_at: new Date().toISOString(),
+      approved_at: formatKstIsoTimestamp(),
       card_no_masked: maskedCard,
       issuer_code: issuer.code,
       issuer_name: issuer.name,
       acquirer_code: issuer.code,
       acquirer_name: issuer.name,
-      terminal_id: this.config.terminalId,
+      terminal_id: params.terminalId || this.config.terminalId,
       merchant_no: 'M99999999',
       amount: params.amount,
       installment_months: params.installmentMonths || 0,
@@ -120,7 +120,7 @@ export class MockVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         canceled_amount: 0,
-        canceled_at: new Date().toISOString(),
+        canceled_at: formatKstIsoTimestamp(),
         error_code: 'E_INVALID_AUTH_NO',
         error_message: '원거래 승인번호가 유효하지 않습니다.',
       };
@@ -130,7 +130,7 @@ export class MockVanAdapter extends BaseVanAdapter {
     return {
       success: true,
       cancel_auth_code: cancelAuthCode,
-      canceled_at: new Date().toISOString(),
+      canceled_at: formatKstIsoTimestamp(),
       canceled_amount: params.amount,
       raw_response: {
         mock: true,
@@ -155,7 +155,7 @@ export class MockVanAdapter extends BaseVanAdapter {
       return {
         success: false,
         auth_code: '',
-        approved_at: new Date().toISOString(),
+        approved_at: formatKstIsoTimestamp(),
         receipt_type: params.receiptType,
         identity_no_masked: '',
         amount: params.amount,
@@ -179,7 +179,7 @@ export class MockVanAdapter extends BaseVanAdapter {
     return {
       success: true,
       auth_code: authCode,
-      approved_at: new Date().toISOString(),
+      approved_at: formatKstIsoTimestamp(),
       receipt_type: params.receiptType,
       identity_no_masked: idMasked,
       amount: params.amount,
@@ -196,7 +196,7 @@ export class MockVanAdapter extends BaseVanAdapter {
     return {
       success: true,
       auth_code: `CC${params.orgAuthCode.slice(-7)}`,
-      approved_at: new Date().toISOString(),
+      approved_at: formatKstIsoTimestamp(),
       receipt_type: 'PERSONAL',
       identity_no_masked: '010-****-****',
       amount: params.amount,

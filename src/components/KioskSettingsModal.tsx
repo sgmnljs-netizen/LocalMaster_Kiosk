@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Settings, X, Monitor, Wifi, Shield, Zap, Loader2, CheckCircle2, AlertTriangle, LayoutGrid, RotateCcw, Star } from 'lucide-react';
 import {
   useKioskSettings,
@@ -10,9 +10,16 @@ import {
   DEFAULT_AUTH_METHODS,
   canonicalizeKioskMenuId,
   isKioskMenuEnabled,
+  normalizeVanProviderType,
+  resolveDefaultVanPort,
+  resolveVanStatusEndpointPath,
+  clearKioskAdminSession,
+  bootstrapLocalKioskSettings,
+  saveKioskSettings,
 } from '../stores/kioskSettings';
 import { api } from '../services/api';
 import { kioskVanClient } from '../services/van/van_client';
+import { VirtualKeyboard, type VirtualKeyboardMode } from './VirtualKeyboard';
 
 interface KioskSettingsModalProps {
   isOpen: boolean;
@@ -49,7 +56,7 @@ const AUTH_METHOD_ITEMS: { key: KioskAuthModeKey; label: string; desc: string; e
 ];
 
 const FALLBACK_KIOSK_OPTIONS: TerminalDeviceItem[] = [
-  { device_id: 'DEV_KIOSK_01', device_name: '입구 무인 키오스크 1호기', terminal_id: '88010003', vcat_port: 9099, van_provider: 'SMARTRO', device_type: 'KIOSK' },
+  { device_id: 'DEV_KIOSK_01', device_name: '입구 무인 키오스크 1호기', terminal_id: '88010003', vcat_port: 8089, van_provider: 'SMARTRO', device_type: 'KIOSK' },
   { device_id: 'DEV_KIOSK_02', device_name: '2층 무인 키오스크 2호기', terminal_id: '88010004', vcat_port: 9099, van_provider: 'KCP', device_type: 'KIOSK' },
   { device_id: 'custom', device_name: '⚙️ 직접 입력 (커스텀 설정)', terminal_id: '', vcat_port: 9099, van_provider: 'KCP', device_type: 'KIOSK' },
 ];
@@ -67,7 +74,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const [terminalList, setTerminalList] = useState<TerminalDeviceItem[]>(FALLBACK_KIOSK_OPTIONS);
   const [formDeviceId, setFormDeviceId] = useState(settings.deviceId);
   const [formDeviceName, setFormDeviceName] = useState(settings.deviceName);
-  const [formProviderType, setFormProviderType] = useState(settings.providerType);
+  const [formProviderType, setFormProviderType] = useState(normalizeVanProviderType(settings.providerType));
   const [formTerminalId, setFormTerminalId] = useState(settings.terminalId);
   const [formVcatPort, setFormVcatPort] = useState(settings.vcatPort);
 
@@ -75,7 +82,8 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const [formStoreCode, setFormStoreCode] = useState(settings.storeCode);
   const [formDeviceKey, setFormDeviceKey] = useState(settings.deviceKey);
 
-  const [formAdminPin, setFormAdminPin] = useState(settings.adminPin);
+  // 보안 정책: 기존 PIN 평문 노출 및 실수로 초기화되는 사고 방지를 위해 입력란은 빈 문자열로 시작 (변경 시에만 4자리 입력)
+  const [formAdminPin, setFormAdminPin] = useState('');
   const [formIsMaintenance, setFormIsMaintenance] = useState(settings.isMaintenanceMode);
 
   const [formMenuOverrides, setFormMenuOverrides] = useState<KioskMenuVisibilityMap>(settings.menuOverrides || {});
@@ -97,6 +105,12 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const [isPinging, setIsPinging] = useState(false);
   const [pingStatus, setPingStatus] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [activeKeyboardField, setActiveKeyboardField] = useState<
+    'terminalId' | 'vcatPort' | 'apiUrl' | 'storeCode' | 'deviceKey' | 'adminPin' | null
+  >(null);
+  const [isBootstrapping, setIsBootstrapping] = useState(false);
+  const [bootstrapMsg, setBootstrapMsg] = useState<string | null>(null);
+  const wasOpenRef = useRef<boolean>(false);
 
   const configurableMenus = useMemo(() => {
     const builtinCanonicalSet = new Set(STANDARD_KIOSK_MENUS.map((m) => m.id));
@@ -127,17 +141,20 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
     return true;
   };
 
+  // 모달이 닫힘 -> 열림(false -> true) 전환될 때만 폼을 초기화하여,
+  // 10초 주기 백그라운드 설정 폴링이나 자동 불러오기 저장 시 입력 중인 값·가상키보드·안내문구가 초기화되지 않도록 보호
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpenRef.current) {
+      wasOpenRef.current = true;
       setFormDeviceId(settings.deviceId);
       setFormDeviceName(settings.deviceName);
-      setFormProviderType(settings.providerType);
+      setFormProviderType(normalizeVanProviderType(settings.providerType));
       setFormTerminalId(settings.terminalId);
       setFormVcatPort(settings.vcatPort);
       setFormApiUrl(settings.apiUrl);
       setFormStoreCode(settings.storeCode);
       setFormDeviceKey(settings.deviceKey);
-      setFormAdminPin(settings.adminPin);
+      setFormAdminPin('');
       setFormIsMaintenance(settings.isMaintenanceMode);
       setFormMenuOverrides(settings.menuOverrides || {});
       setFormAuthMethods({
@@ -150,6 +167,8 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       setPolicyGuardMsg(null);
       setPingStatus(null);
       setSaveSuccess(false);
+      setActiveKeyboardField(null);
+      setBootstrapMsg(null);
 
       // 백엔드 실시간 단말기 마스터 조회
       const fetchTerminals = async () => {
@@ -164,7 +183,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
               device_name: '⚙️ 직접 입력 (커스텀 설정)',
               terminal_id: '',
               vcat_port: 9099,
-              van_provider: 'KCP',
+              van_provider: 'KCP_VAN',
               device_type: 'KIOSK',
             };
             setTerminalList([...list, customOpt]);
@@ -174,8 +193,45 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
         }
       };
       fetchTerminals();
+    } else if (!isOpen) {
+      wasOpenRef.current = false;
     }
   }, [isOpen, settings]);
+
+  // 도킹 화상키보드 열림 시 가로형 모니터 등 낮은 뷰포트에서도 활성 입력창이 가려지지 않도록 중앙 스크롤 보장
+  useEffect(() => {
+    if (!isOpen || !activeKeyboardField || typeof document === 'undefined') return;
+    const timer = window.setTimeout(() => {
+      const targetEl = document.querySelector(
+        `[data-testid="settings-input-${activeKeyboardField}"]`
+      ) as HTMLElement | null;
+      if (targetEl && typeof targetEl.scrollIntoView === 'function') {
+        targetEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, activeKeyboardField]);
+
+  // 🛡️ 관리자 설정창 열림 상태에서 현장 담당자 이탈 방치 시 180초(3분) 무조작 자동 닫힘 가드
+  useEffect(() => {
+    if (!isOpen) return;
+    const SETTINGS_IDLE_CLOSE_MS = 180000;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const resetIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        clearKioskAdminSession();
+        onClose();
+      }, SETTINGS_IDLE_CLOSE_MS);
+    };
+    resetIdle();
+    const events = ['click', 'touchstart', 'keydown', 'input', 'change', 'wheel'];
+    events.forEach((ev) => window.addEventListener(ev, resetIdle));
+    return () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      events.forEach((ev) => window.removeEventListener(ev, resetIdle));
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -236,9 +292,10 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       setFormDeviceId(matched.device_id);
       setFormDeviceName(matched.device_name);
       if (matched.device_id !== 'custom') {
+        const nextProv = normalizeVanProviderType(matched.van_provider);
         setFormTerminalId(matched.terminal_id);
-        setFormVcatPort(String(matched.vcat_port));
-        setFormProviderType(matched.van_provider);
+        setFormVcatPort(String(matched.vcat_port || resolveDefaultVanPort(nextProv)));
+        setFormProviderType(nextProv);
       }
     }
   };
@@ -246,38 +303,46 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const handlePingVcat = async () => {
     setIsPinging(true);
     setPingStatus(null);
+    const statusPath = resolveVanStatusEndpointPath(formProviderType);
     try {
-      const res = await fetch(`http://127.0.0.1:${formVcatPort}/vcat/status`, {
+      const res = await fetch(`http://127.0.0.1:${formVcatPort}${statusPath}`, {
         signal: AbortSignal.timeout(3000),
       });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
-      setPingStatus(`[${formDeviceName}] VCAT 포트(${formVcatPort}) 통신 정상 확인!`);
+      setPingStatus(`[${formDeviceName}] VAN 데몬(${formVcatPort}${statusPath}) 통신 정상 확인!`);
     } catch {
-      setPingStatus('VCAT 데몬 응답 없음. 포트와 프로그램을 확인해주세요.');
+      setPingStatus(`VAN 데몬(${formVcatPort}${statusPath}) 응답 없음. 포트와 프로그램을 확인해주세요.`);
     } finally {
       setIsPinging(false);
     }
   };
 
   const handleSave = () => {
+    const trimmedNewPin = formAdminPin.trim();
+    if (trimmedNewPin.length > 0 && !/^\d{4}$/.test(trimmedNewPin)) {
+      setActiveTab('maintenance');
+      setPolicyGuardMsg('관리자 PIN 번호를 변경하려면 숫자 4자리를 모두 입력해 주세요. (유지 시 비워두기)');
+      return;
+    }
+
     const cleanStoreCd = formStoreCode.trim();
     const cleanDeviceId = formDeviceId.trim();
     const rawTerminalId = formTerminalId.trim();
     const cleanTerminalId = rawTerminalId === 'custom' ? '88010003' : (rawTerminalId || '88010003');
     const cleanVcatPort = formVcatPort.trim();
+    const normalizedProvider = normalizeVanProviderType(formProviderType);
 
     const updated: Partial<KioskSettings> = {
       deviceId: cleanDeviceId,
       deviceName: formDeviceName,
-      providerType: formProviderType,
+      providerType: normalizedProvider,
       terminalId: cleanTerminalId,
       vcatPort: cleanVcatPort,
       apiUrl: formApiUrl.trim(),
       storeCode: cleanStoreCd,
       deviceKey: formDeviceKey.trim(),
-      adminPin: formAdminPin.trim() || '0000',
       isMaintenanceMode: formIsMaintenance,
       menuOverrides: formMenuOverrides,
       authMethods: formAuthMethods,
@@ -295,15 +360,19 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
     }
 
     kioskVanClient.setConfig({
-      provider: formProviderType.replace('_VAN', '') as any,
-      ...({ providerType: formProviderType } as any),
+      provider: normalizedProvider.replace('_VAN', '') as any,
+      ...({ providerType: normalizedProvider } as any),
       vcatPort: Number(cleanVcatPort) || 9099,
       terminalId: cleanTerminalId,
     });
 
-    updateSettings(updated, { syncRemote: true });
+    updateSettings(updated, {
+      syncRemote: true,
+      newAdminPin: trimmedNewPin.length === 4 ? trimmedNewPin : undefined,
+    });
     setSaveSuccess(true);
     setTimeout(() => {
+      clearKioskAdminSession();
       onClose();
     }, 600);
   };
@@ -385,7 +454,10 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              clearKioskAdminSession();
+              onClose();
+            }}
             style={{
               background: '#ffffff',
               border: '1px solid #cbd5e1',
@@ -429,7 +501,10 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 key={tab.key}
                 type="button"
                 data-testid={`settings-tab-${tab.key}`}
-                onClick={() => setActiveTab(tab.key as any)}
+                onClick={() => {
+                  setActiveKeyboardField(null);
+                  setActiveTab(tab.key as any);
+                }}
                 style={{
                   padding: '11px 8px',
                   fontSize: '13px',
@@ -521,13 +596,16 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   </label>
                   <input
                     type="text"
+                    data-testid="settings-input-terminalId"
                     value={formTerminalId}
+                    onFocus={() => setActiveKeyboardField('terminalId')}
+                    onClick={() => setActiveKeyboardField('terminalId')}
                     onChange={(e) => setFormTerminalId(e.target.value)}
                     placeholder="예: 88010003"
                     style={{
                       width: '100%',
                       background: '#ffffff',
-                      border: '1px solid #cbd5e1',
+                      border: activeKeyboardField === 'terminalId' ? '2px solid #059669' : '1px solid #cbd5e1',
                       borderRadius: '12px',
                       padding: '12px 14px',
                       color: '#0f172a',
@@ -552,13 +630,16 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   </label>
                   <input
                     type="text"
+                    data-testid="settings-input-vcatPort"
                     value={formVcatPort}
-                    onChange={(e) => setFormVcatPort(e.target.value)}
+                    onFocus={() => setActiveKeyboardField('vcatPort')}
+                    onClick={() => setActiveKeyboardField('vcatPort')}
+                    onChange={(e) => setFormVcatPort(e.target.value.replace(/[^0-9]/g, ''))}
                     placeholder="예: 9099"
                     style={{
                       width: '100%',
                       background: '#ffffff',
-                      border: '1px solid #cbd5e1',
+                      border: activeKeyboardField === 'vcatPort' ? '2px solid #059669' : '1px solid #cbd5e1',
                       borderRadius: '12px',
                       padding: '12px 14px',
                       color: '#0f172a',
@@ -585,7 +666,14 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 </label>
                 <select
                   value={formProviderType}
-                  onChange={(e) => setFormProviderType(e.target.value)}
+                  onChange={(e) => {
+                    const nextProv = normalizeVanProviderType(e.target.value);
+                    setFormProviderType(nextProv);
+                    const curPort = formVcatPort.trim();
+                    if (!curPort || curPort === '9099' || curPort === '8088' || curPort === '8089') {
+                      setFormVcatPort(resolveDefaultVanPort(nextProv));
+                    }
+                  }}
                   style={{
                     width: '100%',
                     background: '#ffffff',
@@ -601,7 +689,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   }}
                 >
                   <option value="KCP_VAN" style={{ background: '#ffffff', color: '#0f172a' }}>💳 NHN KCP VAN (현장 단말기)</option>
-                  <option value="KOCES_VAN" style={{ background: '#ffffff', color: '#0f172a' }}>💳 KOCES 코세스 VAN (현장 단말기)</option>
+                  <option value="SMARTRO_VAN" style={{ background: '#ffffff', color: '#0f172a' }}>💳 스마트로 SMARTRO VAN (현장 단말기)</option>
                   <option value="NICE_VAN" style={{ background: '#ffffff', color: '#0f172a' }}>💳 NICE 정보통신 VAN (현장 단말기)</option>
                 </select>
               </div>
@@ -1000,13 +1088,16 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 </label>
                 <input
                   type="text"
+                  data-testid="settings-input-apiUrl"
                   value={formApiUrl}
+                  onFocus={() => setActiveKeyboardField('apiUrl')}
+                  onClick={() => setActiveKeyboardField('apiUrl')}
                   onChange={(e) => setFormApiUrl(e.target.value)}
                   placeholder="예: http://127.0.0.1:8000"
                   style={{
                     width: '100%',
                     background: '#ffffff',
-                    border: '1px solid #cbd5e1',
+                    border: activeKeyboardField === 'apiUrl' ? '2px solid #059669' : '1px solid #cbd5e1',
                     borderRadius: '12px',
                     padding: '12px 14px',
                     color: '#0f172a',
@@ -1032,13 +1123,16 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 </label>
                 <input
                   type="text"
+                  data-testid="settings-input-storeCode"
                   value={formStoreCode}
-                  onChange={(e) => setFormStoreCode(e.target.value)}
+                  onFocus={() => setActiveKeyboardField('storeCode')}
+                  onClick={() => setActiveKeyboardField('storeCode')}
+                  onChange={(e) => setFormStoreCode(e.target.value.toUpperCase())}
                   placeholder="예: H01-SE-001"
                   style={{
                     width: '100%',
                     background: '#ffffff',
-                    border: '1px solid #cbd5e1',
+                    border: activeKeyboardField === 'storeCode' ? '2px solid #059669' : '1px solid #cbd5e1',
                     borderRadius: '12px',
                     padding: '12px 14px',
                     color: '#0f172a',
@@ -1065,13 +1159,16 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 </label>
                 <input
                   type="password"
+                  data-testid="settings-input-deviceKey"
                   value={formDeviceKey}
+                  onFocus={() => setActiveKeyboardField('deviceKey')}
+                  onClick={() => setActiveKeyboardField('deviceKey')}
                   onChange={(e) => setFormDeviceKey(e.target.value)}
                   placeholder="파트너센터 발급 기기 인증키"
                   style={{
                     width: '100%',
                     background: '#ffffff',
-                    border: '1px solid #cbd5e1',
+                    border: activeKeyboardField === 'deviceKey' ? '2px solid #059669' : '1px solid #cbd5e1',
                     borderRadius: '12px',
                     padding: '12px 14px',
                     color: '#0f172a',
@@ -1082,6 +1179,63 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                     boxSizing: 'border-box',
                   }}
                 />
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  data-testid="settings-auto-bootstrap-btn"
+                  disabled={isBootstrapping}
+                  onClick={async () => {
+                    setIsBootstrapping(true);
+                    setBootstrapMsg(null);
+                    try {
+                      const res = await bootstrapLocalKioskSettings({
+                        force: true,
+                        allowAuthenticatedLan: true,
+                        apiUrlOverride: formApiUrl.trim() || undefined,
+                      });
+                      if (res && res.storeCode) {
+                        setFormApiUrl(res.apiUrl);
+                        setFormStoreCode(res.storeCode);
+                        setFormDeviceKey(res.deviceKey);
+                        setFormDeviceId(res.deviceId);
+                        setFormDeviceName(res.deviceName);
+                        setFormTerminalId(res.terminalId);
+                        setFormVcatPort(res.vcatPort);
+                        setFormProviderType(normalizeVanProviderType(res.providerType));
+                        setBootstrapMsg(`✅ 서버 기기정보 자동 연동 완료 (${res.storeCode} · TID ${res.terminalId})`);
+                      } else {
+                        setBootstrapMsg('⚠️ 서버에서 기기 프로비저닝 정보를 불러오지 못했습니다. API 주소 및 서버 연결을 확인하세요.');
+                      }
+                    } finally {
+                      setIsBootstrapping(false);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '13px',
+                    background: '#ecfdf5',
+                    border: '1px solid #a7f3d0',
+                    borderRadius: '14px',
+                    color: '#065f46',
+                    fontSize: '13.5px',
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isBootstrapping ? <Loader2 size={16} className="animate-spin" color="#059669" /> : <RotateCcw size={16} color="#059669" />}
+                  서버 기기정보 자동 불러오기 (매장코드 · 인증키 · 단말기)
+                </button>
+                {bootstrapMsg && (
+                  <p style={{ fontSize: '12.5px', color: bootstrapMsg.startsWith('✅') ? '#059669' : '#b45309', fontWeight: 700, textAlign: 'center', margin: '8px 0 0 0' }}>
+                    {bootstrapMsg}
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -1126,37 +1280,127 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 }}
               >
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
-                  관리자 마스터 PIN 번호 (4자리)
+                  관리자 PIN 번호 변경 (4자리 · 미입력 시 기존 유지)
                 </label>
                 <input
                   type="password"
+                  data-testid="settings-input-adminPin"
                   maxLength={4}
                   value={formAdminPin}
-                  onChange={(e) => setFormAdminPin(e.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder="0000"
+                  onFocus={() => setActiveKeyboardField('adminPin')}
+                  onClick={() => setActiveKeyboardField('adminPin')}
+                  onChange={(e) => {
+                    setPolicyGuardMsg(null);
+                    setFormAdminPin(e.target.value.replace(/[^0-9]/g, ''));
+                  }}
+                  placeholder={settings.hasCustomAdminPin ? '변경 시 새 4자리 입력 (현재 커스텀 PIN 설정됨)' : '변경 시 새 4자리 입력'}
                   style={{
                     width: '100%',
                     background: '#ffffff',
-                    border: '1px solid #cbd5e1',
+                    border: activeKeyboardField === 'adminPin' ? '2px solid #059669' : '1px solid #cbd5e1',
                     borderRadius: '12px',
                     padding: '12px 14px',
                     color: '#0f172a',
                     fontFamily: 'monospace',
-                    fontSize: '20px',
+                    fontSize: formAdminPin ? '20px' : '14px',
                     fontWeight: 800,
                     textAlign: 'center',
-                    letterSpacing: '8px',
+                    letterSpacing: formAdminPin ? '8px' : '0px',
                     outline: 'none',
                     boxSizing: 'border-box',
                   }}
                 />
                 <p style={{ fontSize: '12px', color: '#64748b', margin: '8px 0 0 0', fontWeight: 500 }}>
-                  * 좌측 상단 5회 탭 시 입력할 관리자 비밀번호입니다.
+                  * 좌측 상단 5회 탭 시 입력할 관리자 비밀번호입니다. 비워두면 기존 PIN이 그대로 유지됩니다.
                 </p>
               </div>
             </div>
           )}
         </div>
+
+        {/* 터치스크린 무키보드 환경 대응 도킹 화상키보드 */}
+        {activeKeyboardField && (() => {
+          const kbMeta: Record<
+            NonNullable<typeof activeKeyboardField>,
+            {
+              label: string;
+              mode: VirtualKeyboardMode;
+              value: string;
+              onChange: (v: string) => void;
+              uppercase?: boolean;
+              masked?: boolean;
+              maxLength?: number;
+            }
+          > = {
+            terminalId: {
+              label: '단말기 번호 (TID)',
+              mode: 'ASCII_TEXT',
+              value: formTerminalId,
+              onChange: setFormTerminalId,
+              uppercase: true,
+              maxLength: 32,
+            },
+            vcatPort: {
+              label: 'VCAT 포트',
+              mode: 'NUMERIC',
+              value: formVcatPort,
+              onChange: setFormVcatPort,
+              maxLength: 5,
+            },
+            apiUrl: {
+              label: '서버 API 주소',
+              mode: 'ASCII_TEXT',
+              value: formApiUrl,
+              onChange: setFormApiUrl,
+              maxLength: 120,
+            },
+            storeCode: {
+              label: '매장 코드',
+              mode: 'ASCII_TEXT',
+              value: formStoreCode,
+              onChange: setFormStoreCode,
+              uppercase: true,
+              maxLength: 24,
+            },
+            deviceKey: {
+              label: '기기 인증키',
+              mode: 'ASCII_TEXT',
+              value: formDeviceKey,
+              onChange: setFormDeviceKey,
+              masked: true,
+              maxLength: 128,
+            },
+            adminPin: {
+              label: '새 관리자 PIN (4자리)',
+              mode: 'NUMERIC',
+              value: formAdminPin,
+              onChange: (val) => {
+                setPolicyGuardMsg(null);
+                setFormAdminPin(val);
+              },
+              masked: true,
+              maxLength: 4,
+            },
+          };
+          const cfg = kbMeta[activeKeyboardField];
+          return (
+            <div style={{ flexShrink: 0, padding: '10px 18px', background: '#f1f5f9', borderTop: '1px solid #e2e8f0' }}>
+              <VirtualKeyboard
+                key={activeKeyboardField}
+                mode={cfg.mode}
+                label={cfg.label}
+                value={cfg.value}
+                onChange={cfg.onChange}
+                uppercase={cfg.uppercase}
+                masked={cfg.masked}
+                maxLength={cfg.maxLength}
+                compact={true}
+                docked={true}
+                onClose={() => setActiveKeyboardField(null)}
+              />
+            </div>
+          );
+        })()}
 
         {/* Footer (Fixed Bottom) */}
         <div
@@ -1173,7 +1417,10 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
         >
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              clearKioskAdminSession();
+              onClose();
+            }}
             style={{
               padding: '12px 22px',
               background: '#ffffff',

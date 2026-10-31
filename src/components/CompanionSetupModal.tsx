@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { UserPlus, Timer, X, AlertCircle, UserCheck } from 'lucide-react';
-import { api, Member, Bay } from '../services/api';
+import { api, Member, MemberAsset, Bay } from '../services/api';
+import { TimeMaster } from '../utils/timeMaster';
+import { normalizeYmdDigits } from '../utils/kioskPurchaseEligibility';
+import { checkIfKioskDailyProduct, evaluateDailyPassEligibility } from '../utils/kioskProductSpecSummary';
 
 export interface CompanionTargetItem {
   bayNo: number;
@@ -14,6 +17,8 @@ export interface CompanionTargetItem {
   ticketName?: string;
   durationMin: number;
   price: number;
+  prodCd?: string;
+  vatYn?: string;
 }
 
 interface CompanionSetupModalProps {
@@ -27,23 +32,35 @@ interface CompanionSetupModalProps {
   onCancel: () => void;
 }
 
-const getAssignableAssets = (member?: Member | null, bay?: Bay | null) => {
-  const targetZoneCode = bay?.zone_code?.toUpperCase() || 'BAY';
-  return (member?.assets || []).filter((a) => {
+export const filterCompanionAssignableAssets = (
+  assets: MemberAsset[] = [],
+  targetZoneCodeInput?: string | null,
+  todayYmdInput?: string
+): MemberAsset[] => {
+  const targetZoneCode = (targetZoneCodeInput || 'BAY').toUpperCase();
+  const todayDigits = normalizeYmdDigits(todayYmdInput || TimeMaster.getKstYmd(TimeMaster.getSyncedDate()));
+  return assets.filter((a) => {
     if (a.is_assignable === false) return false;
+    const startDigits = normalizeYmdDigits(a.start_date);
+    if (todayDigits && startDigits && startDigits > todayDigits) return false;
     const logicType = (a.logic_type || 'PERIOD').toUpperCase();
     if (logicType === 'COUNT' || logicType === 'COUPON') {
-      const cnt = (a as any).remain_cnt ?? a.rem_count ?? 0;
+      const cnt = a.remain_cnt ?? a.rem_count ?? 0;
       if (cnt <= 0) return false;
-    } else {
-      if (a.rem_count !== null && a.rem_count !== undefined && a.rem_count <= 0) return false;
-      if ((a as any).remain_cnt !== null && (a as any).remain_cnt !== undefined && (a as any).remain_cnt <= 0) return false;
-      if (a.remain_days !== undefined && a.remain_days !== null && a.remain_days < 0) return false;
+    } else if (logicType === 'TIME') {
+      const remMin = a.remain_min ?? a.remain_cnt ?? a.rem_count ?? 0;
+      if (remMin <= 0) return false;
+    } else if (a.remain_days !== undefined && a.remain_days !== null && a.remain_days < 0) {
+      return false;
     }
     if (!a.allowed_categories || a.allowed_categories.length === 0) return true;
     const allowedUpper = a.allowed_categories.map((c: string) => String(c).toUpperCase());
     return allowedUpper.includes(targetZoneCode);
   });
+};
+
+const getAssignableAssets = (member?: Member | null, bay?: Bay | null) => {
+  return filterCompanionAssignableAssets(member?.assets || [], bay?.zone_code);
 };
 
 const getFirstAssignableAsset = (member?: Member | null, bay?: Bay | null) => {
@@ -71,6 +88,8 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   const [searchError, setSearchError] = useState<string>('');
   const [companionCandidates, setCompanionCandidates] = useState<Member[]>([]);
   const [dailyPrice, setDailyPrice] = useState<number>(defaultDailyPrice || 15000);
+  const [dailyProdCd, setDailyProdCd] = useState<string | undefined>(undefined);
+  const [dailyVatYn, setDailyVatYn] = useState<string>('Y');
   const [companionMembers, setCompanionMembers] = useState<Record<number, Member>>({});
 
   // 🛡️ [BUG-P02 Fix] selectedDurationMin이 0으로 전달되더라도 대표자 유효 이용권 시간 또는 60분으로 안전 폴백
@@ -124,18 +143,31 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
     });
   });
 
-  // 백엔드 일일권 상품 단가 동적 조회
+  // 백엔드 일일권 상품 단가 및 상품코드 동적 조회 (현재 시각·선택 타석 구역 적격 일일권 최우선 매칭)
   useEffect(() => {
     let mounted = true;
     api.getProducts().then((prods) => {
       if (!mounted || !Array.isArray(prods)) return;
-      const dailyProds = prods.filter(
-        (p) => (p.logic_type || '').toUpperCase() === 'DAILY' || (p.prod_nm || '').includes('일일')
+      const dailyProds = prods.filter((p) => checkIfKioskDailyProduct(p));
+      const refBay =
+        bays.find((b) => b.bay_no === selectedBayNos[1]) ||
+        bays.find((b) => b.bay_no === selectedBayNos[0]) ||
+        null;
+      const nowSynced = TimeMaster.getSyncedDate();
+      const eligibleDailyProds = dailyProds.filter(
+        (p) => evaluateDailyPassEligibility(p, { selectedBay: refBay, now: nowSynced }).eligible
       );
+      const candidatePool = eligibleDailyProds.length > 0 ? eligibleDailyProds : dailyProds;
       const matched =
-        dailyProds.find((p) => Number(p.duration_min) === Number(effectiveDurationMin)) || dailyProds[0];
+        candidatePool.find((p) => Number(p.duration_min) === Number(effectiveDurationMin)) || candidatePool[0];
       const resolvedPrice = Number(matched?.sale_price || matched?.standard_price || defaultDailyPrice || 0);
       const matchedDur = Number(matched?.duration_min) > 0 ? Number(matched?.duration_min) : effectiveDurationMin;
+      const resolvedProdCd = matched?.prod_cd || undefined;
+      const resolvedVatYn = matched?.vat_yn || 'Y';
+      if (resolvedProdCd) {
+        setDailyProdCd(resolvedProdCd);
+      }
+      setDailyVatYn(resolvedVatYn);
       if (resolvedPrice > 0) {
         setDailyPrice(resolvedPrice);
         setTargets((prev) =>
@@ -144,6 +176,8 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
               ? {
                   ...t,
                   price: resolvedPrice,
+                  prodCd: resolvedProdCd,
+                  vatYn: resolvedVatYn,
                   durationMin: t.durationMin > 0 ? t.durationMin : matchedDur,
                   ticketName: `일일 타석권 ${t.durationMin > 0 ? t.durationMin : matchedDur}분`,
                 }
@@ -252,7 +286,9 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       memberItemId: canUseMembership ? parsedId : undefined,
       ticketName: canUseMembership && validAsset ? resolveAssetTicketName(validAsset) : `일일 타석권 ${resolvedCompanionDur}분`,
       durationMin: resolvedCompanionDur,
-      price: canUseMembership ? 0 : dailyPrice
+      price: canUseMembership ? 0 : dailyPrice,
+      prodCd: canUseMembership ? undefined : dailyProdCd,
+      vatYn: canUseMembership ? undefined : dailyVatYn,
     });
     if (alreadyAssignedSlot && !canUseMembership) {
       setSearchError(lang === 'KO' ? '이미 다른 타석에 선택된 회원권이므로 일일 타석권 결제로 자동 설정되었습니다.' : 'Membership already used in another slot; set to Daily Pass.');
@@ -544,7 +580,16 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                       onClick={() => {
                         setSearchError('');
                         setSearchHp('');
-                        updateTarget(activeBayIdx, { isGuest: true, memberNo: undefined, memberItemId: undefined, memberName: `비회원 ${activeBayIdx}`, ticketType: 'DAILY', price: dailyPrice });
+                        updateTarget(activeBayIdx, {
+                          isGuest: true,
+                          memberNo: undefined,
+                          memberItemId: undefined,
+                          memberName: `비회원 ${activeBayIdx}`,
+                          ticketType: 'DAILY',
+                          price: dailyPrice,
+                          prodCd: dailyProdCd,
+                          vatYn: dailyVatYn,
+                        });
                       }}
                       style={{
                         padding: '8px 18px',
@@ -663,10 +708,21 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                 {!currentTarget.isGuest && currentAssignableAssets.length > 1 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {currentAssignableAssets.map((asset) => {
-                      const assetId = Number(asset.member_item_id || (asset as any).id);
+                      const assetId = Number(asset.member_item_id || asset.id);
                       const isSelectedAsset = currentTarget.ticketType === 'MEMBERSHIP' && Number(currentTarget.memberItemId) === assetId;
                       const assetName = resolveAssetTicketName(asset);
-                      const remCnt = (asset as any).remain_cnt ?? asset.rem_count;
+                      const assetLogicUpper = String(asset.logic_type || 'PERIOD').toUpperCase();
+                      const remCnt = asset.remain_cnt ?? asset.rem_count;
+                      const remBadge =
+                        assetLogicUpper === 'COUNT' || assetLogicUpper === 'COUPON'
+                          ? remCnt !== undefined && remCnt !== null
+                            ? ` (잔여 ${remCnt}회)`
+                            : ''
+                          : assetLogicUpper === 'TIME'
+                            ? ` (잔여 ${asset.remain_min ?? remCnt ?? 0}분)`
+                            : asset.remain_days !== undefined && asset.remain_days !== null
+                              ? ` (잔여 ${asset.remain_days}일)`
+                              : '';
                       return (
                         <button
                           key={assetId}
@@ -677,8 +733,10 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                               ticketType: 'MEMBERSHIP',
                               memberItemId: assetId,
                               price: 0,
+                              prodCd: undefined,
+                              vatYn: undefined,
                               ticketName: assetName,
-                              durationMin: Number((asset as any).duration_min || currentTarget.durationMin || effectiveDurationMin)
+                              durationMin: Number(asset.duration_min || currentTarget.durationMin || effectiveDurationMin)
                             });
                           }}
                           style={{
@@ -692,7 +750,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                             cursor: 'pointer'
                           }}
                         >
-                          🎟️ {assetName}{remCnt !== undefined && remCnt !== null ? ` (잔여 ${remCnt}회)` : ''}
+                          🎟️ {assetName}{remBadge}
                         </button>
                       );
                     })}
@@ -713,6 +771,8 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                         ticketType: 'MEMBERSHIP',
                         memberItemId: resolvedAssetId,
                         price: 0,
+                        prodCd: undefined,
+                        vatYn: undefined,
                         ticketName: resolveAssetTicketName(selectedAsset)
                       });
                     }}
@@ -737,7 +797,16 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                   {/* 일일 이용권 결제 옵션 */}
                   <button
                     type="button"
-                    onClick={() => updateTarget(activeBayIdx, { ticketType: 'DAILY', price: dailyPrice, ticketName: `일일 타석권 ${currentTarget.durationMin}분` })}
+                    onClick={() =>
+                      updateTarget(activeBayIdx, {
+                        ticketType: 'DAILY',
+                        memberItemId: undefined,
+                        price: dailyPrice,
+                        prodCd: dailyProdCd,
+                        vatYn: dailyVatYn,
+                        ticketName: `일일 타석권 ${currentTarget.durationMin}분`,
+                      })
+                    }
                     style={{
                       padding: '20px',
                       borderRadius: '18px',

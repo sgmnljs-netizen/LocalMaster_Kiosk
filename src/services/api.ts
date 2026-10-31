@@ -34,6 +34,7 @@ const _baseHost = BASE_URL.replace(/\/api$/, '').replace(/^http:\/\//, 'ws://').
 export const WS_BASE_URL = _baseHost;
 
 export interface MemberAsset {
+  id?: number | string;
   member_item_id: string;
   item_name: string;
   rem_count?: number;
@@ -200,6 +201,13 @@ export interface Product {
   target_gender?: string | null;
   access_rules?: Record<string, any> | null;
   rules_detail?: Record<string, any> | null;
+  schedule_notice?: string | null;
+  bundle_summary?: string[] | null;
+  zone_labels?: Record<string, string> | null;
+  evaluated_ymd?: string | null;
+  today_day_type?: 'WEEKDAY' | 'WEEKEND' | 'PUBLIC_HOLIDAY' | 'STORE_CLOSED' | string | null;
+  is_usable_now?: boolean;
+  unusable_now_reason?: string | null;
   meta_data?: {
     display_nm?: string;
     badges?: string[];
@@ -288,77 +296,106 @@ export const DEFAULT_50_ZONES = [
   { zone_cd: 'PAR3', zone_name: '천연잔디 PAR3 코스', floor_no: 1 },
 ];
 
-export const LM_SCHEMA_VERSION = 'v20260824_50bays_v4';
+export const LM_SCHEMA_VERSION = 'v20261030_prod_clean_v5';
+
+export const isDemoEnvironment = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const search = window.location?.search || '';
+  const pathname = window.location?.pathname || '';
+  const hostname = window.location?.hostname || '';
+  return (
+    import.meta.env.VITE_DEMO_MODE === 'true' ||
+    search.includes('demo=true') ||
+    search.includes('demo=1') ||
+    pathname.includes('/demo/') ||
+    hostname.endsWith('segnet.co.kr') ||
+    hostname.endsWith('golfos.co.kr')
+  );
+};
+
+export const isStrictOnlineStoreRuntime = (forceProdCheck?: boolean): boolean => {
+  const isForcedStrict =
+    typeof localStorage !== 'undefined' && localStorage.getItem('LM_FORCE_STRICT_ONLINE') === 'true';
+  return Boolean(((forceProdCheck ?? import.meta.env.PROD) || isForcedStrict) && !isDemoEnvironment());
+};
 
 // --------------------------------------------------------------------------
-// 💾 Edge DB Initializer (LocalStorage 기반 가상 DB & 데모 시드 데이터)
+// 💾 Edge DB Initializer (LocalStorage 기반 가상 DB — 데모 시드는 명시적 데모 모드에서만 적재)
 // --------------------------------------------------------------------------
 
 const initializeEdgeDB = () => {
+  if (typeof localStorage === 'undefined') return;
   // [P0-02] 구버전 스키마 감지 시 설정값(lm-kiosk-settings, LM_KIOSK_TERMINAL_ID, kiosk_zoom_scale, LM_KIOSK_AUDIT_LOGS)은 보존하고 캐시 키만 제거
   const currentVersion = localStorage.getItem('LM_SCHEMA_VERSION');
   const existingBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
   
   if (currentVersion !== LM_SCHEMA_VERSION) {
     console.warn(`[Auto-Heal] 구버전 캐시 감지 (${currentVersion} -> ${LM_SCHEMA_VERSION}). 캐시 데이터 키 선택 초기화를 실행합니다.`);
-    ['LM_BAYS', 'LM_PRODUCTS', 'LM_LOCKERS', 'LM_TERMS'].forEach(key => localStorage.removeItem(key));
+    ['LM_BAYS', 'LM_PRODUCTS', 'LM_LOCKERS', 'LM_TERMS', 'LM_MEMBERS', 'LM_ZONES'].forEach(key => localStorage.removeItem(key));
     localStorage.setItem('LM_SCHEMA_VERSION', LM_SCHEMA_VERSION);
   }
 
-  // 1. 기본 가맹점 정보
-  if (!localStorage.getItem('LM_STORE_INFO') || localStorage.getItem('LM_STORE_INFO') === '{}') {
-    const activeStoreCd = getKioskSettings().storeCode || STORE_CODE;
-    localStorage.setItem('LM_STORE_INFO', JSON.stringify({
-      store_cd: activeStoreCd,
-      store_nm: '골포스 강남 1호점 (체험관)',
-      biz_no: '721-81-04039',
-      business_no: '721-81-04039',
-      ceo_name: '대표이사',
-      address: '서울특별시 강남구 테헤란로 123',
-      tel: '1566-8705',
-      close_time: '23:00',
-      checkin_policy: 'CHECKIN_REQUIRED',
-      meta_data: { integration: { face_terminal_yn: true } }
-    }));
-  }
+  if (isDemoEnvironment()) {
+    // 1. 데모 전용 가맹점 정보
+    if (!localStorage.getItem('LM_STORE_INFO') || localStorage.getItem('LM_STORE_INFO') === '{}') {
+      const activeStoreCd = getKioskSettings().storeCode || STORE_CODE;
+      localStorage.setItem('LM_STORE_INFO', JSON.stringify({
+        store_cd: activeStoreCd,
+        store_nm: '골포스 강남 1호점 (체험관)',
+        biz_no: '721-81-04039',
+        business_no: '721-81-04039',
+        ceo_name: '대표이사',
+        address: '서울특별시 강남구 테헤란로 123',
+        tel: '1566-8705',
+        close_time: '23:00',
+        checkin_policy: 'CHECKIN_REQUIRED',
+        meta_data: { integration: { face_terminal_yn: true } }
+      }));
+    }
 
-  // 2. 기본 구역 정보 (ZONES: 1F, 2F, 3F, PAR3)
-  if (!localStorage.getItem('LM_ZONES') || localStorage.getItem('LM_ZONES') === '[]') {
-    localStorage.setItem('LM_ZONES', JSON.stringify(DEFAULT_50_ZONES));
-  }
+    // 2. 데모 전용 구역 정보 (ZONES: 1F, 2F, 3F, PAR3)
+    if (!localStorage.getItem('LM_ZONES') || localStorage.getItem('LM_ZONES') === '[]') {
+      localStorage.setItem('LM_ZONES', JSON.stringify(DEFAULT_50_ZONES));
+    }
 
-  // 3. 기본 타석 목록 (캐시가 완전히 비어있을 때만 시드 생성 — 50개 강제 비교 제거)
-  if (!Array.isArray(existingBays) || existingBays.length === 0) {
-    localStorage.setItem('LM_BAYS', JSON.stringify(generateDefault50Bays()));
-  }
+    // 3. 데모 전용 타석 목록 (캐시가 비어있을 때만 시드 생성)
+    if (!Array.isArray(existingBays) || existingBays.length === 0) {
+      localStorage.setItem('LM_BAYS', JSON.stringify(generateDefault50Bays()));
+    }
 
-  // 4. 기본 상품 목록 (PRODUCTS)
-  const existingProducts = JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]');
-  if (!existingProducts || existingProducts.length === 0) {
-    localStorage.setItem('LM_PRODUCTS', JSON.stringify([
-      { prod_cd: 'D01', prod_nm: '일일 타석 60분', standard_price: 20000, sale_price: 20000, logic_type: 'DAILY', duration_min: 60 },
-      { prod_cd: 'D02', prod_nm: '일일 타석 90분', standard_price: 28000, sale_price: 28000, logic_type: 'DAILY', duration_min: 90 },
-      { prod_cd: 'D03', prod_nm: '일일 타석 120분', standard_price: 35000, sale_price: 35000, logic_type: 'DAILY', duration_min: 120 },
-      { prod_cd: 'P03', prod_nm: '1개월 정기 회원권', standard_price: 180000, sale_price: 180000, logic_type: 'MEMBERSHIP', days: 30 },
-      { prod_cd: 'P04', prod_nm: '3개월 정기 회원권', standard_price: 480000, sale_price: 450000, logic_type: 'MEMBERSHIP', days: 90 },
-    ]));
-  }
+    // 4. 데모 전용 상품 목록 (PRODUCTS)
+    const existingProducts = JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]');
+    if (!existingProducts || existingProducts.length === 0) {
+      localStorage.setItem('LM_PRODUCTS', JSON.stringify([
+        { prod_cd: 'D01', prod_nm: '일일 타석 60분', standard_price: 20000, sale_price: 20000, logic_type: 'DAILY', duration_min: 60 },
+        { prod_cd: 'D02', prod_nm: '일일 타석 90분', standard_price: 28000, sale_price: 28000, logic_type: 'DAILY', duration_min: 90 },
+        { prod_cd: 'D03', prod_nm: '일일 타석 120분', standard_price: 35000, sale_price: 35000, logic_type: 'DAILY', duration_min: 120 },
+        { prod_cd: 'P03', prod_nm: '1개월 정기 회원권', standard_price: 180000, sale_price: 180000, logic_type: 'MEMBERSHIP', days: 30 },
+        { prod_cd: 'P04', prod_nm: '3개월 정기 회원권', standard_price: 480000, sale_price: 450000, logic_type: 'MEMBERSHIP', days: 90 },
+      ]));
+    }
 
-  // 5. 기본 회원 목록 (MEMBERS)
-  const existingMembers = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]');
-  if (!existingMembers || existingMembers.length === 0) {
-    localStorage.setItem('LM_MEMBERS', JSON.stringify([
-      { member_no: 'M001', member_name: '홍길동', hp: '010-1234-5678', member_grade: '일반', grade_cd: 'GENERAL', status_cd: 'ACTIVE', total_point: 5000, discount_rate: 0.0 },
-      { member_no: 'M002', member_name: '이골프', hp: '010-9988-7766', member_grade: '우수', grade_cd: 'GOLD', status_cd: 'ACTIVE', total_point: 12000, discount_rate: 5.0 },
-      { member_no: 'M003', member_name: '박프로', hp: '010-5544-3322', member_grade: 'VIP', grade_cd: 'VIP', status_cd: 'ACTIVE', total_point: 35000, discount_rate: 10.0 },
-    ]));
+    // 5. 데모 전용 회원 목록 (MEMBERS)
+    const existingMembers = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]');
+    if (!existingMembers || existingMembers.length === 0) {
+      localStorage.setItem('LM_MEMBERS', JSON.stringify([
+        { member_no: 'M001', member_name: '홍길동', hp: '010-1234-5678', member_grade: '일반', grade_cd: 'GENERAL', status_cd: 'ACTIVE', total_point: 5000, discount_rate: 0.0 },
+        { member_no: 'M002', member_name: '이골프', hp: '010-9988-7766', member_grade: '우수', grade_cd: 'GOLD', status_cd: 'ACTIVE', total_point: 12000, discount_rate: 5.0 },
+        { member_no: 'M003', member_name: '박프로', hp: '010-5544-3322', member_grade: 'VIP', grade_cd: 'VIP', status_cd: 'ACTIVE', total_point: 35000, discount_rate: 10.0 },
+      ]));
+    }
+  } else {
+    if (!localStorage.getItem('LM_BAYS')) localStorage.setItem('LM_BAYS', JSON.stringify([]));
+    if (!localStorage.getItem('LM_ZONES')) localStorage.setItem('LM_ZONES', JSON.stringify([]));
+    if (!localStorage.getItem('LM_PRODUCTS')) localStorage.setItem('LM_PRODUCTS', JSON.stringify([]));
+    if (!localStorage.getItem('LM_MEMBERS')) localStorage.setItem('LM_MEMBERS', JSON.stringify([]));
   }
 
   if (!localStorage.getItem('LM_LOCKERS')) localStorage.setItem('LM_LOCKERS', JSON.stringify([]));
   if (!localStorage.getItem('LM_SALES')) localStorage.setItem('LM_SALES', JSON.stringify([]));
   if (!localStorage.getItem('LM_PAR3_SLOTS')) localStorage.setItem('LM_PAR3_SLOTS', JSON.stringify([]));
   localStorage.setItem('LM_KIOSK_EDGEDB_INIT', 'true');
-  console.log('⛳ LocalMaster Kiosk: Edge DB Seeded & Ready.');
+  console.log('⛳ LocalMaster Kiosk: Edge DB Ready.');
 };
 
 // 즉시 초기화 실행
@@ -368,19 +405,12 @@ initializeEdgeDB();
 // 🔗 Hybrid API Client Implementation
 // --------------------------------------------------------------------------
 
-const MIDDLEWARE_URL = import.meta.env.VITE_MIDDLEWARE_URL || localStorage.getItem('LM_MIDDLEWARE_URL') || 'http://127.0.0.1:5001';
-const KIOSK_WS_KEY = import.meta.env.VITE_KIOSK_WS_KEY || localStorage.getItem('LM_KIOSK_WS_KEY') || 'kiosk-ws-key-2025';
-const MIDDLEWARE_API_KEY_CLIENT = import.meta.env.VITE_MIDDLEWARE_API_KEY || localStorage.getItem('LM_MIDDLEWARE_API_KEY') || 'secret-key-changeme';
-export const isDemoEnvironment = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  return (
-    import.meta.env.VITE_DEMO_MODE === 'true' ||
-    window.location.search.includes('demo=true') ||
-    window.location.pathname.includes('/demo/') ||
-    window.location.hostname.endsWith('segnet.co.kr') ||
-    window.location.hostname.endsWith('golfos.co.kr')
-  );
-};
+const _safeReadStorage = (key: string): string | null =>
+  typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+
+const MIDDLEWARE_URL = import.meta.env.VITE_MIDDLEWARE_URL || _safeReadStorage('LM_MIDDLEWARE_URL') || 'http://127.0.0.1:5001';
+const KIOSK_WS_KEY = import.meta.env.VITE_KIOSK_WS_KEY || _safeReadStorage('LM_KIOSK_WS_KEY') || 'kiosk-ws-key-2025';
+const MIDDLEWARE_API_KEY_CLIENT = import.meta.env.VITE_MIDDLEWARE_API_KEY || _safeReadStorage('LM_MIDDLEWARE_API_KEY') || 'secret-key-changeme';
 
 class HybridAPIClient {
   private terminalId: string;
@@ -391,10 +421,12 @@ class HybridAPIClient {
 
   constructor() {
     const settings = getKioskSettings();
-    let tid = settings?.terminalId || localStorage.getItem('LM_KIOSK_TERMINAL_ID');
+    let tid = settings?.terminalId || _safeReadStorage('LM_KIOSK_TERMINAL_ID');
     if (!tid) {
       tid = `T-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-      localStorage.setItem('LM_KIOSK_TERMINAL_ID', tid);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('LM_KIOSK_TERMINAL_ID', tid);
+      }
     }
     this.terminalId = tid;
   }
@@ -504,7 +536,15 @@ class HybridAPIClient {
         };
       }
     } catch (err) {
-      console.warn('[Terminal Resolve] Failed to resolve terminal route, using local settings:', err);
+      console.warn('[Terminal Resolve] Failed to resolve terminal route:', err);
+      if (isSubUnit) {
+        return {
+          terminal_id: '',
+          error: true,
+          status: 503,
+          message: '정산 단말기 라우팅 서버 통신 오류로 결제가 차단되었습니다. 잠시 후 다시 시도해 주세요.',
+        };
+      }
     }
     return {
       terminal_id: this.getTerminalId(),
@@ -515,6 +555,50 @@ class HybridAPIClient {
   }
 
   /**
+   * 🔐 키오스크 관리자 / 세그넷 엔지니어 PIN 서버 검증 (/v1/kiosk/verify-admin-pin)
+   * - 온라인 응답 시 서버 검증 결과(valid, role, pin_session_token)를 권위 있게 적용
+   * - 백엔드 미연결/네트워크 타임아웃 시에만 `offline: true`를 반환하여 오프라인 현장 복구 폴백 허용
+   */
+  async verifyAdminPin(pin: string): Promise<{
+    valid: boolean;
+    role?: 'OWNER' | 'ENGINEER' | string | null;
+    pin_session_token?: string | null;
+    has_custom_admin_pin?: boolean;
+    message?: string;
+    offline?: boolean;
+    locked?: boolean;
+  }> {
+    const settings = getKioskSettings();
+    try {
+      const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/verify-admin-pin`, {
+        method: 'POST',
+        headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          store_cd: this.getStoreCd(),
+          device_id: settings.deviceId,
+          pin,
+        }),
+        signal: AbortSignal.timeout(2500),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+      if (res.status === 404 || res.status >= 500) {
+        // 구버전 엣지 백엔드이거나 백엔드 장애 상태일 때 현장 복구 폴백 허용
+        return { valid: false, offline: true };
+      }
+      const errBody = await res.json().catch(() => ({}));
+      return {
+        valid: false,
+        locked: res.status === 429,
+        message: errBody?.detail || errBody?.message || '관리자 PIN 검증에 실패했습니다.',
+      };
+    } catch {
+      return { valid: false, offline: true };
+    }
+  }
+
+  /**
    * 📱 스마트 태그 (NFC / BLE / QR UID) 회원 인증 (/v1/kiosk/smart-auth)
    */
   async authenticateSmartTag(
@@ -522,7 +606,8 @@ class HybridAPIClient {
     rssi?: number,
     authType?: 'BLE' | 'NFC' | 'QR'
   ): Promise<Member | null> {
-    const isConnected = await this.checkConnection();
+    const strictOnline = isStrictOnlineStoreRuntime();
+    const isConnected = strictOnline ? true : await this.checkConnection();
     if (!isConnected) {
       return this.getMember(tagUid);
     }
@@ -611,9 +696,22 @@ class HybridAPIClient {
         });
       } else if (res.status === 404) {
         return null;
+      } else if (strictOnline && res.status >= 500) {
+        httpErr = Object.assign(new Error('서버와 일시적으로 통신할 수 없습니다. 잠시 후 다시 시도해 주세요.'), {
+          status: 503,
+          networkError: true,
+          message: '서버와 일시적으로 통신할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+        });
       }
     } catch (err) {
       console.warn('[SmartAuth] Failed to authenticate smart tag via /v1/kiosk/smart-auth:', err);
+      if (strictOnline) {
+        httpErr = Object.assign(new Error('서버와 일시적으로 통신할 수 없습니다. 잠시 후 다시 시도해 주세요.'), {
+          status: 503,
+          networkError: true,
+          message: '서버와 일시적으로 통신할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+        });
+      }
     }
     if (httpErr) {
       throw httpErr;
@@ -658,10 +756,14 @@ class HybridAPIClient {
     }
 
     const cachedBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
-    const baysToReturn = (Array.isArray(cachedBays) && cachedBays.length > 0) ? cachedBays : generateDefault50Bays();
+    const baysToReturn = (Array.isArray(cachedBays) && cachedBays.length > 0)
+      ? cachedBays
+      : (isDemoEnvironment() ? generateDefault50Bays() : []);
 
     const cachedZones = JSON.parse(localStorage.getItem('LM_ZONES') || '[]');
-    const zonesToReturn = (cachedZones && cachedZones.length > 0) ? cachedZones : DEFAULT_50_ZONES;
+    const zonesToReturn = (cachedZones && cachedZones.length > 0)
+      ? cachedZones
+      : (isDemoEnvironment() ? DEFAULT_50_ZONES : []);
 
     return {
       store_info: JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}'),
@@ -1172,7 +1274,8 @@ class HybridAPIClient {
 
   // 1. 회원 조회 (QR 또는 휴대폰 번호)
   async getMember(query: string): Promise<Member | null> {
-    const isConnected = await this.checkConnection();
+    const strictOnline = isStrictOnlineStoreRuntime();
+    const isConnected = strictOnline ? true : await this.checkConnection();
     console.log(`[LM_KIOSK] Auth Query: "${query}". Network Connection: ${isConnected ? 'ONLINE' : 'OFFLINE(EdgeDB)'}`);
     
     // Normalize QR/NFC/BLE prefix if present (e.g. GOLFOS_MEMBER_M260501 / QR-M260501 -> M260501)
@@ -1236,9 +1339,22 @@ class HybridAPIClient {
           });
         } else if (res.status === 404) {
           return null;
+        } else if (strictOnline && res.status >= 500) {
+          duplicateErr = Object.assign(new Error('서버와 일시적으로 통신할 수 없습니다. 잠시 후 다시 시도해 주세요.'), {
+            status: 503,
+            networkError: true,
+            message: '서버와 일시적으로 통신할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+          });
         }
       } catch (err) {
         console.error('Backend member query failed. Falling back to EdgeDB:', err);
+        if (strictOnline) {
+          duplicateErr = Object.assign(new Error('서버와 일시적으로 통신할 수 없습니다. 잠시 후 다시 시도해 주세요.'), {
+            status: 503,
+            networkError: true,
+            message: '서버와 일시적으로 통신할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+          });
+        }
       }
       if (duplicateErr) {
         throw duplicateErr;
@@ -1285,6 +1401,16 @@ class HybridAPIClient {
       const activeHpMatches = members.filter(m => isMemberActive(m) && matchPhone(m));
 
       if (activeHpMatches.length > 1) {
+        const maskCandidateHp = (rawHp?: string): string => {
+          const digits = String(rawHp || '').replace(/[^0-9]/g, '');
+          if (digits.length >= 10) {
+            return `${digits.slice(0, 3)}-****-${digits.slice(-4)}`;
+          }
+          if (digits.length >= 4) {
+            return `***-****-${digits.slice(-4)}`;
+          }
+          return '***-****-****';
+        };
         const msg = `동일한 번호를 사용하는 회원이 ${activeHpMatches.length}명 있습니다. 본인 계정을 선택해 주세요.`;
         throw Object.assign(new Error(msg), {
           duplicate: true,
@@ -1295,7 +1421,7 @@ class HybridAPIClient {
             member_no: m.member_no,
             member_name: m.member_name,
             masked_name: m.masked_name,
-            hp: m.hp,
+            hp: maskCandidateHp(m.hp),
             grade_cd: m.grade_cd || m.member_grade || 'GENERAL',
           })),
         });
@@ -1310,6 +1436,11 @@ class HybridAPIClient {
         throw Object.assign(new Error(msg), { inactive: true, status: 403, message: msg });
       }
       return null;
+    }
+
+    if (searchTarget.trim().length < 2) {
+      const msg = '회원 조회는 최소 2글자 이상 성함 또는 휴대폰 뒷 8자리를 입력해 주세요.';
+      throw Object.assign(new Error(msg), { status: 400, message: msg });
     }
 
     const found = members.find(m => isMemberActive(m) && m.member_name === searchTarget);
@@ -1382,7 +1513,7 @@ class HybridAPIClient {
 
     let bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
     if (!Array.isArray(bays) || bays.length === 0) {
-      bays = generateDefault50Bays();
+      bays = isDemoEnvironment() ? generateDefault50Bays() : [];
     }
     const now = new Date();
     
@@ -2393,6 +2524,23 @@ class HybridAPIClient {
     };
   }
 
+  // 로컬 하드웨어 브릿지(:18080) 베이스 URL 단일 SSOT (스마트로/코세스 등 타 VAN 포트와 분리)
+  getLocalBleBridgeUrl(): string {
+    const customUrl = _safeReadStorage('LM_HW_BRIDGE_URL');
+    if (customUrl && customUrl.trim()) {
+      return customUrl.trim().replace(/\/+$/, '');
+    }
+    return 'http://127.0.0.1:18080';
+  }
+
+  // 로컬 하드웨어 브릿지(:18080) BLE 근접 감지 캐시 즉시 초기화 + 앞사람 잔류 신호 재발화 억제
+  clearLocalBleCache(): void {
+    fetch(`${this.getLocalBleBridgeUrl()}/api/v1/ble/clear`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(500),
+    }).catch(() => undefined);
+  }
+
   // 6. 타석 이동 (사용 중인 타석 변경 — POST /v1/kiosk/bays/move)
   async moveBay(
     memberNo: string,
@@ -2401,6 +2549,8 @@ class HybridAPIClient {
   ): Promise<{
     success: boolean;
     message: string;
+    res_id?: string;
+    hardware_success?: boolean;
     old_bay_no?: number;
     new_bay_no?: number;
     remain_min?: number;
@@ -2433,6 +2583,8 @@ class HybridAPIClient {
         return {
           success: data.success !== false,
           message: data.message || `타석이 ${targetBayNo}번으로 성공적으로 변경되었습니다.`,
+          res_id: data.res_id,
+          hardware_success: data.hardware_success !== false,
           old_bay_no: data.old_bay_no,
           new_bay_no: data.new_bay_no ?? targetBayNo,
           remain_min: data.remain_min,
@@ -3157,27 +3309,35 @@ class HybridAPIClient {
     referrerHp: string | null = null,
     privacyAgree: boolean = true
   ): Promise<{ success: boolean; member?: Member; message: string }> {
-    const isConnected = await this.checkConnection();
+    if (!privacyAgree) {
+      return { success: false, message: '필수 개인정보 수집 및 키오스크 이용약관에 동의해 주세요.' };
+    }
+    const isDemo = isDemoEnvironment();
+    const isConnected = !isDemo ? true : await this.checkConnection();
     const storeCd = this.getStoreCd();
     const cleanName = name.trim();
 
     if (isConnected) {
       try {
-        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/member?store_cd=${encodeURIComponent(storeCd)}`, {
-          method: 'POST',
-          headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            member_name: cleanName,
-            hp: hp,
-            email: email,
-            store_cd: storeCd,
-            gender: gender,
-            face_auth_yn: faceRegistered ? 'Y' : 'N',
-            privacy_agree_yn: privacyAgree ? 'Y' : 'N',
-            marketing_agree_yn: marketingAgree ? 'Y' : 'N',
-            referrer_hp: referrerHp || undefined
-          })
-        });
+        const res = await fetchWithPaymentRetry(
+          `${this.getBaseUrl()}/v1/kiosk/member?store_cd=${encodeURIComponent(storeCd)}`,
+          {
+            method: 'POST',
+            headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+              member_name: cleanName,
+              hp: hp,
+              email: email,
+              store_cd: storeCd,
+              gender: gender,
+              face_auth_yn: faceRegistered ? 'Y' : 'N',
+              privacy_agree_yn: privacyAgree ? 'Y' : 'N',
+              marketing_agree_yn: marketingAgree ? 'Y' : 'N',
+              referrer_hp: referrerHp || undefined
+            })
+          },
+          { label: '신규 회원가입 등록' }
+        );
         if (res.ok) {
           const created = await res.json();
           created.face_registered = Boolean(created.face_registered);
@@ -3196,19 +3356,19 @@ class HybridAPIClient {
           return { success: true, member: created, message: '회원가입이 성공적으로 완료되었습니다.' };
         } else {
           const errData = await res.json().catch(() => ({ detail: '회원 등록 중 에러가 발생했습니다.' }));
-          return { success: false, message: errData.detail || '회원 등록 실패' };
+          const errMsg = typeof errData.detail === 'string'
+            ? errData.detail
+            : (errData.detail?.message || errData.message || '회원 등록 실패');
+          return { success: false, message: errMsg };
         }
       } catch (err) {
         console.error('Backend registration failed:', err);
-        return { success: false, message: '서버 통신 오류로 회원가입에 실패했습니다.' };
+        return { success: false, message: '서버 통신 오류로 회원가입에 실패했습니다. 잠시 후 다시 시도해 주세요.' };
       }
     }
 
-    // EdgeDB 오프라인/데모 모드 폴백
+    // EdgeDB 데모 모드 폴백
     try {
-      if (!privacyAgree) {
-        return { success: false, message: '필수 개인정보 수집 및 키오스크 이용약관에 동의해 주세요.' };
-      }
       const members = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]') as Member[];
       const cleanHp = hp.replace(/[^0-9]/g, '');
       const dup = members.find(m => m.hp && m.hp.replace(/[^0-9]/g, '') === cleanHp);
@@ -3686,25 +3846,30 @@ class HybridAPIClient {
     guestName?: string, 
     hpNo?: string
   ): Promise<{ success: boolean; res_id?: string; message: string }> {
-    const isConnected = await this.checkConnection();
+    const isDemo = isDemoEnvironment();
+    const isConnected = !isDemo ? true : await this.checkConnection();
     const storeCd = this.getStoreCd();
 
     if (isConnected) {
       try {
-        const createRes = await fetch(`${this.getBaseUrl()}/v1/kiosk/hold-reservation?store_cd=${encodeURIComponent(storeCd)}`, {
-          method: 'POST',
-          headers: this.getSecureHeaders({ 
-            'Content-Type': 'application/json',
-            'x-store-cd': storeCd
-          }),
-          body: JSON.stringify({
-            bay_no: bayNo,
-            duration_min: durationMin,
-            member_no: memberNo || null,
-            guest_name: guestName || null,
-            hp_no: hpNo || null
-          })
-        });
+        const createRes = await fetchWithPaymentRetry(
+          `${this.getBaseUrl()}/v1/kiosk/hold-reservation?store_cd=${encodeURIComponent(storeCd)}`,
+          {
+            method: 'POST',
+            headers: this.getSecureHeaders({ 
+              'Content-Type': 'application/json',
+              'x-store-cd': storeCd
+            }),
+            body: JSON.stringify({
+              bay_no: bayNo,
+              duration_min: durationMin,
+              member_no: memberNo || null,
+              guest_name: guestName || null,
+              hp_no: hpNo || null
+            })
+          },
+          { label: '타석 보류 예약 생성' }
+        );
         
         if (createRes.ok) {
           const createData = await createRes.json();
@@ -3728,8 +3893,8 @@ class HybridAPIClient {
           return { success: false, message: errMsg };
         }
       } catch (err) {
-        console.error('Backend createHoldReservation failed. Falling back to EdgeDB:', err);
-        if (!isDemoEnvironment()) {
+        console.error('Backend createHoldReservation failed:', err);
+        if (!isDemo) {
           return {
             success: false,
             message: err instanceof Error ? err.message : '서버 통신 오류로 타석 보류 예약 생성에 실패했습니다.'
@@ -3738,7 +3903,7 @@ class HybridAPIClient {
       }
     }
 
-    // Edge DB 모드
+    // Edge DB 데모 모드 폴백
     const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
     const targetIdx = bays.findIndex(b => b.bay_no === bayNo);
     if (targetIdx !== -1) {
@@ -3766,19 +3931,24 @@ class HybridAPIClient {
 
   // 18. 결제 취소 시 보류 상태(HOLD) 예약 해제/삭제 API
   async cancelHoldReservation(resId: string): Promise<{ success: boolean; message: string }> {
-    const isConnected = await this.checkConnection();
+    const isDemo = isDemoEnvironment();
+    const isConnected = !isDemo ? true : await this.checkConnection();
     const storeCd = this.getStoreCd();
 
     if (isConnected && !resId.startsWith('R-HOLD-')) {
       try {
-        const res = await fetch(`${this.getBaseUrl()}/reservations/${resId}/cancel`, {
-          method: 'PATCH',
-          headers: this.getSecureHeaders({ 
-            'Content-Type': 'application/json',
-            'x-store-cd': storeCd
-          }),
-          body: JSON.stringify({ memo: 'Kiosk Cancel' })
-        });
+        const res = await fetchWithPaymentRetry(
+          `${this.getBaseUrl()}/reservations/${resId}/cancel`,
+          {
+            method: 'PATCH',
+            headers: this.getSecureHeaders({ 
+              'Content-Type': 'application/json',
+              'x-store-cd': storeCd
+            }),
+            body: JSON.stringify({ memo: 'Kiosk Cancel' })
+          },
+          { label: '보류 예약 취소' }
+        );
         if (res.ok) {
           const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
           const filtered = holds.filter((h: any) => h.res_id !== resId);
@@ -3790,7 +3960,7 @@ class HybridAPIClient {
       }
     }
 
-    // Edge DB 모드
+    // 로컬 보류 예약 미러 정리 (네트워크 순단 시에도 잔여 캐시 제거)
     const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
     const filtered = holds.filter((h: any) => h.res_id !== resId);
     localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));

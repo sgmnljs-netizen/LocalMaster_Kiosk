@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Calendar, User, Users, Clock, ArrowLeft, CreditCard, Check, HelpCircle, CreditCard as CardIcon, Loader2, RefreshCw, X, Plus, Ticket, UserCheck, UserPlus } from 'lucide-react';
-import { api, Par3Slot, Product, KioskZone, Member, MemberAsset, KioskCompanionItem, STORE_CODE } from '../services/api';
+import { api, isDemoEnvironment, Par3Slot, Product, KioskZone, Member, MemberAsset, KioskCompanionItem } from '../services/api';
 import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
 import { MemberAuth } from './MemberAuth';
 import { TimeMaster } from '../utils/timeMaster';
 import { kioskVanClient } from '../services/van/van_client';
+import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC, extractKstYyyyMmDd } from '../services/van/adapters/BaseVanAdapter';
 import { PaymentOutboxManager } from '../services/paymentResilience';
 import { useKioskSettings } from '../stores/kioskSettings';
 
@@ -208,7 +209,19 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   // 선점된 파3 예약 ID 추적 (결제 취소/거절 시 즉시 락 해제용)
   const currentHoldResIdRef = useRef<string | null>(null);
 
-  // 언마운트 시 미완료 보류(HOLD) 예약 해제 및 VAN 단말기 요청 취소 클린업
+  const restoreDefaultVanConfig = useCallback(() => {
+    let rawProvider = (settings.providerType || 'KCP').toUpperCase();
+    if (rawProvider.endsWith('_VAN')) {
+      rawProvider = rawProvider.replace('_VAN', '');
+    }
+    kioskVanClient.setConfig({
+      provider: rawProvider as any,
+      terminalId: settings.terminalId || '88010003',
+      vcatPort: parseInt(settings.vcatPort, 10) || 9099,
+    });
+  }, [settings.terminalId, settings.vcatPort, settings.providerType]);
+
+  // 언마운트 시 미완료 보류(HOLD) 예약 해제, VAN 단말기 요청 취소 및 기본 단말기(TID) 설정 원복 클린업
   useEffect(() => {
     return () => {
       if (currentHoldResIdRef.current) {
@@ -216,8 +229,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         currentHoldResIdRef.current = null;
       }
       kioskVanClient.cancelCurrentRequest();
+      restoreDefaultVanConfig();
     };
-  }, []);
+  }, [restoreDefaultVanConfig]);
 
   const getAssignableAssets = useCallback((m?: Member | null, isReplacingLeader = false): MemberAsset[] => {
     const usedCounts = new Map<string, number>();
@@ -485,10 +499,29 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     );
     if (par3Products.length === 0) return null;
 
+    const isSingleRoundPar3Product = (p: Product): boolean => {
+      const logicUpper = String(p.logic_type || '').toUpperCase();
+      if (['COUNT', 'PERIOD', 'MEMBERSHIP', 'RENTAL', 'LOCKER'].includes(logicUpper)) {
+        return false;
+      }
+      if ((p.total_count ?? 0) > 1 || (p.days ?? 0) > 1) {
+        return false;
+      }
+      return true;
+    };
+
     const matchedCourseProducts = par3Products.filter(p =>
       (selectedZoneName && p.prod_nm.includes(selectedZoneName)) ||
       (course && p.prod_nm.includes(course))
     );
+    const singleMatched = matchedCourseProducts.filter(isSingleRoundPar3Product);
+    if (singleMatched.length > 0) {
+      return singleMatched[singleMatched.length - 1];
+    }
+    const singleAnyPar3 = par3Products.filter(isSingleRoundPar3Product);
+    if (singleAnyPar3.length > 0) {
+      return singleAnyPar3[singleAnyPar3.length - 1];
+    }
     if (matchedCourseProducts.length > 0) {
       return matchedCourseProducts[matchedCourseProducts.length - 1];
     }
@@ -631,16 +664,16 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     const vat = isTaxFree ? 0 : Math.round(amount / 11);
 
     // 만약 전원 이용권 사용 등으로 최종 결제금액이 ₩0 이라면 카드 리더기 연출 생략하고 즉시 승인!
+    // (await 체인을 유지하여 확정 웹훅 완료 전까지 isSubmittingRef 잠금이 해제되지 않도록 방어)
     if (amount === 0) {
       setPaymentState('DISPATCHING');
       setAuthProgress(50);
-      setTimeout(async () => {
-        setAuthProgress(100);
-        await executeConfirmWebhook(resId, 0, 'MEMBERSHIP_TICKET', undefined, {
-          prodCd,
-          gradeDiscountAmount: calculateTotalGradeDiscount(),
-        });
-      }, 500);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      setAuthProgress(100);
+      await executeConfirmWebhook(resId, 0, 'MEMBERSHIP_TICKET', undefined, {
+        prodCd,
+        gradeDiscountAmount: calculateTotalGradeDiscount(),
+      });
       return;
     }
 
@@ -648,24 +681,46 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     setAuthProgress(20);
 
     try {
-      // [BUG-P3-03] 사업장/서브가맹점 단말기 라우팅(resolveTerminalRoute) 검증 연동
+      // [C-4] 다중 사업자/서브가맹점 단말기 라우팅(resolveTerminalRoute) 정합 인자 전달 및 422 Fail-Fast 차단
       let routedTerminalId: string | undefined = undefined;
+      const businessUnitType = matchedProd?.business_unit_type || 'MAIN';
+      const businessMerchantId = matchedProd?.business_merchant_id || 'MAIN';
+      const proIdStr = matchedProd?.pro_id ? String(matchedProd.pro_id) : null;
+      const isSubMerchant =
+        ['PRO', 'SUB', 'LESSON', 'FNB'].includes(String(businessUnitType).toUpperCase()) ||
+        (Boolean(businessMerchantId) && businessMerchantId !== 'MAIN') ||
+        Boolean(proIdStr);
+
       if (typeof (api as any).resolveTerminalRoute === 'function') {
         const routeRes = await api.resolveTerminalRoute(
-          prodCd || `PAR3_${course || 'COURSE'}`,
-          matchedProd?.business_unit_type,
-          matchedProd?.business_merchant_id || undefined,
-          matchedProd?.pro_id ? String(matchedProd.pro_id) : undefined
+          settings.deviceId,
+          businessMerchantId,
+          businessUnitType,
+          proIdStr
         );
-        if (routeRes && routeRes.success === false) {
+        if (
+          !routeRes ||
+          routeRes.error ||
+          routeRes.status === 422 ||
+          routeRes.success === false ||
+          (isSubMerchant && !routeRes.terminal_id)
+        ) {
           await api.cancelHoldReservation(resId).catch(() => {});
           currentHoldResIdRef.current = null;
           fetchSlots();
-          setErrorMsg(routeRes.message || '결제 단말기 가맹점 라우팅 설정 오류로 결제를 진행할 수 없습니다.');
+          setErrorMsg(routeRes?.message || '결제 단말기 가맹점 라우팅 설정 오류로 결제를 진행할 수 없습니다.');
           resetPaymentState();
           return;
         }
-        routedTerminalId = routeRes?.terminal_id || undefined;
+        if (routeRes.terminal_id) {
+          routedTerminalId = routeRes.terminal_id;
+          kioskVanClient.setConfig({
+            provider: String(routeRes.van_provider || routeRes.provider_type || settings.providerType || 'KCP').replace('_VAN', '') as any,
+            ...({ providerType: routeRes.van_provider || routeRes.provider_type || settings.providerType } as any),
+            vcatPort: Number(routeRes.vcat_port || settings.vcatPort) || 9099,
+            terminalId: routeRes.terminal_id,
+          });
+        }
       }
 
       const effectiveInstallmentMonths = amount >= MIN_INSTALLMENT_AMOUNT ? installmentMonths : 0;
@@ -673,12 +728,13 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       const approval = await kioskVanClient.requestCardPayment(
         {
           amount,
-          vat,
+          vatAmount: vat,
+          taxFreeAmount: isTaxFree ? amount : 0,
           isTaxFree,
           installmentMonths: effectiveInstallmentMonths,
           terminalId: routedTerminalId,
-          timeoutSeconds: 30,
-        } as any,
+          timeoutSeconds: KIOSK_VAN_APPROVAL_TIMEOUT_SEC,
+        },
         (vanState) => {
           if (vanState === 'READY' || vanState === 'WAITING_CARD') {
             setPaymentState('INSERT_WAIT');
@@ -700,6 +756,26 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         setErrorMsg(approval.error_message || '카드 결제가 거절되었습니다.');
         resetPaymentState();
         return;
+      }
+
+      if (approval.auth_code && amount > 0) {
+        PaymentOutboxManager.recordWalInFlight({
+          storeCd: api.getStoreCd(),
+          terminalId: approval.terminal_id || routedTerminalId || settings.terminalId || '',
+          authCode: approval.auth_code,
+          vanTrNo: approval.van_tr_no,
+          amount,
+          purpose: 'WEBHOOK_CONFIRM',
+          endpoint: '/v1/kiosk/payment-webhook',
+          payload: {
+            res_id: resId,
+            member_no: players[0]?.member_no || memberNo || null,
+            product_name: matchedProd?.prod_nm || `Par3 ${course || 'COURSE'}`,
+            issuer_name: approval.issuer_name || '',
+            card_no_masked: approval.card_no_masked || '',
+            approved_at: approval.approved_at || '',
+          },
+        });
       }
 
       setAuthProgress(100);
@@ -724,7 +800,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }
   };
 
-  const rollbackVanApprovalIfNeeded = async (resId: string, amount: number, vanResult?: any, reason?: string) => {
+  const rollbackVanApprovalIfNeeded = async (resId: string, amount: number, vanResult?: any, reason?: string): Promise<boolean | null> => {
     const authCodeStr = String(vanResult?.auth_code || '');
     if (
       amount <= 0 ||
@@ -734,11 +810,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       authCodeStr.startsWith('MEMBERSHIP') ||
       (vanResult?.amount !== undefined && vanResult.amount <= 0)
     ) {
-      return;
+      return null;
     }
     const matchedProd = getMatchedCourseProduct();
     const isTaxFree = matchedProd?.vat_yn === 'N';
-    const orgApprovedDate = (vanResult.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) || TimeMaster.getKstYmd(TimeMaster.getSyncedDate()).replace(/-/g, '');
+    const orgApprovedDate = extractKstYyyyMmDd(vanResult.approved_at);
     const cancelAmt = vanResult.amount || amount;
     const cancelVat = isTaxFree ? 0 : Math.round(cancelAmt / 11);
     const cancelInstallment = vanResult.installment_months || 0;
@@ -747,23 +823,18 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       const cancelRes = await kioskVanClient.cancelCardPayment({
         amount: cancelAmt,
         vat: cancelVat,
+        isTaxFree,
         installmentMonths: cancelInstallment,
         orgAuthCode: vanResult.auth_code,
         orgApprovedDate,
         terminalId: vanResult.terminal_id,
         vanTrNo: vanResult.van_tr_no,
-        ...({
-          orgAuthNo: vanResult.auth_code,
-          orgAuthDate: orgApprovedDate,
-          orgVanTrNo: vanResult.van_tr_no,
-          vatAmount: cancelVat,
-        } as any)
       });
       if (!cancelRes || !cancelRes.success) {
         const backendReason = reason || 'Par3 webhook failed';
         const revReason = cancelRes?.error_message || 'Unknown';
         await api.reportGhostCharge({
-          store_cd: STORE_CODE,
+          store_cd: api.getStoreCd(),
           member_no: players[0]?.member_no || memberNo,
           prod_cd: resolvedProdCd,
           amount: cancelAmt,
@@ -777,14 +848,16 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           reversalErrorReason: revReason,
           error_reason: `${backendReason} / Cancel failed: ${revReason}`
         });
+        return false;
       } else {
         PaymentOutboxManager.removeByAuthCode(vanResult.auth_code);
+        return true;
       }
     } catch (cancelErr: any) {
       const backendReason = reason || `Par3 webhook failed (resId=${resId})`;
       const revReason = cancelErr?.message || String(cancelErr);
       await api.reportGhostCharge({
-        store_cd: STORE_CODE,
+        store_cd: api.getStoreCd(),
         member_no: players[0]?.member_no || memberNo,
         prod_cd: resolvedProdCd,
         amount: cancelAmt,
@@ -798,6 +871,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         reversalErrorReason: revReason,
         error_reason: `${backendReason} / Cancel exception: ${revReason}`
       });
+      return false;
     }
   };
 
@@ -826,6 +900,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       const isSuccess = typeof confirmRes === 'boolean' ? confirmRes : !!(confirmRes as any)?.success;
 
       if (isSuccess) {
+        if (authNo && amount > 0) {
+          PaymentOutboxManager.removeByAuthCode(authNo);
+        }
         currentHoldResIdRef.current = null;
         const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
         const formattedDate = TimeMaster.formatKstDateTime(TimeMaster.getSyncedDate());
@@ -845,29 +922,39 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           prodNm: `Par3 ${selectedZoneName} 코스 [${selectedSlot?.time}]`,
           partySize: players.length,
           totalAmount: amount,
-          resId: resId
+          resId: resId,
+          vatYn: matchedProd?.vat_yn || (selectedSlot as { vat_yn?: string } | null)?.vat_yn,
         });
 
         setPaymentState('DONE');
       } else {
-        await rollbackVanApprovalIfNeeded(resId, amount, vanResult, (confirmRes as any)?.message || 'Par3 webhook returned false');
+        const rollbackSucceeded = await rollbackVanApprovalIfNeeded(resId, amount, vanResult, (confirmRes as any)?.message || 'Par3 webhook returned false');
         await api.cancelHoldReservation(resId).catch(() => {});
         currentHoldResIdRef.current = null;
         fetchSlots();
-        setErrorMsg('결제 웹훅 승인 처리에 실패하여 카드 승인이 자동 취소되었습니다.');
+        setErrorMsg(
+          rollbackSucceeded === false
+            ? '카드 승인은 완료되었으나 단말기 자동 취소에 실패하여 긴급 환불 접수되었습니다. 승인 영수증 지참 후 프런트에 문의해 주세요.'
+            : '결제 웹훅 승인 처리에 실패하여 카드 승인이 자동 취소되었습니다.'
+        );
         resetPaymentState();
       }
     } catch (err: any) {
-      await rollbackVanApprovalIfNeeded(resId, amount, vanResult, err?.message || 'Par3 webhook exception');
+      const rollbackSucceeded = await rollbackVanApprovalIfNeeded(resId, amount, vanResult, err?.message || 'Par3 webhook exception');
       await api.cancelHoldReservation(resId).catch(() => {});
       currentHoldResIdRef.current = null;
       fetchSlots();
-      setErrorMsg('결제 서버 통신 중 오류가 발생하여 카드 승인이 자동 취소되었습니다.');
+      setErrorMsg(
+        rollbackSucceeded === false
+          ? '카드 승인은 완료되었으나 단말기 자동 취소에 실패하여 긴급 환불 접수되었습니다. 승인 영수증 지참 후 프런트에 문의해 주세요.'
+          : '결제 서버 통신 중 오류가 발생하여 카드 승인이 자동 취소되었습니다.'
+      );
       resetPaymentState();
     }
   };
 
   const resetPaymentState = () => {
+    restoreDefaultVanConfig();
     setPaymentState('IDLE');
     setCreatedReceipt(null);
     setLoading(false);
@@ -896,8 +983,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     resetPaymentState();
   };
 
-  // 영수증 인쇄 완료 후 최종 메인화면 이전 처리 (결제/인쇄 완료되었으므로 메인 복귀)
+  // 영수증 인쇄 완료 후 최종 메인화면 이전 처리 (결제/인쇄 완료되었으므로 VAN 잠금 즉시 해제 후 메인 복귀)
   const handleReceiptClose = () => {
+    onVanBusyChange?.(false);
+    resetPaymentState();
     onCancel();
   };
 
@@ -1015,12 +1104,18 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             }}
           >
             {(() => {
+              const PAR3_PREP_CUTOFF_MS = 600_000;
               const kstNow = TimeMaster.getSyncedDate();
+              const todayYmd = TimeMaster.getKstYmd(kstNow);
               const curHourMin = `${String(kstNow.getHours()).padStart(2, '0')}${String(kstNow.getMinutes()).padStart(2, '0')}`;
               
-              // 준비시간 Cutoff (10분 이내) 계산 (프론트 2중 방어 - KST 서버 동기화 시각 기준)
-              const cutoffNow = new Date(TimeMaster.getSyncedNowMs() + 10 * 60 * 1000);
-              const cutoffHourMin = `${String(cutoffNow.getHours()).padStart(2, '0')}${String(cutoffNow.getMinutes()).padStart(2, '0')}`;
+              // 준비시간 Cutoff (10분 이내) 계산 (프론트 2중 방어 - KST 서버 동기화 시각 및 심야 23:50~23:59 롤오버 방어)
+              const cutoffNow = new Date(TimeMaster.getSyncedNowMs() + PAR3_PREP_CUTOFF_MS);
+              const cutoffYmd = TimeMaster.getKstYmd(cutoffNow);
+              const cutoffHourMin =
+                cutoffYmd > todayYmd
+                  ? '2400'
+                  : `${String(cutoffNow.getHours()).padStart(2, '0')}${String(cutoffNow.getMinutes()).padStart(2, '0')}`;
 
               // 현재시각 이전 과거 시각만 필터링하고, 준비시간(10분 이내) 슬롯은 목록에 표시하되 마감 처리
               const displayedSlots = slots.filter(s => {
@@ -1763,8 +1858,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               position: 'relative'
             }}
           >
-            {/* 가상 QA 에러 모의 버튼 (모의 결제 모드 전용 노출) */}
-            {(settings.providerType === 'MOCK_VAN' || import.meta.env.VITE_DEMO_MODE === 'true' || import.meta.env.DEV) && (
+            {/* 가상 QA 에러 모의 버튼 (데모 쇼룸 및 로컬 개발 환경 전용 격리 노출) */}
+            {(isDemoEnvironment() || import.meta.env.DEV) && (
               <div style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '8px' }}>
                 <button
                   onClick={() => handleSimulateFail('한도초과 에러')}

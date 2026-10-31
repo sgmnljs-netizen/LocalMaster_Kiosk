@@ -22,6 +22,7 @@ export interface CompletedPurchaseInfo {
   days?: number;
   totalCount?: number;
   logicType?: string;
+  allowedCategories?: string[];
   purchaseType?: 'MEMBERSHIP' | 'LOCKER' | 'PRODUCT';
   lockerNo?: number | string;
   cardIssuer?: string;
@@ -170,7 +171,6 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
             installment_months: purchaseInfo?.installmentMonths ?? 0,
             terminal_id: purchaseInfo?.terminalId || settings.terminalId || api.getTerminalId(),
           } : undefined,
-          barcode_text: `PUR-${safeApprNo}`,
           footer_message: `유효기간: ${periodDisplayStr}\n키오스크 결제가 완료되었습니다.`,
         });
         receiptOk = Boolean(res?.success);

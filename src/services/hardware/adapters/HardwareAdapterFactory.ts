@@ -13,10 +13,17 @@ import {
   WindowsBridgeScannerAdapter,
 } from './WindowsBridgeAdapter';
 
-export const getIsMockHardware = (): boolean => {
+import { isKioskDemoRuntime } from '../../van/adapters/BaseVanAdapter';
+
+export const getIsMockHardware = (forceProdCheck?: boolean): boolean => {
   if (typeof window === 'undefined') return false;
-  const stored = localStorage.getItem('HW_MOCK');
+  const stored = window.localStorage ? window.localStorage.getItem('HW_MOCK') : null;
   if (stored !== null) return stored === 'true';
+  if (import.meta.env.VITE_HW_MOCK === 'true') return true;
+  const isProd = forceProdCheck ?? Boolean(import.meta.env.PROD);
+  if (isProd && !isKioskDemoRuntime()) {
+    return false;
+  }
   const isRealWindows =
     window.navigator.userAgent.includes('Windows') &&
     Boolean(window.navigator.platform && window.navigator.platform.startsWith('Win')) &&

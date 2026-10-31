@@ -1,11 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { CreditCard, Printer, ShieldAlert, Sparkles, ShieldCheck, RefreshCw, Ticket, CheckCircle2, UserCheck, X, ArrowLeft, Hand } from 'lucide-react';
-import { api, STORE_CODE } from '../services/api';
+import { api } from '../services/api';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { useKioskVanPayment } from '../hooks/useKioskVanPayment';
 import { kioskVanClient } from '../services/van/van_client';
+import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC, extractKstYyyyMmDd } from '../services/van/adapters/BaseVanAdapter';
 import type { CardApprovalResult } from '../services/van/van_types';
 import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
+import { VirtualKeyboard } from './VirtualKeyboard';
+import { Code128BarcodeSvg } from './common/Code128BarcodeSvg';
 
 
 import { TimeMaster } from '../utils/timeMaster';
@@ -20,6 +23,7 @@ export const INSTALLMENT_MONTH_OPTIONS = [0, 2, 3, 4, 5, 6, 12] as const;
 
 interface PaymentTerminalProps {
   productName: string;
+  productSpecSummary?: string;
   amount: number;
   discountableAmount?: number;
   productCategory?: string;
@@ -54,6 +58,7 @@ interface PaymentTerminalProps {
 
 export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   productName,
+  productSpecSummary,
   amount,
   discountableAmount,
   productCategory,
@@ -144,8 +149,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     onPaymentSuccess(payload);
   }, [onPaymentSuccess]);
 
-  // 🎟️ 쿠폰 관련 상태 (보유 쿠폰 목록 자동 조회 + 수기 번호 입력)
+  // 🎟️ 쿠폰 관련 상태 (보유 쿠폰 목록 자동 조회 + 수기 번호 입력 + 터치 화상키보드)
   const [couponCode, setCouponCode] = useState('');
+  const [isCouponKeyboardOpen, setIsCouponKeyboardOpen] = useState(false);
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [couponError, setCouponError] = useState('');
   const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
@@ -234,6 +240,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     setAppliedCoupon(coupon);
     setCouponCode('');
     setCouponError('');
+    setIsCouponKeyboardOpen(false);
     if (isPayRequested.current) {
       isSilentCancelRef.current = true;
       cancelPayment();
@@ -356,6 +363,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       setAppliedCoupon(coupon);
       setCouponCode('');
       setCouponError('');
+      setIsCouponKeyboardOpen(false);
       // 이미 단말기 결제 대기 중이었던 경우 기존 승인 요청을 취소하고 변경된 금액으로 재요청 준비
       if (isPayRequested.current) {
         isSilentCancelRef.current = true;
@@ -375,6 +383,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const handleRemoveCoupon = () => {
     setAppliedCoupon(null);
     setCouponError('');
+    setIsCouponKeyboardOpen(false);
     if (isPayRequested.current) {
       isSilentCancelRef.current = true;
       cancelPayment();
@@ -510,13 +519,12 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       amount: actualPayAmt,
       productName,
       customerName: memberName,
-      timeoutSeconds: 30,
+      timeoutSeconds: KIOSK_VAN_APPROVAL_TIMEOUT_SEC,
       vatAmount: vatAmt,
+      taxFreeAmount: isTaxFree ? actualPayAmt : 0,
+      isTaxFree,
+      terminalId: activeTerminalId || undefined,
       installmentMonths: effectiveInst,
-      ...({
-        taxFreeAmount: isTaxFree ? actualPayAmt : 0,
-        vat_yn: isTaxFree ? 'N' : 'Y',
-      } as any),
     });
 
     if (res.success) {
@@ -524,7 +532,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       // 정전/강제종료(장비 OFF)가 800ms 대기 또는 백엔드 전산 등록 도중 발생하더라도 재기동 시 유실 없이 추적 가능
       if (res.auth_code && actualPayAmt > 0) {
         PaymentOutboxManager.recordWalInFlight({
-          storeCd: STORE_CODE,
+          storeCd: api.getStoreCd(),
           terminalId: res.terminal_id || activeTerminalId || settings.terminalId || '',
           authCode: res.auth_code,
           vanTrNo: res.van_tr_no,
@@ -582,7 +590,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         });
       } catch (err: any) {
         // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소 + 실패 시 유령결제 긴급 리포트)
-        const orgDate = (res.approved_at || '').replace(/[^0-9]/g, '').slice(0, 8) || TimeMaster.getKstYmd(new Date()).replace(/-/g, '');
+        const orgDate = extractKstYyyyMmDd(res.approved_at);
         const resolvedInst = res.installment_months ?? effectiveInst;
         try {
           const cancelRes = await kioskVanClient.cancelCardPayment({
@@ -595,19 +603,12 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             isTaxFree,
             vat: vatAmt,
             reason: '타석 배정 전산 오류로 인한 자동 망취소',
-            ...({
-              vatAmount: vatAmt,
-              taxFreeAmount: isTaxFree ? actualPayAmt : 0,
-              orgAuthNo: res.auth_code,
-              orgAuthDate: orgDate,
-              orgVanTrNo: res.van_tr_no,
-            } as any)
           });
           if (!cancelRes || !cancelRes.success) {
             const backendReason = err?.message || 'Webhook failed';
             const revReason = cancelRes?.error_message || 'Unknown';
             await api.reportGhostCharge({
-              store_cd: STORE_CODE,
+              store_cd: api.getStoreCd(),
               member_no: memberNo,
               prod_cd: productName,
               amount: actualPayAmt,
@@ -621,15 +622,16 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               reversalErrorReason: revReason,
               error_reason: `${backendReason} / Cancel failed: ${revReason}`
             });
+            setErrorMsg('카드 승인은 완료되었으나 단말기 자동 취소에 실패하여 긴급 환불 접수되었습니다. 승인 영수증 지참 후 프런트에 문의해 주세요.');
           } else {
             PaymentOutboxManager.removeByAuthCode(res.auth_code);
+            setErrorMsg('타석 배정 처리 실패로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 회수해 주세요.');
           }
-          setErrorMsg('타석 배정 처리 실패로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 회수해 주세요.');
         } catch (cancelErr: any) {
           const backendReason = err?.message || 'Webhook failed';
           const revReason = cancelErr?.message || String(cancelErr);
           await api.reportGhostCharge({
-            store_cd: STORE_CODE,
+            store_cd: api.getStoreCd(),
             member_no: memberNo,
             prod_cd: productName,
             amount: actualPayAmt,
@@ -643,7 +645,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             reversalErrorReason: revReason,
             error_reason: `${backendReason} / Cancel exception: ${revReason}`
           });
-          setErrorMsg(err.message || '결제 후 배정 처리 중 오류가 발생했습니다.');
+          setErrorMsg('카드 승인은 완료되었으나 단말기 자동 취소에 실패하여 긴급 환불 접수되었습니다. 승인 영수증 지참 후 프런트에 문의해 주세요.');
         }
         setPayStep('INSERT_CARD');
         isPayRequested.current = false;
@@ -888,12 +890,23 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 <div style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.6px' }}>
                   {productName}
                 </div>
-                <div style={{ fontSize: '16px', color: '#86868b', fontWeight: 600, marginTop: '4px' }}>
+                <div
+                  data-testid="payment-product-spec-summary"
+                  style={{
+                    fontSize: '16px',
+                    color: productSpecSummary ? '#334155' : '#86868b',
+                    fontWeight: productSpecSummary ? 700 : 600,
+                    marginTop: '4px',
+                    lineHeight: 1.4
+                  }}
+                >
                   {(assignedBayNos && assignedBayNos.length > 0)
-                    ? `동반자 그룹 (${assignedBayNos.length}석)`
-                    : (assignedBayNo !== undefined && assignedBayNo !== null)
-                      ? '즉시 배정 · 타석 이용권'
-                      : '정규 이용권'}
+                    ? `동반자 그룹 (${assignedBayNos.length}석)${productSpecSummary ? ` · ${productSpecSummary}` : ''}`
+                    : productSpecSummary
+                      ? productSpecSummary
+                      : (assignedBayNo !== undefined && assignedBayNo !== null)
+                        ? '즉시 배정 · 타석 이용권'
+                        : '정규 이용권'}
                 </div>
               </div>
             </div>
@@ -1271,7 +1284,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                         type="text"
                         data-testid="coupon-code-input"
                         value={couponCode}
+                        onClick={() => setIsCouponKeyboardOpen(true)}
                         onFocus={() => {
+                          setIsCouponKeyboardOpen(true);
                           if (isPayRequested.current && (vanState === 'WAITING_CARD' || vanState === 'READY')) {
                             isSilentCancelRef.current = true;
                             cancelPayment();
@@ -1290,14 +1305,21 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                             setErrorMsg('');
                           }
                         }}
-                        onKeyDown={(e) => e.key === 'Enter' && handleVerifyCoupon()}
-                        placeholder="쿠폰 번호 입력 또는 바코드 스캔"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                            setIsCouponKeyboardOpen(false);
+                            void handleVerifyCoupon();
+                          }
+                        }}
+                        placeholder="쿠폰 번호 터치 입력 또는 바코드 스캔"
                         style={{
                           flex: 1,
                           height: '56px',
                           padding: '0 18px',
                           borderRadius: '14px',
-                          border: '1px solid #d2d2d7',
+                          border: isCouponKeyboardOpen ? '2px solid #059669' : '1px solid #d2d2d7',
                           fontSize: '17px',
                           fontWeight: 700,
                           outline: 'none',
@@ -1308,7 +1330,10 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                       <button
                         type="button"
                         data-testid="apply-coupon-btn"
-                        onClick={() => handleVerifyCoupon()}
+                        onClick={() => {
+                          setIsCouponKeyboardOpen(false);
+                          void handleVerifyCoupon();
+                        }}
                         disabled={isVerifyingCoupon || !couponCode.trim()}
                         style={{
                           padding: '0 24px',
@@ -1326,6 +1351,30 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                         {isVerifyingCoupon ? '확인 중' : '적용'}
                       </button>
                     </div>
+                    {isCouponKeyboardOpen && (
+                      <div style={{ marginTop: '12px' }}>
+                        <VirtualKeyboard
+                          mode="COUPON_CODE"
+                          uppercase={true}
+                          compact={true}
+                          docked={true}
+                          label="쿠폰 번호"
+                          maxLength={32}
+                          value={couponCode}
+                          onChange={(val) => {
+                            setCouponCode(val);
+                            if (isPayRequested.current && (vanState === 'WAITING_CARD' || vanState === 'READY')) {
+                              isSilentCancelRef.current = true;
+                              cancelPayment();
+                              isPayRequested.current = false;
+                              setIsReadyToPay(false);
+                              setErrorMsg('');
+                            }
+                          }}
+                          onClose={() => setIsCouponKeyboardOpen(false)}
+                        />
+                      </div>
+                    )}
                     {couponError && (
                       <div style={{ fontSize: '14px', color: '#ff3b30', fontWeight: 700, marginTop: '8px' }}>
                         ⚠️ {couponError}
@@ -1892,7 +1941,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                   <h3 style={{ fontSize: '22px', fontWeight: 900, letterSpacing: '-0.5px' }}>
                     ⛳ {settings.deviceName || 'GOLFOS'}
                   </h3>
-                  <p style={{ fontSize: '12px', color: '#555', marginTop: '4px' }}>지점코드: {settings.storeCode || STORE_CODE}</p>
+                  <p style={{ fontSize: '12px', color: '#555', marginTop: '4px' }}>지점코드: {settings.storeCode || api.getStoreCd()}</p>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
@@ -2050,30 +2099,16 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               </>
             )}
 
-            {/* 게이트 출입용 실시간 가상 바코드 */}
+            {/* 게이트 출입용 표준 Code128B 스캔 바코드 */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', borderTop: '1px dashed #000', paddingTop: '14px', marginTop: '14px' }}>
               <span style={{ fontSize: '10px', color: '#666', letterSpacing: '1px', fontWeight: 700 }}>GATE ENTRY BARCODE</span>
-              <svg style={{ width: '220px', height: '50px' }}>
-                <rect x="0" y="0" width="8" height="50" fill="#000" />
-                <rect x="12" y="0" width="3" height="50" fill="#000" />
-                <rect x="20" y="0" width="6" height="50" fill="#000" />
-                <rect x="30" y="0" width="10" height="50" fill="#000" />
-                <rect x="45" y="0" width="3" height="50" fill="#000" />
-                <rect x="52" y="0" width="8" height="50" fill="#000" />
-                <rect x="64" y="0" width="5" height="50" fill="#000" />
-                <rect x="74" y="0" width="12" height="50" fill="#000" />
-                <rect x="90" y="0" width="3" height="50" fill="#000" />
-                <rect x="98" y="0" width="8" height="50" fill="#000" />
-                <rect x="110" y="0" width="6" height="50" fill="#000" />
-                <rect x="122" y="0" width="10" height="50" fill="#000" />
-                <rect x="136" y="0" width="5" height="50" fill="#000" />
-                <rect x="146" y="0" width="8" height="50" fill="#000" />
-                <rect x="158" y="0" width="3" height="50" fill="#000" />
-                <rect x="166" y="0" width="6" height="50" fill="#000" />
-              </svg>
-              <span style={{ fontSize: '12px', fontWeight: 700, fontFamily: 'monospace', letterSpacing: '3px' }}>
-                *{appNo}*
-              </span>
+              <Code128BarcodeSvg
+                value={String(resId || appNo || '00000000')}
+                width={220}
+                barHeight={48}
+                labelText={`*${String(resId || appNo || '00000000').slice(0, 20)}*`}
+                testId="payment-gate-barcode"
+              />
               <p style={{ fontSize: '9px', color: '#888', textAlign: 'center', marginTop: '2px', lineHeight: '1.4' }}>
                 게이트 센서 스캐너에 본 바코드를<br />가볍게 스캔 터치해 주세요.
               </p>

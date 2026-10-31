@@ -1,6 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { ShoppingBag, X, Layers, Hand, Clock } from 'lucide-react';
-import { api, Product } from '../services/api';
+import { api, Bay, Product } from '../services/api';
+import { TimeMaster } from '../utils/timeMaster';
+import {
+  buildKioskProductSpecSummary,
+  checkIfKioskDailyProduct,
+  evaluateDailyPassEligibility,
+  normalizeTargetGenderLabel,
+  resolveKioskProductDurationMin,
+} from '../utils/kioskProductSpecSummary';
 
 /** 샴페인 플래티넘 메탈 스마트 IC 칩 (EMV Chip) 그래픽 */
 const EmvChip: React.FC = () => (
@@ -27,6 +35,11 @@ interface ProductShopProps {
   purposeType?: 'ALLOCATE_DAILY' | 'PURCHASE_PRODUCT' | 'SELECT_DAILY_PASS';
   maxAssignableMin?: number | null;
   nextLimitResStartTime?: string | null;
+  selectedBay?: Bay | null;
+  allStoreFloors?: string[];
+  zoneLabelMap?: Record<string, string>;
+  hasActiveMembership?: boolean;
+  nowOverride?: Date;
   initialProducts?: Product[];
   onProductSelected: (product: Product) => void;
   onCancel: () => void;
@@ -48,6 +61,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   purposeType,
   maxAssignableMin = null,
   nextLimitResStartTime = null,
+  selectedBay = null,
+  allStoreFloors,
+  zoneLabelMap,
+  hasActiveMembership = false,
+  nowOverride,
   initialProducts,
   onProductSelected,
   onCancel
@@ -61,23 +79,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   const [displayCategories, setDisplayCategories] = useState<DisplayCategoryItem[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>(initialProducts || []);
   const [loading, setLoading] = useState(false);
+  const [warningTitle, setWarningTitle] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
   // 일일 타석 배정권 여부 판별 헬퍼 (상품 DB 속성 직접 참조)
-  const checkIfDaily = (prod: Product) => {
-    const logicUpper = (prod.logic_type || '').toUpperCase();
-    if (logicUpper === 'PERIOD' || logicUpper === 'COUNT' || logicUpper === 'COUPON') {
-      return false;
-    }
-    if (logicUpper === 'DAILY' || logicUpper === 'DAY') {
-      return true;
-    }
-    const isDailyLogic = logicUpper === 'FACILITY';
-    const isDailyCd = (prod.prod_cd || '').startsWith('D') || (prod.prod_cd || '').startsWith('P01') || (prod.prod_cd || '').startsWith('P02');
-    const isDailyName = (prod.prod_nm || '').includes('일일') || (prod.prod_nm || '').includes('당일');
-    const hasDuration = prod.duration_min != null && prod.duration_min > 0;
-    return (isDailyLogic || isDailyCd || isDailyName) && hasDuration;
-  };
+  const checkIfDaily = (prod: Product) => checkIfKioskDailyProduct(prod);
 
   const nonDailyFilter = (p: Product) => {
     const lt = (p.logic_type || '').toUpperCase();
@@ -85,14 +91,20 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   };
 
   useEffect(() => {
+    if (initialProducts && initialProducts.length > 0) {
+      setAllProducts(initialProducts);
+      return;
+    }
+    let mounted = true;
     const loadKioskShopData = async () => {
       setLoading(true);
       try {
-        // 1. KIOSK 용 전시 카테고리 로드
-        const categories = await api.getKioskDisplayCategories();
-
-        // 2. 전체 상품 로드
-        const products = await api.getProducts();
+        // 1. KIOSK 전시 카테고리 및 전체 상품을 병렬 조회하여 체감 응답 지연 절반 단축
+        const [categories, products] = await Promise.all([
+          api.getKioskDisplayCategories(),
+          api.getProducts(),
+        ]);
+        if (!mounted) return;
         setAllProducts(products);
 
         // 🛡️ BUG-S06: PURCHASE_PRODUCT 모드에서는 일일권/라카만 들어있어 필터링 후 0개가 되는 빈 탭을 제외하고,
@@ -123,20 +135,19 @@ export const ProductShop: React.FC<ProductShopProps> = ({
       } catch (err) {
         console.error('Failed to load kiosk shop data:', err);
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
     loadKioskShopData();
-  }, [memberNo, purposeType]);
+    return () => {
+      mounted = false;
+    };
+  }, [memberNo, purposeType, initialProducts]);
 
   // 일일 타석 배정권 시간(분) 추출 헬퍼 (DB 물리 컬럼 ➔ time_min ➔ JSON access_rules/rules_detail 직접 참조)
-  const getDurationMin = (prod: Product) => {
-    if (prod.duration_min != null && prod.duration_min > 0) return prod.duration_min;
-    if (prod.time_min != null && prod.time_min > 0) return prod.time_min;
-    const jsonDuration = prod.access_rules?.duration_min || prod.rules_detail?.duration_min;
-    if (jsonDuration != null && jsonDuration > 0) return Number(jsonDuration);
-    return 60;
-  };
+  const getDurationMin = (prod: Product) => resolveKioskProductDurationMin(prod);
 
   // 현재 탭 및 목적(purposeType)에 맞는 노출 상품 목록 필터링
   const getFilteredProducts = (): Product[] => {
@@ -165,6 +176,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   // 비회원의 장기 회원권 탭 진입 차단 처리
   const handleTabClick = (tabId: number | 'DAILY_PASS', tabName: string) => {
     if (tabId !== 'DAILY_PASS' && !memberNo && (tabName.includes('회원') || tabName.includes('정기') || tabName.includes('라카'))) {
+      setWarningTitle('회원 인증 필요');
       setWarningMessage('장기 정기권 및 지정 시설 상품 구매는 회원 인증이 필요합니다.\n처음 화면으로 돌아가 회원 조회를 먼저 완료해 주십시오.');
       return;
     }
@@ -336,16 +348,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           filteredProducts.map((prod) => {
             const isDaily = checkIfDaily(prod);
             const durationMin = getDurationMin(prod);
-            const rawLogicType = (prod.logic_type || '').toUpperCase();
-            const totalCount = prod.total_count ?? prod.access_rules?.total_count ?? prod.rules_detail?.total_count ?? 0;
-            const days = prod.days ?? prod.access_rules?.days ?? prod.rules_detail?.days ?? 0;
-
-            const resolvedLogicType: 'COUNT' | 'PERIOD' | 'DAILY' =
-              rawLogicType === 'COUNT' || rawLogicType === 'COUPON' || (!isDaily && totalCount > 0)
-                ? 'COUNT'
-                : isDaily
-                  ? 'DAILY'
-                  : 'PERIOD';
+            const specSummary = buildKioskProductSpecSummary(prod, {
+              allStoreFloors,
+              zoneLabelMap,
+              hasActiveMembership,
+            });
 
             // 1. 실제 판매 기준 가격 (sale_price 우선 참조) 및 정상가 취소선 계산
             const effectiveSalePrice =
@@ -359,20 +366,24 @@ export const ProductShop: React.FC<ProductShopProps> = ({
             const hasAnyDiscount = hasSaleDiscount || hasGradeDiscount;
             const priceFormatted = finalPrice.toLocaleString();
 
-            // 2. 배지(badge) 및 노출 상품명(display_nm) 동적 반영 (하드코딩 제거)
-            const customBadge = prod.meta_data?.pos_button?.badge || prod.meta_data?.badges?.[0] || null;
-            const rawTargetGender = String(
-              prod.target_gender || prod.access_rules?.restricted_gender || prod.rules_detail?.restricted_gender || 'ALL'
-            ).toUpperCase();
-            const targetGenderNorm = rawTargetGender === 'MALE' ? 'M' : rawTargetGender === 'FEMALE' ? 'F' : rawTargetGender;
-            const genderBadge = targetGenderNorm === 'F' ? '여성 전용' : targetGenderNorm === 'M' ? '남성 전용' : null;
-            const isDurationExceeded = Boolean(
-              isDailyPurpose &&
-              isDaily &&
-              typeof maxAssignableMin === 'number' &&
-              maxAssignableMin > 0 &&
-              durationMin > maxAssignableMin
-            );
+            // 2. 배지(badge), 성별 제한, 일일권 실시간 이용 적합성(시간/구역/요일) 동적 반영
+            const customBadge = prod.meta_data?.pos_button?.badge || prod.meta_data?.badges?.[0] || prod.meta_data?.badge || null;
+            const genderInfo = normalizeTargetGenderLabel(prod);
+            const targetGenderNorm = genderInfo.code;
+            const genderBadge = genderInfo.label;
+
+            const dailyEligibility =
+              isDailyPurpose && isDaily
+                ? evaluateDailyPassEligibility(prod, {
+                    maxAssignableMin,
+                    nextLimitResStartTime,
+                    selectedBay,
+                    now: nowOverride ?? TimeMaster.getSyncedDate(),
+                    allStoreFloors,
+                    zoneLabelMap,
+                  })
+                : null;
+            const isCardDisabled = Boolean(dailyEligibility && !dailyEligibility.eligible);
             const displayName = prod.meta_data?.display_nm || prod.prod_nm;
 
             return (
@@ -380,15 +391,15 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 key={prod.prod_cd}
                 data-testid={`product-card-${prod.prod_cd}`}
                 data-duration={durationMin}
-                data-disabled={isDurationExceeded ? 'true' : 'false'}
+                data-disabled={isCardDisabled ? 'true' : 'false'}
                 onClick={() => {
-                  if (isDurationExceeded) {
-                    setWarningMessage(
-                      `선택하신 타석은 다음 예약(${nextLimitResStartTime || '예정'})으로 인해 최대 [${maxAssignableMin}분]까지만 이용 가능합니다.\n\n${durationMin}분 상품을 이용하시려면 우측 상단 [×] 닫기 버튼을 눌러 다른 타석을 선택해 주세요.`
-                    );
+                  if (isCardDisabled && dailyEligibility) {
+                    setWarningTitle(dailyEligibility.modalTitle || '이용 제한 안내');
+                    setWarningMessage(dailyEligibility.modalMessage || '현재 선택하실 수 없는 상품입니다.');
                     return;
                   }
                   if (!memberNo && (prod.logic_type || '').toUpperCase() !== 'DAILY' && !checkIfDaily(prod)) {
+                    setWarningTitle('회원 인증 필요');
                     setWarningMessage('회원 전용 상품입니다. 먼저 회원 인증을 진행해 주세요.');
                     return;
                   }
@@ -397,6 +408,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                     const memG = normMemGender === 'MALE' || normMemGender === '남' ? 'M' : normMemGender === 'FEMALE' || normMemGender === '여' ? 'F' : normMemGender;
                     if (memG && memG !== targetGenderNorm) {
                       const reqLabel = targetGenderNorm === 'F' ? '여성' : '남성';
+                      setWarningTitle('상품 구매 제한 안내');
                       setWarningMessage(`선택하신 상품은 [${reqLabel} 회원 전용] 상품입니다.\n다른 상품을 선택해 주세요.`);
                       return;
                     }
@@ -406,30 +418,30 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                 style={{
                   padding: '24px 26px 22px 26px',
                   borderRadius: '24px',
-                  border: isDurationExceeded ? '1.5px dashed #cbd5e1' : '1.5px solid #e2e8f0',
-                  background: isDurationExceeded
+                  border: isCardDisabled ? '1.5px dashed #cbd5e1' : '1.5px solid #e2e8f0',
+                  background: isCardDisabled
                     ? '#f8fafc'
                     : 'linear-gradient(135deg, #ffffff 0%, #fbfcfd 45%, #f4f6f8 100%)',
-                  opacity: isDurationExceeded ? 0.56 : 1,
-                  cursor: isDurationExceeded ? 'not-allowed' : 'pointer',
+                  opacity: isCardDisabled ? 0.56 : 1,
+                  cursor: isCardDisabled ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
                   gap: '18px',
-                  boxShadow: isDurationExceeded ? 'none' : '0 8px 24px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.03)',
+                  boxShadow: isCardDisabled ? 'none' : '0 8px 24px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.03)',
                   transition: 'all 0.22s cubic-bezier(0.25, 1, 0.5, 1)',
                   position: 'relative',
                   overflow: 'hidden',
                   boxSizing: 'border-box'
                 }}
                 onMouseEnter={(e) => {
-                  if (isDurationExceeded) return;
+                  if (isCardDisabled) return;
                   e.currentTarget.style.borderColor = '#059669';
                   e.currentTarget.style.transform = 'translateY(-3px)';
                   e.currentTarget.style.boxShadow = '0 16px 36px rgba(5, 150, 105, 0.14), 0 2px 8px rgba(0, 0, 0, 0.04)';
                 }}
                 onMouseLeave={(e) => {
-                  if (isDurationExceeded) return;
+                  if (isCardDisabled) return;
                   e.currentTarget.style.borderColor = '#e2e8f0';
                   e.currentTarget.style.transform = 'translateY(0)';
                   e.currentTarget.style.boxShadow = '0 8px 24px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.03)';
@@ -440,11 +452,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <EmvChip />
                     <span style={{ fontSize: '12px', fontWeight: 900, color: '#64748b', letterSpacing: '1.2px' }}>
-                      {resolvedLogicType === 'DAILY'
-                        ? 'DAILY PASS'
-                        : resolvedLogicType === 'COUNT'
-                          ? 'COUNT PASS'
-                          : 'VIP MEMBERSHIP'}
+                      {specSummary.headerTypeBadge}
                     </span>
                   </div>
 
@@ -462,7 +470,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                         {genderBadge}
                       </span>
                     )}
-                    {isDurationExceeded ? (
+                    {isCardDisabled && dailyEligibility?.badgeLabel ? (
                       <span style={{
                         fontSize: '12px',
                         fontWeight: 800,
@@ -472,7 +480,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                         color: '#b45309',
                         border: '1px solid #fcd34d'
                       }}>
-                        {`⚠️ 최대 ${maxAssignableMin}분 가능 (초과)`}
+                        {dailyEligibility.badgeLabel}
                       </span>
                     ) : customBadge ? (
                       <span style={{
@@ -490,70 +498,99 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                   </div>
                 </div>
 
-                {/* [2단: 카드 본체 — 24px 볼드 상품명 & 1회 배정시간 시그니처 뱃지 & 1열 혜택 라인] */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', marginTop: '2px' }}>
+                {/* [2단: 카드 본체 — 24px 볼드 상품명 & 1회 배정시간 시그니처 뱃지 & 유동적 혜택·제한 라인] */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', marginTop: '2px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                     <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#0f172a', letterSpacing: '-0.6px', margin: 0, lineHeight: 1.2 }}>
                       {displayName}
                     </h3>
 
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '5px 11px',
-                      borderRadius: '8px',
-                      fontSize: '13px',
-                      fontWeight: 800,
-                      whiteSpace: 'nowrap',
-                      background: '#f1f5f9',
-                      color: '#1e293b',
-                      border: '1px solid #e2e8f0',
-                      flexShrink: 0
-                    }}>
-                      <Clock size={13} strokeWidth={2.4} style={{ color: '#059669' }} />
-                      <span>1회 {durationMin}분 배정</span>
-                    </span>
+                    {specSummary.resolvedLogicType !== 'RETAIL' && specSummary.resolvedLogicType !== 'RENTAL' && (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '5px 11px',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: 800,
+                        whiteSpace: 'nowrap',
+                        background: '#f1f5f9',
+                        color: '#1e293b',
+                        border: '1px solid #e2e8f0',
+                        flexShrink: 0
+                      }}>
+                        <Clock size={13} strokeWidth={2.4} style={{ color: '#059669' }} />
+                        <span>1회 {durationMin}분 배정</span>
+                      </span>
+                    )}
                   </div>
 
-                  {/* 1열 가로 시원한 혜택 요약 라인 (원색 체크 아이콘 노이즈 제거) */}
+                  {/* 1열 가로 기본 제공량 요약 라인 (허위 '무제한' 제거) */}
                   <div style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '7px',
-                    flexWrap: 'nowrap',
-                    whiteSpace: 'nowrap',
+                    flexWrap: 'wrap',
                     fontSize: '13px',
                     color: '#475569',
                     fontWeight: 700,
                     padding: '2px 0'
                   }}>
-                    {resolvedLogicType === 'COUNT' ? (
-                      <>
-                        <span>🎫 총 <strong style={{ color: '#047857' }}>{totalCount}회</strong> 제공</span>
-                        <span style={{ color: '#cbd5e1' }}>·</span>
-                        <span>📅 {days > 0 ? `유효기간 ${days}일` : '횟수 차감형'}</span>
-                        <span style={{ color: '#cbd5e1' }}>·</span>
-                        <span>⚡ 결제 즉시 가동</span>
-                      </>
-                    ) : resolvedLogicType === 'PERIOD' ? (
-                      <>
-                        <span>📅 <strong style={{ color: '#047857' }}>{days > 0 ? `${days}일` : '정기'}</strong> 무제한</span>
-                        <span style={{ color: '#cbd5e1' }}>·</span>
-                        <span>⏰ 1일 {durationMin}분</span>
-                        <span style={{ color: '#cbd5e1' }}>·</span>
-                        <span>⚡ 결제 즉시 가동</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>⛳ 당일 1회 즉시 배정</span>
-                        <span style={{ color: '#cbd5e1' }}>·</span>
-                        <span>⏱️ <strong style={{ color: '#047857' }}>{durationMin}분</strong> 이용</span>
-                        <span style={{ color: '#cbd5e1' }}>·</span>
-                        <span>⚡ 결제 즉시 가동</span>
-                      </>
-                    )}
+                    {specSummary.benefitTokens.map((tok, tokIdx) => (
+                      <React.Fragment key={tokIdx}>
+                        {tokIdx > 0 && <span style={{ color: '#cbd5e1' }}>·</span>}
+                        <span>
+                          {tok.icon} {tok.label}
+                          {tok.highlight && <strong style={{ color: '#047857' }}>{tok.highlight}</strong>}
+                          {tok.suffix || ''}
+                        </span>
+                      </React.Fragment>
+                    ))}
                   </div>
+
+                  {/* Exception-Only 유동 조건 칩: 실제 제한 옵션이 설정된 상품에만 노출 (일반 올패스 상품은 미렌더링) */}
+                  {specSummary.restrictionChips.length > 0 && (
+                    <div
+                      data-testid={`product-restriction-chips-${prod.prod_cd}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        flexWrap: 'wrap',
+                        marginTop: '2px'
+                      }}
+                    >
+                      {specSummary.restrictionChips.map((chip) => {
+                        const chipStyle =
+                          chip.tone === 'amber'
+                            ? { background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }
+                            : chip.tone === 'emerald'
+                              ? { background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }
+                              : { background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' };
+                        return (
+                          <span
+                            key={chip.key}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '4px 10px',
+                              borderRadius: '8px',
+                              fontSize: '12.5px',
+                              fontWeight: 800,
+                              lineHeight: 1.2,
+                              whiteSpace: 'nowrap',
+                              ...chipStyle
+                            }}
+                          >
+                            <span>{chip.icon}</span>
+                            <span>{chip.label}</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* [3단: 카드 푸터 — 이용요금 & 56px 딥 차콜 애플 필 구매 버튼] */}
@@ -584,28 +621,28 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                   </div>
 
                   <button
-                    disabled={isDurationExceeded}
+                    disabled={isCardDisabled}
                     style={{
                       width: '100%',
                       height: '56px',
                       borderRadius: '999px',
-                      background: isDurationExceeded ? '#e2e8f0' : '#1d1d1f',
-                      color: isDurationExceeded ? '#64748b' : '#ffffff',
+                      background: isCardDisabled ? '#e2e8f0' : '#1d1d1f',
+                      color: isCardDisabled ? '#64748b' : '#ffffff',
                       border: 'none',
                       fontSize: '17px',
                       fontWeight: 800,
                       letterSpacing: '-0.3px',
-                      cursor: isDurationExceeded ? 'not-allowed' : 'pointer',
+                      cursor: isCardDisabled ? 'not-allowed' : 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: '8px',
-                      boxShadow: isDurationExceeded ? 'none' : '0 6px 18px rgba(0, 0, 0, 0.14)',
+                      boxShadow: isCardDisabled ? 'none' : '0 6px 18px rgba(0, 0, 0, 0.14)',
                       transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
                     }}
                   >
-                    {isDurationExceeded ? (
-                      <span>다음 예약({nextLimitResStartTime || '예정'})으로 선택 불가 (최대 {maxAssignableMin}분)</span>
+                    {isCardDisabled && dailyEligibility?.buttonLabel ? (
+                      <span>{dailyEligibility.buttonLabel}</span>
                     ) : (
                       <>
                         <Hand size={18} className="animate-hand-tap" style={{ color: '#10b981' }} />
@@ -640,7 +677,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         • 일일 타석권은 결제 즉시 타석 배정이 완료되며, 모든 결제는 신용카드만 가능합니다 (현금 결제/환불은 안내 데스크 문의).
       </div>
 
-      {/* 회원 전용 상품 인증 및 시간 초과 안내 모달 (동기식 alert 대체) */}
+      {/* 회원 전용 상품 인증 및 이용 제한 안내 모달 (동기식 alert 대체) */}
       {warningMessage && (
         <div style={{
           position: 'fixed',
@@ -668,18 +705,26 @@ export const ProductShop: React.FC<ProductShopProps> = ({
             border: '1px solid #e5e5ea'
           }}>
             <div style={{ fontSize: '48px', marginBottom: '16px' }}>
-              {warningMessage.includes('다음 예약') ? '⏰' : '🔒'}
+              {warningMessage.includes('다음 예약') || warningTitle?.includes('시간')
+                ? '⏰'
+                : warningTitle?.includes('구역')
+                  ? '📍'
+                  : '🔒'}
             </div>
             <h3 style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', marginBottom: '12px' }}>
-              {warningMessage.includes('다음 예약')
-                ? '이용 시간 초과 상품 안내'
-                : (warningMessage.includes('전용]') ? '상품 구매 제한 안내' : '회원 인증 필요')}
+              {warningTitle ||
+                (warningMessage.includes('다음 예약')
+                  ? '이용 시간 초과 상품 안내'
+                  : (warningMessage.includes('전용]') ? '상품 구매 제한 안내' : '회원 인증 필요'))}
             </h3>
             <p style={{ fontSize: '16px', color: '#515154', lineHeight: '1.6', whiteSpace: 'pre-line', marginBottom: '28px', fontWeight: 600 }}>
               {warningMessage}
             </p>
             <button
-              onClick={() => setWarningMessage(null)}
+              onClick={() => {
+                setWarningTitle(null);
+                setWarningMessage(null);
+              }}
               style={{
                 width: '100%',
                 height: '56px',

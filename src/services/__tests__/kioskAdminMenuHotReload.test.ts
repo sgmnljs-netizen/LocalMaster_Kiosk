@@ -529,6 +529,30 @@ describe('Kiosk Admin Menu, Auth Override, Hot-Reload & Dev Security QA (A04, A0
       expect(getIsMockVan()).toBe(true);
     });
 
+    it('A08-3: getIsMockVan(true) locks out UA-inferred Mock mode in non-demo production runtime', () => {
+      mockLocalStorage.removeItem('VAN_MOCK');
+      Object.defineProperty(window.navigator, 'webdriver', {
+        value: true,
+        configurable: true,
+      });
+      Object.defineProperty(window.navigator, 'userAgent', {
+        value: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        configurable: true,
+      });
+      Object.defineProperty(window.navigator, 'platform', {
+        value: 'Linux x86_64',
+        configurable: true,
+      });
+
+      // Production non-demo runtime MUST return false even on Linux/Mac/webdriver
+      expect(getIsMockVan(true)).toBe(false);
+
+      // Explicit localStorage override still works when intentionally set by engineer
+      mockLocalStorage.setItem('VAN_MOCK', 'true');
+      expect(getIsMockVan(true)).toBe(true);
+      mockLocalStorage.removeItem('VAN_MOCK');
+    });
+
     it('A08-2: Static audit verifies all simulator debug chips are completely removed from MemberAuth.tsx', () => {
       const memberAuthFilePath = path.resolve(__dirname, '../../components/MemberAuth.tsx');
       expect(fs.existsSync(memberAuthFilePath)).toBe(true);

@@ -5,6 +5,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { kioskVanClient } from '../services/van/van_client';
+import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC } from '../services/van/adapters/BaseVanAdapter';
 import type {
   CardPaymentRequestParams,
   CardApprovalResult,
@@ -26,12 +27,18 @@ interface UseKioskVanPaymentReturn {
 export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const { settings } = useKioskSettings();
   const [state, setState] = useState<VanPaymentState>('IDLE');
-  const [remainingSeconds, setRemainingSeconds] = useState<number>(30);
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(KIOSK_VAN_APPROVAL_TIMEOUT_SEC);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CardApprovalResult | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isTimeoutRef = useRef<boolean>(false);
+  const stateRef = useRef<VanPaymentState>('IDLE');
+
+  const updateVanState = useCallback((next: VanPaymentState) => {
+    stateRef.current = next;
+    setState(next);
+  }, []);
 
   // 키오스크 로컬 설정이 변경되면 vanClient 설정도 동기화
   useEffect(() => {
@@ -56,35 +63,38 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const reset = useCallback(() => {
     clearTimer();
     isTimeoutRef.current = false;
-    setState('IDLE');
-    setRemainingSeconds(30);
+    updateVanState('IDLE');
+    setRemainingSeconds(KIOSK_VAN_APPROVAL_TIMEOUT_SEC);
     setError(null);
     setResult(null);
-  }, [clearTimer]);
+  }, [clearTimer, updateVanState]);
 
   const cancelPayment = useCallback(() => {
     isTimeoutRef.current = false;
     kioskVanClient.cancelCurrentRequest();
     clearTimer();
-    setState('CANCELLED');
+    updateVanState('CANCELLED');
     setError('결제가 취소되었습니다.');
-  }, [clearTimer]);
+  }, [clearTimer, updateVanState]);
 
   const startPayment = useCallback(
     async (params: CardPaymentRequestParams): Promise<CardApprovalResult> => {
       reset();
       isTimeoutRef.current = false;
-      const totalTimeout = params.timeoutSeconds || 30;
+      const totalTimeout = params.timeoutSeconds || KIOSK_VAN_APPROVAL_TIMEOUT_SEC;
       setRemainingSeconds(totalTimeout);
 
-      // 1초 단위 타이머 시작
+      // 1초 단위 타이머 시작 (이미 VAN사 승인 통신 중['REQUESTING']일 때는 소켓 절단 금지 — 어댑터 원장 복구 보장)
       timerRef.current = setInterval(() => {
         setRemainingSeconds((prev) => {
           if (prev <= 1) {
             clearTimer();
+            if (stateRef.current === 'REQUESTING') {
+              return 0;
+            }
             isTimeoutRef.current = true;
             kioskVanClient.cancelCurrentRequest();
-            setState('TIMEOUT');
+            updateVanState('TIMEOUT');
             setError('결제 시간이 초과되어 취소되었습니다.');
             return 0;
           }
@@ -95,9 +105,9 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
       try {
         const res = await kioskVanClient.requestCardPayment(params, (newState) => {
           if (newState === 'CANCELLED' && isTimeoutRef.current) {
-            setState('TIMEOUT');
+            updateVanState('TIMEOUT');
           } else {
-            setState(newState);
+            updateVanState(newState);
           }
         });
 
@@ -106,11 +116,11 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         if (!res.success) {
           if (res.error_code === 'E_USER_CANCEL' || (res as any).errorCode === 'E_USER_CANCEL') {
             if (isTimeoutRef.current) {
-              setState('TIMEOUT');
+              updateVanState('TIMEOUT');
               setError('결제 시간이 초과되어 취소되었습니다.');
               res.error_code = 'E_TIMEOUT';
             } else {
-              setState('CANCELLED');
+              updateVanState('CANCELLED');
               setError(res.error_message || '결제가 취소되었습니다.');
             }
           } else {
@@ -122,7 +132,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         return res;
       } catch (err: unknown) {
         clearTimer();
-        setState('ERROR');
+        updateVanState('ERROR');
         const errMsg = err instanceof Error ? err.message : '단말기 통신 중 오류가 발생했습니다.';
         setError(errMsg);
         const failResult: CardApprovalResult = {

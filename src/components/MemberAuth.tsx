@@ -12,6 +12,9 @@ import {
 
 export type AuthMode = 'SMART_TAG' | 'PHONE_KEYPAD' | 'QR_SCAN' | 'FACE';
 
+// [H-4] MemberAuth 언마운트 후 즉시 재진입 시에도 앞사람 BLE 시퀀스를 재소비하지 않도록 모듈 레벨 기억
+let _lastGlobalHandledBleSeq = 0;
+
 const AUTH_MODE_SHORT_LABELS: Record<AuthMode, string> = {
   SMART_TAG: '앱 스마트 체크인',
   PHONE_KEYPAD: '전화번호',
@@ -90,16 +93,35 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   const faceAbortControllerRef = useRef<AbortController | null>(null);
   // 키오스크 ↔ 로컬 하드웨어 브릿지 NFC/BLE 시퀀스 및 WebSocket 연결 ref
   const nfcBleWsRef = useRef<WebSocket | null>(null);
-  const lastHandledBleSeqRef = useRef<number>(0);
+  const lastHandledBleSeqRef = useRef<number>(_lastGlobalHandledBleSeq);
 
-  // 🛡️ 안면 스캔 또는 서버 검색 진행 중 전역 비활동(Inactivity) 타이머 리셋 방어 (BUG-M10)
+  // [H-4] 인증 화면 언마운트(뒤로가기/홈/인증완료) 시 로컬 BLE 잔류 캐시 즉시 클리어
   useEffect(() => {
-    if (!faceScanning && !isSearching && !detectedMember && duplicateCandidates.length === 0) return;
+    return () => {
+      api.clearLocalBleCache();
+    };
+  }, []);
+
+  // 🛡️ 안면 스캔 또는 서버 검색 등 능동 하드웨어/네트워크 진행 중에만 전역 비활동(Inactivity) 타이머 리셋 방어
+  // (수동 입력 대기 모달인 detectedMember / duplicateCandidates 방치 시에는 전역 40초 초기화가 정상 작동해야 타인 계정 오인증 차단 가능)
+  useEffect(() => {
+    if (!faceScanning && !isSearching) return;
     const keepAlive = setInterval(() => {
       window.dispatchEvent(new Event('keydown'));
     }, 10000);
     return () => clearInterval(keepAlive);
-  }, [faceScanning, isSearching, detectedMember, duplicateCandidates.length]);
+  }, [faceScanning, isSearching]);
+
+  // 🛡️ 본인 확인 팝업(detectedMember) 무응답 방치 시 20초 후 자동 파기 + 로컬 BLE 캐시 즉시 초기화 (C-2 계정 탈취 방어)
+  useEffect(() => {
+    if (!detectedMember) return;
+    const dismissTimer = setTimeout(() => {
+      setDetectedMember(null);
+      setPhoneDigits('');
+      api.clearLocalBleCache();
+    }, 20000);
+    return () => clearTimeout(dismissTimer);
+  }, [detectedMember]);
 
   // 스마트 태그 (NFC/BLE/QR) 감지 시 회원 수신 처리 (3번 본인 확인 팝업 유도)
   const handleSmartTagDetected = useCallback(async (
@@ -214,7 +236,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     const pollBleBridge = async () => {
       try {
         const res = await fetch(
-          `http://127.0.0.1:18080/api/v1/ble/poll?since_seq=${lastHandledBleSeqRef.current}`,
+          `${api.getLocalBleBridgeUrl()}/api/v1/ble/poll?since_seq=${lastHandledBleSeqRef.current}`,
           {
             method: 'GET',
             signal: AbortSignal.timeout(800),
@@ -222,6 +244,11 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         );
         if (!res.ok || cancelled) return;
         const data = await res.json();
+        // 브릿지 데몬 재시작으로 seq가 낮아진 경우 기준 시퀀스 자동 리셋
+        if (typeof data?.seq === 'number' && data.seq < lastHandledBleSeqRef.current) {
+          lastHandledBleSeqRef.current = 0;
+          _lastGlobalHandledBleSeq = 0;
+        }
         if (
           !cancelled &&
           data?.detected &&
@@ -230,10 +257,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           data.seq > lastHandledBleSeqRef.current
         ) {
           lastHandledBleSeqRef.current = data.seq;
-          fetch('http://127.0.0.1:18080/api/v1/ble/clear', {
-            method: 'POST',
-            signal: AbortSignal.timeout(500),
-          }).catch(() => undefined);
+          _lastGlobalHandledBleSeq = data.seq;
+          api.clearLocalBleCache();
           const rssiVal = typeof data.rssi === 'number' ? data.rssi : undefined;
           handleSmartTagDetected(String(data.token), undefined, rssiVal, 'BLE');
         }
@@ -1371,7 +1396,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.25fr', gap: '16px', width: '100%', marginTop: '6px' }}>
               <button
-                onClick={() => setDetectedMember(null)}
+                onClick={() => {
+                  api.clearLocalBleCache();
+                  setDetectedMember(null);
+                }}
                 style={{
                   height: '68px',
                   borderRadius: '999px',
@@ -1391,6 +1419,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               <button
                 onClick={() => {
                   const target = detectedMember;
+                  api.clearLocalBleCache();
                   setDetectedMember(null);
                   onAuthSuccess(target);
                 }}

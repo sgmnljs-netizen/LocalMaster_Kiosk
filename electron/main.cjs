@@ -46,11 +46,18 @@ function appendKioskRuntimeLog(levelTag, message) {
 }
 
 
-// 3. 무인 터치스크린 오작동 방지: 스와이프 뒤로가기, 핀치 줌, 자동 번역, 음성 안내 차단 해제
-app.commandLine.appendSwitch('overscroll-history-navigation', '0');
-app.commandLine.appendSwitch('disable-features', 'Translate,BackForwardCache');
-app.commandLine.appendSwitch('disable-pinch');
-app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+function readWindowsServerUrlFallback() {
+  if (process.platform !== 'win32') return '';
+  try {
+    const raw = fs.readFileSync('C:\\GolfOS\\bin\\kiosk_server_url.txt', 'utf8').trim();
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      return raw;
+    }
+  } catch (_) {
+    // ignore missing file
+  }
+  return '';
+}
 
 const args = process.argv.slice(2);
 const isWindowedArg = args.includes('--window');
@@ -60,7 +67,37 @@ const urlArg = args.find((a) => a.startsWith('http://') || a.startsWith('https:/
 const TARGET_URL =
   urlArg ||
   process.env.KIOSK_APP_URL ||
-  (isDevMode ? 'http://localhost:5179' : 'http://127.0.0.1:8000/kiosk');
+  (isDevMode ? 'http://localhost:5179' : (readWindowsServerUrlFallback() || 'http://127.0.0.1:8000/kiosk'));
+
+// 3. 무인 터치스크린 오작동 방지 및 2-Tier 사설 LAN 서버(192.168.x.x / Tailscale) ➔ 로컬 브릿지(127.0.0.1:8090/18080) PNA 차단 해제
+app.commandLine.appendSwitch('overscroll-history-navigation', '0');
+app.commandLine.appendSwitch(
+  'disable-features',
+  'Translate,BackForwardCache,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults,PrivateNetworkAccessPermissionPrompt'
+);
+app.commandLine.appendSwitch('disable-pinch');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+try {
+  const parsedOrigin = new URL(TARGET_URL).origin;
+  const origins = Array.from(
+    new Set([parsedOrigin, 'http://127.0.0.1:8000', 'http://localhost:5179'])
+  );
+  app.commandLine.appendSwitch('unsafely-treat-insecure-origin-as-secure', origins.join(','));
+} catch (_) {
+  app.commandLine.appendSwitch(
+    'unsafely-treat-insecure-origin-as-secure',
+    'http://127.0.0.1:8000,http://localhost:5179'
+  );
+}
+
+// 윈도우 10/11 고DPI(125%/150%) 블러 원천 차단 및 DirectWrite 안티앨리어싱 강제 (macOS Retina 과부하 방지를 위해 win32 전용)
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch('high-dpi-support', '1');
+  app.commandLine.appendSwitch('enable-font-antialiasing');
+  app.commandLine.appendSwitch('enable-direct-write');
+  app.commandLine.appendSwitch('force-device-scale-factor', '1');
+}
 
 const iconPngPath = path.join(__dirname, 'icon.png');
 const iconIcoPath = path.join(__dirname, 'icon.ico');
@@ -125,6 +162,12 @@ function configureKioskHardwarePermissions() {
 }
 
 function buildKioskAppMenu() {
+  // Windows/Linux 무인 키오스크 전체화면 모드에서는 Alt 키 누름 시 상단 메뉴바가 절대 노출되지 않도록 완전 제거
+  if (isKioskMode && process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+
   const template = [
     ...(process.platform === 'darwin'
       ? [
@@ -224,7 +267,14 @@ function createKioskWindow() {
     return { action: 'deny' };
   });
 
-  // 브라우저 기본 새로고침(Ctrl+R / Cmd+R), 새 창(Ctrl+N / Cmd+N), 탭 닫기(Ctrl+W / Cmd+W) OS 레벨 2중 차단
+  // 무인 터치스크린 0.5초 롱프레스 시 크로미움 기본 우클릭 컨텍스트 메뉴 노출 원천 차단
+  mainWindow.webContents.on('context-menu', (event) => {
+    if (!isDevMode) {
+      event.preventDefault();
+    }
+  });
+
+  // 브라우저 기본 새로고침(F5 / Ctrl+R / Cmd+R), 뒤로가기(Alt+Left / BrowserBack), 새 창(Ctrl+N), 탭 닫기(Ctrl+W) OS 레벨 2중 차단
   mainWindow.webContents.on('before-input-event', (event, input) => {
     const key = (input.key || '').toLowerCase();
     const ctrlOrCmd = input.control || input.meta;
@@ -243,12 +293,23 @@ function createKioskWindow() {
       return;
     }
 
-    // Ctrl+Shift+R 엔지니어 비상 리로드 허용 및 개발 모드 시 일반 새로고침(Ctrl+R / Cmd+R) 허용
+    // Ctrl+Shift+R 엔지니어 비상 리로드 허용 및 개발 모드 시 일반 새로고침(Ctrl+R / Cmd+R / F5) 허용
     if (ctrlOrCmd && key === 'r' && (isDevMode || input.shift)) {
       return;
     }
 
-    // 실수 새로고침 / 새 창 / 창 닫기 단축키 차단
+    if (!isDevMode) {
+      if (key === 'f5' || key === 'browserback' || key === 'browserforward') {
+        event.preventDefault();
+        return;
+      }
+      if (input.alt && (key === 'arrowleft' || key === 'arrowright' || key === 'home')) {
+        event.preventDefault();
+        return;
+      }
+    }
+
+    // 실수 새로고침 / 새 창 / 창 닫기 / 인쇄 / 소스보기 단축키 차단
     if (ctrlOrCmd && ['r', 'n', 't', 'w', 'p', 's', 'f', 'u', 'g'].includes(key)) {
       event.preventDefault();
     }
@@ -292,15 +353,114 @@ function createKioskWindow() {
     }
   });
 
+  let loadRetryTimer = null;
+  let crashReloadTimer = null;
+  let loadRetryCount = 0;
+  let crashTimestamps = [];
+
+  const clearRecoveryTimers = () => {
+    if (loadRetryTimer) {
+      clearTimeout(loadRetryTimer);
+      loadRetryTimer = null;
+    }
+    if (crashReloadTimer) {
+      clearTimeout(crashReloadTimer);
+      crashReloadTimer = null;
+    }
+  };
+
+  const buildWaitingSplashDataUrl = (attempt, targetUrl) => {
+    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>GOLFOS KIOSK</title>
+      <style>
+        *{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-touch-callout:none;}
+        body{background:#041B14;color:#F8FAFC;font-family:'Pretendard','Malgun Gothic',sans-serif;height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:48px;}
+        .box{max-width:680px;padding:48px 40px;border-radius:28px;background:rgba(255,255,255,0.05);border:1px solid rgba(16,185,129,0.28);}
+        .badge{display:inline-block;padding:8px 18px;border-radius:999px;background:rgba(16,185,129,0.16);color:#34D399;font-size:15px;font-weight:800;letter-spacing:0.6px;margin-bottom:22px;}
+        h1{font-size:30px;font-weight:900;margin-bottom:14px;line-height:1.35;}
+        p{font-size:18px;color:#CBD5E1;line-height:1.6;font-weight:600;}
+        .meta{margin-top:24px;font-size:14px;color:#94A3B8;font-family:monospace;}
+      </style></head><body oncontextmenu="return false">
+      <div class="box">
+        <div class="badge">GOLFOS KIOSK AUTO-RECOVERY</div>
+        <h1>매장 서버 연결 대기 중입니다</h1>
+        <p>전원 투입 또는 서버 점검 직후 시스템을 준비하고 있습니다.<br/>서버 응답이 확인되는 즉시 자동으로 시작 화면으로 전환됩니다.</p>
+        <div class="meta">재연결 시도 #${attempt} · ${String(targetUrl).replace(/[<>"']/g, '')}</div>
+      </div></body></html>`;
+    return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+  };
+
+  // [C-5] 아침 일괄 전원 ON 또는 서버 재기동 시 ERR_CONNECTION_REFUSED 영구 고착 방지 (3초 -> 5초 자동 재연결)
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (isMainFrame === false) return;
+    if (errorCode === -3) return; // ERR_ABORTED 정상 취소 무시
+    if (String(validatedURL || '').startsWith('data:text/html')) return;
+
+    loadRetryCount += 1;
+    const retryDelayMs = loadRetryCount <= 2 ? 3000 : 5000;
+    appendKioskRuntimeLog(
+      'RECOVERY',
+      `Main frame load failed (code=${errorCode}, desc=${errorDescription}, attempt=${loadRetryCount}). Retrying ${TARGET_URL} in ${retryDelayMs}ms`
+    );
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) {
+        if (!isKioskMode) mainWindow.maximize();
+        mainWindow.show();
+      }
+      mainWindow.loadURL(buildWaitingSplashDataUrl(loadRetryCount, TARGET_URL)).catch(() => {});
+    }
+
+    if (loadRetryTimer) clearTimeout(loadRetryTimer);
+    loadRetryTimer = setTimeout(() => {
+      loadRetryTimer = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadURL(TARGET_URL).catch(() => {});
+      }
+    }, retryDelayMs);
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const currentUrl = mainWindow.webContents.getURL() || '';
+    if (!currentUrl.startsWith('data:text/html')) {
+      if (loadRetryCount > 0) {
+        appendKioskRuntimeLog('RECOVERY', `Connected to ${currentUrl} after ${loadRetryCount} retry attempt(s).`);
+      }
+      loadRetryCount = 0;
+      if (loadRetryTimer) {
+        clearTimeout(loadRetryTimer);
+        loadRetryTimer = null;
+      }
+    }
+  });
+
+  // [C-5] 24/7 무인 가동 중 렌더러 OOM/GPU 비정상 종료(render-process-gone) 발생 시 자동 복구
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    appendKioskRuntimeLog('CRASH', `Renderer process gone: reason=${details?.reason}, exitCode=${details?.exitCode}`);
+    const reason = details?.reason || 'unknown';
+    appendKioskRuntimeLog('CRASH', `Renderer process gone: reason=${reason}, exitCode=${details?.exitCode}`);
+    if (reason === 'clean-exit' || reason === 'killed') return;
+
+    const now = Date.now();
+    crashTimestamps = crashTimestamps.filter((ts) => now - ts < 60000);
+    crashTimestamps.push(now);
+    const delayMs = crashTimestamps.length > 4 ? 10000 : 1500;
+
+    if (crashReloadTimer) clearTimeout(crashReloadTimer);
+    crashReloadTimer = setTimeout(() => {
+      crashReloadTimer = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        appendKioskRuntimeLog('RECOVERY', `Reloading TARGET_URL after renderer crash (${reason})`);
+        mainWindow.loadURL(TARGET_URL).catch(() => {});
+      }
+    }, delayMs);
   });
 
   mainWindow.on('closed', () => {
+    clearRecoveryTimers();
     mainWindow = null;
   });
 
-  mainWindow.loadURL(TARGET_URL);
+  mainWindow.loadURL(TARGET_URL).catch(() => {});
   return mainWindow;
 }
 

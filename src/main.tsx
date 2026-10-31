@@ -2,10 +2,13 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import KioskApp from './KioskApp'
 import './styles/kiosk_design_system.css'
-import { generateDefault50Bays, DEFAULT_50_ZONES, api } from './services/api'
+import { generateDefault50Bays, DEFAULT_50_ZONES, isDemoEnvironment, api } from './services/api'
 
-// [Demo Showcase Environment Init]
+// [Demo Showcase Environment Init — 명시적 데모 모드(isDemoEnvironment)에서만 실행, 실매장 프로덕션 오염 원천 차단]
 function initDemoEnvironment() {
+  if (!isDemoEnvironment()) {
+    return;
+  }
   if (!localStorage.getItem('LM_STORE_INFO')) {
     localStorage.setItem('LM_STORE_INFO', JSON.stringify({
       store_cd: 'H01-SE-001',
@@ -21,7 +24,7 @@ function initDemoEnvironment() {
   }
 
   const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
-  if (!bays || bays.length !== 50) {
+  if (!Array.isArray(bays) || bays.length === 0) {
     localStorage.setItem('LM_BAYS', JSON.stringify(generateDefault50Bays()));
   }
 

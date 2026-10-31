@@ -161,14 +161,15 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
     isFaceEnrollStepRef.current = isFaceEnrollStep;
   }, [isFaceEnrollStep]);
 
-  // 🛡️ 안면 캡처(25초) 또는 가입 통신 중 키오스크 전역 60초 비활동 타이머 리셋 방어 (BUG-M10)
+  // 🛡️ 실제 안면 카메라 캡처(25초) 또는 가입 통신 중에만 키오스크 전역 비활동 타이머 리셋 방어
+  // (안면 캡처 종료 후 단순 대기 중인 isFaceEnrollStep 방치 시에는 전역 90초 초기화가 정상 작동해야 개인정보 노출 방지 가능)
   useEffect(() => {
-    if (!faceCapturing && !loading && !isFaceEnrollStep) return;
+    if (!faceCapturing && !loading) return;
     const keepAlive = setInterval(() => {
       window.dispatchEvent(new Event('keydown'));
     }, 10000);
     return () => clearInterval(keepAlive);
-  }, [faceCapturing, loading, isFaceEnrollStep]);
+  }, [faceCapturing, loading]);
 
   // 안면 등록 캡처 수행 (Front POS 표준: 자동 캡처 모드 및 실시간 감지 연동)
   const triggerFaceCapture = useCallback(async () => {

@@ -1,6 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Lock, X, Delete } from 'lucide-react';
-import { useKioskSettings } from '../stores/kioskSettings';
+import {
+  useKioskSettings,
+  setKioskAdminSessionToken,
+  computeOwnerPinDigest,
+  verifyOfflineAdminOrEngineerPin,
+} from '../stores/kioskSettings';
+import { api } from '../services/api';
 
 interface AdminPinModalProps {
   isOpen: boolean;
@@ -8,16 +14,33 @@ interface AdminPinModalProps {
   onSuccess: () => void;
 }
 
+const ADMIN_PIN_IDLE_CLOSE_MS = 30000;
+
 export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
 }) => {
-  const { settings } = useKioskSettings();
+  const { settings, updateSettings } = useKioskSettings();
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [failCount, setFailCount] = useState(0);
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    if (!isOpen) return;
+    idleTimerRef.current = setTimeout(() => {
+      setPin('');
+      setErrorMsg('');
+      onClose();
+    }, ADMIN_PIN_IDLE_CLOSE_MS);
+  }, [isOpen, onClose]);
 
   useEffect(() => {
     if (isOpen) {
@@ -25,8 +48,19 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
       setErrorMsg('');
       setFailCount(0);
       setLockoutUntil(null);
+      setIsVerifying(false);
+      resetIdleTimer();
+    } else if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
     }
-  }, [isOpen]);
+    return () => {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+  }, [isOpen, resetIdleTimer]);
 
   useEffect(() => {
     if (!lockoutUntil) return;
@@ -47,8 +81,9 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      resetIdleTimer();
       if (e.key >= '0' && e.key <= '9') {
-        handleNumClick(e.key);
+        void handleNumClick(e.key);
       } else if (e.key === 'Backspace') {
         handleDelete();
       } else if (e.key === 'Escape') {
@@ -60,11 +95,28 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, pin, lockoutUntil, failCount, settings.adminPin]);
+  }, [isOpen, pin, lockoutUntil, failCount, isVerifying, settings.adminPin, settings.adminPinDigest, settings.hasCustomAdminPin]);
 
   if (!isOpen) return null;
 
-  const handleNumClick = (num: string) => {
+  const applyPinFailure = () => {
+    const nextFail = failCount + 1;
+    setFailCount(nextFail);
+    setTimeout(() => {
+      if (nextFail >= 5) {
+        const until = Date.now() + 30000;
+        setLockoutUntil(until);
+        setErrorMsg('PIN 5회 오류로 잠금되었습니다. (30초 후 재시도)');
+      } else {
+        setErrorMsg(`관리자 PIN 번호가 일치하지 않습니다. (${nextFail}/5)`);
+      }
+      setPin('');
+    }, 150);
+  };
+
+  const handleNumClick = async (num: string) => {
+    resetIdleTimer();
+    if (isVerifying) return;
     if (lockoutUntil && Date.now() < lockoutUntil) {
       const rem = Math.ceil((lockoutUntil - Date.now()) / 1000);
       setErrorMsg(`PIN 5회 오류로 잠금되었습니다. (${rem}초 후 재시도)`);
@@ -76,47 +128,78 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
     setErrorMsg('');
 
     if (nextPin.length === 4) {
-      const correctPin = settings.adminPin || '0000';
-      // 🛡️ 가맹점 커스텀 PIN 또는 본사/기사 마스터 PIN('0000', '1111', '1234', '2186') 전수 상시 수용
-      const isMasterPin =
-        nextPin === correctPin ||
-        nextPin === '0000' ||
-        nextPin === '1111' ||
-        nextPin === '1234' ||
-        nextPin === '2186';
+      setIsVerifying(true);
+      try {
+        const res = await api.verifyAdminPin(nextPin);
+        if (!res.offline) {
+          if (res.valid) {
+            setKioskAdminSessionToken(res.pin_session_token || null, null);
+            if (res.role === 'OWNER') {
+              updateSettings(
+                {
+                  adminPin: '',
+                  adminPinDigest: computeOwnerPinDigest(nextPin),
+                  hasCustomAdminPin: Boolean(res.has_custom_admin_pin),
+                },
+                { syncRemote: false }
+              );
+            }
+            setPin('');
+            setErrorMsg('');
+            setFailCount(0);
+            setLockoutUntil(null);
+            onSuccess();
+          } else {
+            if (typeof res.has_custom_admin_pin === 'boolean') {
+              updateSettings({ hasCustomAdminPin: res.has_custom_admin_pin }, { syncRemote: false });
+            }
+            if (res.locked) {
+              const secMatch = typeof res.message === 'string' ? res.message.match(/(\d+)\s*초/) : null;
+              const remSec = secMatch ? Math.max(1, Number(secMatch[1])) : 60;
+              setFailCount(5);
+              setLockoutUntil(Date.now() + remSec * 1000);
+              setErrorMsg(res.message || `PIN 5회 오류로 잠금되었습니다. (${remSec}초 후 재시도)`);
+              setPin('');
+            } else {
+              applyPinFailure();
+            }
+          }
+          return;
+        }
 
-      if (isMasterPin) {
-        setTimeout(() => {
+        // 서버 미연결(오프라인 또는 잘못된 apiUrl 복구 상황) 폴백: 로컬 점주 다이제스트 + 엔지니어 솔트 다이제스트 검증
+        const offlineCheck = verifyOfflineAdminOrEngineerPin(
+          nextPin,
+          settings.adminPin,
+          settings.hasCustomAdminPin,
+          settings.adminPinDigest
+        );
+        if (offlineCheck.valid) {
+          setKioskAdminSessionToken(null, nextPin);
           setPin('');
           setErrorMsg('');
           setFailCount(0);
           setLockoutUntil(null);
           onSuccess();
-        }, 100);
-      } else {
-        const nextFail = failCount + 1;
-        setFailCount(nextFail);
-        setTimeout(() => {
-          if (nextFail >= 5) {
-            const until = Date.now() + 30000;
-            setLockoutUntil(until);
-            setErrorMsg('PIN 5회 오류로 잠금되었습니다. (30초 후 재시도)');
-          } else {
-            setErrorMsg(`관리자 PIN 번호가 일치하지 않습니다. (${nextFail}/5)`);
-          }
-          setPin('');
-        }, 200);
+        } else {
+          applyPinFailure();
+        }
+      } finally {
+        setIsVerifying(false);
       }
     }
   };
 
   const handleDelete = () => {
-    if (lockoutUntil && Date.now() < lockoutUntil) return;
+    resetIdleTimer();
+    if (isVerifying || (lockoutUntil && Date.now() < lockoutUntil)) return;
     setPin((prev) => prev.slice(0, -1));
     setErrorMsg('');
   };
 
   const handleClear = () => {
+    resetIdleTimer();
+    if (isVerifying) return;
     setPin('');
     if (!lockoutUntil || Date.now() >= lockoutUntil) {
       setErrorMsg('');

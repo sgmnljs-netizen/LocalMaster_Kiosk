@@ -33,10 +33,12 @@ export interface CardPaymentRequestParams {
   installmentMonths?: number; // 할부 개월수 (0: 일시불, 2~12: 할부)
   taxFreeAmount?: number; // 면세 금액 (기본 0)
   vatAmount?: number; // 부가세 (미지정 시 자동 계산)
+  isTaxFree?: boolean; // 면세 여부 (true일 때 부가세 0원 강제)
+  terminalId?: string; // 서브 사업자 라우팅 단말기 TID 오버라이드 (선택)
   orderId?: string; // 고유 주문/거래 번호
   customerName?: string; // 고객명 (선택)
   productName?: string; // 상품명 (선택)
-  timeoutSeconds?: number; // 단말기 대기 타임아웃 (기본 30초)
+  timeoutSeconds?: number; // 단말기 대기 타임아웃 (기본 60초)
 }
 
 /** 단말기 결제 승인 결과 */

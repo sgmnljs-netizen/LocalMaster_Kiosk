@@ -18,24 +18,33 @@ export interface KioskIntroSlide {
   tag?: string;
 }
 
+function buildOfflineGolfSlideDataUri(
+  primaryHex: string,
+  secondaryHex: string,
+  accentHex: string
+): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 608" width="1080" height="608"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${primaryHex}"/><stop offset="55%" stop-color="${secondaryHex}"/><stop offset="100%" stop-color="#04120e"/></linearGradient><radialGradient id="glow" cx="78%" cy="24%" r="52%"><stop offset="0%" stop-color="${accentHex}" stop-opacity="0.32"/><stop offset="100%" stop-color="${accentHex}" stop-opacity="0"/></radialGradient></defs><rect width="1080" height="608" fill="url(#bg)"/><rect width="1080" height="608" fill="url(#glow)"/><path d="M-40 470 Q 320 350 680 430 T 1120 390 L 1120 608 L -40 608 Z" fill="#07261d" opacity="0.72"/><path d="M-40 520 Q 420 430 780 495 T 1120 470 L 1120 608 L -40 608 Z" fill="#041913" opacity="0.88"/><circle cx="840" cy="170" r="110" fill="none" stroke="${accentHex}" stroke-opacity="0.16" stroke-width="1.5"/><circle cx="840" cy="170" r="165" fill="none" stroke="${accentHex}" stroke-opacity="0.09" stroke-width="1"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 const DEFAULT_ADS: KioskIntroSlide[] = [
   {
     type: 'image',
-    url: 'https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=1080&q=80',
+    url: buildOfflineGolfSlideDataUri('#06281e', '#0b3b2d', '#10b981'),
     title: 'PREMIUM GOLF CLUB',
     subtitle: '국내 최고 수준의 프리미엄 프라이빗 GDR 골프 연습장',
     tag: 'PROMOTION',
   },
   {
     type: 'image',
-    url: 'https://images.unsplash.com/photo-1587174486073-ae5e5cff23aa?auto=format&fit=crop&w=1080&q=80',
+    url: buildOfflineGolfSlideDataUri('#0b2239', '#0a332b', '#34d399'),
     title: 'Professional 1:1 Lessons',
     subtitle: 'KPGA/KLPGA 투어 출신 강사진의 고품격 분석 레슨',
     tag: 'PROMOTION',
   },
   {
     type: 'image',
-    url: 'https://images.unsplash.com/photo-1593111774240-d529f12cf4bb?auto=format&fit=crop&w=1080&q=80',
+    url: buildOfflineGolfSlideDataUri('#111827', '#063226', '#fbbf24'),
     title: 'Smart Unattended Operation',
     subtitle: '24시간 모바일 앱 및 키오스크 연동 무인 자동화 타석 배정',
     tag: 'PROMOTION',
@@ -200,9 +209,13 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'flex-end',
-                background: hideTextOverlay
-                  ? `url("${ad.url}") center/cover no-repeat`
-                  : `linear-gradient(to top, rgba(10, 12, 16, 0.95) 10%, rgba(10,12,16,0.3) 50%, rgba(0,0,0,0) 100%), url("${ad.url}") center/cover no-repeat`,
+                backgroundColor: '#071914',
+                backgroundImage: hideTextOverlay
+                  ? `url("${ad.url}")`
+                  : `linear-gradient(to top, rgba(10, 12, 16, 0.95) 10%, rgba(10,12,16,0.3) 50%, rgba(0,0,0,0) 100%), url("${ad.url}")`,
+                backgroundPosition: 'center',
+                backgroundSize: 'cover',
+                backgroundRepeat: 'no-repeat',
               }}
             >
               {!hideTextOverlay && (

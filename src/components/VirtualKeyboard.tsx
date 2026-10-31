@@ -1,12 +1,51 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Delete, Globe, Smile, RotateCcw } from 'lucide-react';
 
-interface VirtualKeyboardProps {
+export type VirtualKeyboardMode = 'HANGUL_NAME' | 'COUPON_CODE' | 'ASCII_TEXT' | 'NUMERIC';
+
+export interface VirtualKeyboardProps {
   value: string;
   onChange: (val: string) => void;
   onClose: () => void;
   anchorSelector?: string;
   docked?: boolean;
+  mode?: VirtualKeyboardMode;
+  label?: string;
+  placeholder?: string;
+  uppercase?: boolean;
+  masked?: boolean;
+  maxLength?: number;
+  compact?: boolean;
+  submitLabel?: string;
+  onSubmit?: () => void;
+}
+
+export function applyVirtualKeyAction(
+  currentValue: string,
+  action: { type: 'CHAR' | 'TOKEN' | 'BACKSPACE' | 'CLEAR'; text?: string },
+  opts: { mode: VirtualKeyboardMode; uppercase?: boolean; maxLength?: number }
+): string {
+  const safeVal = String(currentValue || '');
+  if (action.type === 'CLEAR') return '';
+  if (action.type === 'BACKSPACE') return safeVal.slice(0, -1);
+
+  let fragment = String(action.text || '');
+  if (opts.mode === 'NUMERIC') {
+    fragment = fragment.replace(/[^0-9]/g, '');
+  } else if (opts.mode === 'COUPON_CODE' || opts.uppercase) {
+    fragment = fragment.toUpperCase();
+  }
+
+  let next = safeVal + fragment;
+  if (opts.mode === 'NUMERIC') {
+    next = next.replace(/[^0-9]/g, '');
+  } else if (opts.mode === 'COUPON_CODE' || opts.uppercase) {
+    next = next.toUpperCase();
+  }
+  if (typeof opts.maxLength === 'number' && opts.maxLength > 0) {
+    next = next.slice(0, opts.maxLength);
+  }
+  return next;
 }
 
 export interface VirtualKeyboardPlacementInput {
@@ -244,19 +283,40 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   onClose,
   anchorSelector = '[data-testid="member-name-input"]',
   docked = true,
+  mode = 'HANGUL_NAME',
+  label,
+  placeholder,
+  uppercase = false,
+  masked = false,
+  maxLength,
+  compact = false,
+  submitLabel,
+  onSubmit,
 }) => {
-  const [lang, setLang] = useState<'KO' | 'EN'>('KO');
+  const isHangulMode = mode === 'HANGUL_NAME';
+  const isNumericMode = mode === 'NUMERIC';
+  const forceUpper = mode === 'COUPON_CODE' || uppercase;
+
+  const [lang, setLang] = useState<'KO' | 'EN'>(() => (isHangulMode ? 'KO' : 'EN'));
   const [isShift, setIsShift] = useState(false);
-  const [inputBuffer, setInputBuffer] = useState<string[]>(() => Hangul.disassemble(value || ''));
+  const [inputBuffer, setInputBuffer] = useState<string[]>(() =>
+    isHangulMode ? Hangul.disassemble(value || '') : []
+  );
   const keyboardRef = useRef<HTMLDivElement | null>(null);
   const [computedTopPx, setComputedTopPx] = useState<number | null>(null);
 
   useEffect(() => {
+    setLang(isHangulMode ? 'KO' : 'EN');
+    setIsShift(false);
+  }, [isHangulMode, mode]);
+
+  useEffect(() => {
+    if (!isHangulMode) return;
     const currentAssembled = assembleHangul(inputBuffer);
     if (value !== currentAssembled) {
       setInputBuffer(value ? Hangul.disassemble(value) : []);
     }
-  }, [value]);
+  }, [value, isHangulMode]);
 
   const recalcKeyboardPosition = useCallback(() => {
     if (docked) return;
@@ -305,7 +365,35 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
     };
   }, [recalcKeyboardPosition, docked]);
 
+  const handleTokenClick = (token: string) => {
+    const next = applyVirtualKeyAction(
+      value,
+      { type: 'TOKEN', text: token },
+      { mode, uppercase: forceUpper, maxLength }
+    );
+    onChange(next);
+  };
+
   const handleKeyClick = (key: string) => {
+    if (!isHangulMode) {
+      let resolvedChar = key;
+      if (isNumericMode) {
+        resolvedChar = key;
+      } else if (forceUpper || isShift) {
+        resolvedChar = key.toUpperCase();
+        if (isShift && !forceUpper) setIsShift(false);
+      } else {
+        resolvedChar = key.toLowerCase();
+      }
+      const next = applyVirtualKeyAction(
+        value,
+        { type: 'CHAR', text: resolvedChar },
+        { mode, uppercase: forceUpper, maxLength }
+      );
+      onChange(next);
+      return;
+    }
+
     let finalKey = key;
     if (isShift) {
       if (lang === 'KO') {
@@ -322,24 +410,30 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
     }
 
     const newBuffer = [...inputBuffer, finalKey];
+    const assembled = assembleHangul(newBuffer);
+    if (typeof maxLength === 'number' && maxLength > 0 && assembled.length > maxLength) {
+      return;
+    }
     setInputBuffer(newBuffer);
-    updateValue(newBuffer);
+    onChange(assembled);
   };
 
   const handleDelete = () => {
+    if (!isHangulMode) {
+      onChange(
+        applyVirtualKeyAction(value, { type: 'BACKSPACE' }, { mode, uppercase: forceUpper, maxLength })
+      );
+      return;
+    }
     if (inputBuffer.length === 0) return;
     const newBuffer = inputBuffer.slice(0, -1);
     setInputBuffer(newBuffer);
-    updateValue(newBuffer);
+    onChange(assembleHangul(newBuffer));
   };
 
   const handleClear = () => {
     setInputBuffer([]);
     onChange('');
-  };
-
-  const updateValue = (buf: string[]) => {
-    onChange(assembleHangul(buf));
   };
 
   const KO_LAYOUT = [
@@ -353,20 +447,77 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
     ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
     ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
     ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
-    ['Z', 'X', 'C', 'V', 'B', 'N', 'M', '@', '.', '_']
+    ['Z', 'X', 'C', 'V', 'B', 'N', 'M', '-', '_', '.']
   ];
 
-  const keys = lang === 'KO' ? KO_LAYOUT : EN_LAYOUT;
+  const COUPON_LAYOUT = [
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+    ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+    ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
+    ['Z', 'X', 'C', 'V', 'B', 'N', 'M', '-', '_']
+  ];
+
+  const NUMERIC_LAYOUT = [
+    ['1', '2', '3'],
+    ['4', '5', '6'],
+    ['7', '8', '9'],
+  ];
+
+  const QUICK_ASCII_CHIPS =
+    mode === 'ASCII_TEXT'
+      ? forceUpper
+        ? ['-', '_', '.', ':', '/']
+        : ['http://', 'https://', '127.0.0.1', '192.168.', ':8000', ':', '/', '-', '_', '.']
+      : [];
+
+  const keys = isNumericMode
+    ? NUMERIC_LAYOUT
+    : mode === 'COUPON_CODE'
+      ? COUPON_LAYOUT
+      : isHangulMode && lang === 'KO'
+        ? KO_LAYOUT
+        : EN_LAYOUT;
+
+  const resolvedBadgeLabel =
+    label ||
+    (mode === 'COUPON_CODE'
+      ? '쿠폰 번호'
+      : mode === 'NUMERIC'
+        ? '숫자 입력'
+        : mode === 'ASCII_TEXT'
+          ? '설정값 입력'
+          : lang === 'EN'
+            ? 'NAME'
+            : '입력 중인 이름');
+
+  const resolvedPlaceholder =
+    placeholder ||
+    (mode === 'COUPON_CODE'
+      ? '영문/숫자 자판을 터치하여 쿠폰 번호를 입력하세요'
+      : mode === 'NUMERIC'
+        ? '아래 숫자 패드를 터치하여 입력하세요'
+        : mode === 'ASCII_TEXT'
+          ? '자판 또는 상단 빠른 기호를 터치하여 입력하세요'
+          : lang === 'EN'
+            ? 'Touch keys below to enter your name'
+            : '가상 자판을 터치하여 이름을 입력하세요');
+
+  const displayPreviewValue = masked && value ? '•'.repeat(value.length) : value;
+  const keyHeightPx = compact ? 46 : 56;
+  const keyWidthPx = compact ? 54 : 78;
+  const keyFontPx = compact ? 18 : 22;
 
   return (
     <div 
       ref={keyboardRef}
       data-virtual-keyboard="true"
+      data-vk-mode={mode}
+      onMouseDown={(e) => e.preventDefault()}
       style={{
         ...(docked
           ? {
               position: 'relative',
-              width: '1000px',
+              width: compact ? '100%' : '1000px',
               maxWidth: '100%',
               margin: '0 auto',
               animation: 'vkSlideDown 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
@@ -387,13 +538,15 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
         backdropFilter: 'blur(30px)',
         WebkitBackdropFilter: 'blur(30px)',
         border: '1.5px solid #e5e5ea',
-        borderRadius: '28px',
-        padding: '18px 24px 20px',
-        boxShadow: '0 24px 60px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.06)',
+        borderRadius: compact ? '20px' : '28px',
+        padding: compact ? '12px 14px 14px' : '18px 24px 20px',
+        boxShadow: compact
+          ? '0 10px 28px rgba(15, 23, 42, 0.12)'
+          : '0 24px 60px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.06)',
         zIndex: 99999,
         display: 'flex',
         flexDirection: 'column',
-        gap: '12px',
+        gap: compact ? '8px' : '12px',
       }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -414,59 +567,60 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
         }
       `}</style>
       {/* 실시간 타이핑 미리보기 바 (Live Input Echo Bar) + 입력 완료 버튼 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '0 2px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '0 2px' }}>
         <div
           data-testid="virtual-keyboard-preview"
           style={{
             flex: 1,
-            minHeight: '52px',
-            borderRadius: '16px',
+            minHeight: compact ? '44px' : '52px',
+            borderRadius: compact ? '12px' : '16px',
             background: '#f5f5f7',
             border: value ? '1.5px solid #059669' : '1px solid rgba(0, 0, 0, 0.08)',
-            padding: '6px 14px',
+            padding: compact ? '4px 10px' : '6px 14px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: '12px',
+            gap: '10px',
             boxSizing: 'border-box'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
             <div style={{
-              padding: '5px 10px',
+              padding: compact ? '4px 8px' : '5px 10px',
               borderRadius: '10px',
               background: value ? 'rgba(5, 150, 105, 0.12)' : '#e8e8ed',
               color: value ? '#047857' : '#515154',
-              fontSize: '13px',
+              fontSize: compact ? '12px' : '13px',
               fontWeight: 800,
               display: 'flex',
               alignItems: 'center',
               gap: '5px',
               flexShrink: 0
             }}>
-              <Smile size={15} />
-              <span>{lang === 'EN' ? 'NAME' : '입력 중인 이름'}</span>
+              {isHangulMode && <Smile size={14} />}
+              <span>{resolvedBadgeLabel}</span>
             </div>
 
             {value ? (
               <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
                 <span style={{
-                  fontSize: '22px',
+                  fontSize: compact ? '17px' : '22px',
                   color: '#1d1d1f',
                   fontWeight: 900,
-                  letterSpacing: '0.4px',
+                  fontFamily: isHangulMode ? 'inherit' : 'monospace',
+                  letterSpacing: masked ? '4px' : '0.4px',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis'
                 }}>
-                  {value}
+                  {displayPreviewValue}
                 </span>
                 <span
                   aria-hidden="true"
                   style={{
                     display: 'inline-block',
                     width: '2.5px',
-                    height: '24px',
+                    height: compact ? '18px' : '24px',
                     background: '#059669',
                     marginLeft: '3px',
                     borderRadius: '2px',
@@ -475,8 +629,8 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                 />
               </div>
             ) : (
-              <span style={{ fontSize: '16px', color: '#86868b', fontWeight: 700 }}>
-                {lang === 'EN' ? 'Touch keys below to enter your name' : '가상 자판을 터치하여 이름을 입력하세요'}
+              <span style={{ fontSize: compact ? '13.5px' : '16px', color: '#86868b', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {resolvedPlaceholder}
               </span>
             )}
           </div>
@@ -487,12 +641,12 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
               data-testid="virtual-keyboard-clear"
               onClick={handleClear}
               style={{
-                padding: '6px 12px',
+                padding: compact ? '4px 9px' : '6px 12px',
                 borderRadius: '999px',
                 border: '1px solid rgba(0, 0, 0, 0.08)',
                 background: '#ffffff',
                 color: '#515154',
-                fontSize: '13px',
+                fontSize: compact ? '12px' : '13px',
                 fontWeight: 800,
                 display: 'flex',
                 alignItems: 'center',
@@ -501,18 +655,19 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                 flexShrink: 0
               }}
             >
-              <RotateCcw size={13} />
-              <span>{lang === 'EN' ? 'Clear' : '초기화'}</span>
+              <RotateCcw size={12} />
+              <span>{lang === 'EN' && isHangulMode ? 'Clear' : '초기화'}</span>
             </button>
           )}
         </div>
 
         <button 
           type="button"
+          data-testid="virtual-keyboard-done"
           style={{
-            height: '52px',
-            padding: '0 28px',
-            fontSize: '16px',
+            height: compact ? '44px' : '52px',
+            padding: compact ? '0 18px' : '0 28px',
+            fontSize: compact ? '14px' : '16px',
             fontWeight: 800,
             borderRadius: '999px',
             background: '#1d1d1f',
@@ -522,163 +677,291 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.14)',
             flexShrink: 0
           }}
-          onClick={onClose}
+          onClick={() => {
+            onSubmit?.();
+            onClose();
+          }}
         >
-          {lang === 'EN' ? 'Done' : '입력 완료'}
+          {submitLabel || (lang === 'EN' && isHangulMode ? 'Done' : '입력 완료')}
         </button>
       </div>
 
+      {/* URL / 특수기호 빠른 입력 칩 영역 (ASCII_TEXT 전용) */}
+      {QUICK_ASCII_CHIPS.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '6px' }}>
+          {QUICK_ASCII_CHIPS.map((chip) => (
+            <button
+              type="button"
+              key={chip}
+              onClick={() => handleTokenClick(chip)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '10px',
+                background: '#ecfdf5',
+                border: '1px solid #a7f3d0',
+                color: '#065f46',
+                fontFamily: 'monospace',
+                fontSize: compact ? '13px' : '14px',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* 키보드 자판 영역 */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {keys.map((row, rowIdx) => (
-          <div 
-            key={rowIdx} 
-            style={{ 
-              display: 'flex', 
-              justifyContent: 'center', 
-              gap: '8px' 
-            }}
-          >
-            {row.map((char) => {
-              let displayChar = char;
-              if (isShift) {
-                if (lang === 'KO') {
-                  const shiftMap: Record<string, string> = {
-                    'ㅂ': 'ㅃ', 'ㅈ': 'ㅉ', 'ㄷ': 'ㄸ', 'ㄱ': 'ㄲ', 'ㅅ': 'ㅆ', 'ㅐ': 'ㅒ', 'ㅔ': 'ㅖ'
-                  };
-                  displayChar = shiftMap[char] || char;
-                } else {
-                  displayChar = char.toUpperCase();
-                }
-              } else {
-                displayChar = lang === 'EN' ? char.toLowerCase() : char;
-              }
-
-              const isShiftedChar = isShift && displayChar !== char;
-
-              return (
+      {isNumericMode ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '420px', width: '100%', margin: '0 auto' }}>
+          {NUMERIC_LAYOUT.map((row, rowIdx) => (
+            <div key={rowIdx} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+              {row.map((digit) => (
                 <button
                   type="button"
-                  key={char}
-                  onClick={() => handleKeyClick(char)}
+                  key={digit}
+                  onClick={() => handleKeyClick(digit)}
                   style={{
-                    width: '78px',
-                    height: '56px',
+                    height: `${keyHeightPx + 4}px`,
                     borderRadius: '14px',
                     fontSize: '22px',
-                    fontWeight: 800,
-                    color: isShiftedChar ? '#ffffff' : '#1d1d1f',
-                    background: isShiftedChar ? '#1d1d1f' : '#f5f5f7',
-                    border: isShiftedChar ? '1px solid #1d1d1f' : '1px solid #e5e5ea',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+                    fontWeight: 900,
+                    color: '#1d1d1f',
+                    background: '#f5f5f7',
+                    border: '1px solid #e5e5ea',
                     cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'all 0.1s ease'
                   }}
                   className="keypad-btn"
                 >
-                  {displayChar}
+                  {digit}
                 </button>
-              );
-            })}
+              ))}
+            </div>
+          ))}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={handleClear}
+              style={{
+                height: `${keyHeightPx + 4}px`,
+                borderRadius: '14px',
+                fontSize: '15px',
+                fontWeight: 800,
+                color: '#515154',
+                background: '#ffffff',
+                border: '1px solid #d2d2d7',
+                cursor: 'pointer',
+              }}
+              className="keypad-btn"
+            >
+              초기화
+            </button>
+            <button
+              type="button"
+              onClick={() => handleKeyClick('0')}
+              style={{
+                height: `${keyHeightPx + 4}px`,
+                borderRadius: '14px',
+                fontSize: '22px',
+                fontWeight: 900,
+                color: '#1d1d1f',
+                background: '#f5f5f7',
+                border: '1px solid #e5e5ea',
+                cursor: 'pointer',
+              }}
+              className="keypad-btn"
+            >
+              0
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              style={{
+                height: `${keyHeightPx + 4}px`,
+                borderRadius: '14px',
+                fontSize: '15px',
+                fontWeight: 800,
+                color: '#dc2626',
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '5px',
+                cursor: 'pointer',
+              }}
+              className="keypad-btn"
+            >
+              <Delete size={18} />
+              지우기
+            </button>
           </div>
-        ))}
-
-        {/* 제어 키 라인 */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '2px' }}>
-          <button
-            type="button"
-            onClick={() => setLang(lang === 'KO' ? 'EN' : 'KO')}
-            style={{
-              width: '120px',
-              height: '56px',
-              borderRadius: '14px',
-              background: '#f5f5f7',
-              border: '1px solid #e5e5ea',
-              color: '#1d1d1f',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              fontSize: '16px',
-              fontWeight: 800,
-              cursor: 'pointer'
-            }}
-            className="keypad-btn"
-          >
-            <Globe size={18} />
-            {lang === 'KO' ? '한글' : 'ENG'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsShift(!isShift)}
-            style={{
-              width: '120px',
-              height: '56px',
-              borderRadius: '14px',
-              background: isShift ? '#1d1d1f' : '#f5f5f7',
-              border: `1.5px solid ${isShift ? '#1d1d1f' : '#e5e5ea'}`,
-              color: isShift ? '#ffffff' : '#1d1d1f',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '16px',
-              fontWeight: 800,
-              cursor: 'pointer'
-            }}
-            className="keypad-btn"
-          >
-            쌍자음 ⇧
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleKeyClick(' ')}
-            style={{
-              width: '280px',
-              height: '56px',
-              borderRadius: '14px',
-              background: '#ffffff',
-              border: '1.5px solid #d2d2d7',
-              color: '#1d1d1f',
-              fontSize: '16px',
-              fontWeight: 800,
-              cursor: 'pointer',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
-            }}
-            className="keypad-btn"
-          >
-            스페이스 (Space)
-          </button>
-
-          <button
-            type="button"
-            onClick={handleDelete}
-            style={{
-              width: '130px',
-              height: '56px',
-              borderRadius: '14px',
-              background: '#fef2f2',
-              border: '1px solid #fecaca',
-              color: '#dc2626',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              fontSize: '16px',
-              fontWeight: 800,
-              cursor: 'pointer'
-            }}
-            className="keypad-btn"
-          >
-            <Delete size={20} />
-            지우기
-          </button>
         </div>
-      </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? '6px' : '8px' }}>
+          {keys.map((row, rowIdx) => (
+            <div 
+              key={rowIdx} 
+              style={{ 
+                display: 'flex', 
+                justifyContent: 'center', 
+                gap: compact ? '5px' : '8px' 
+              }}
+            >
+              {row.map((char) => {
+                let displayChar = char;
+                if (!isHangulMode) {
+                  displayChar = forceUpper || isShift ? char.toUpperCase() : char.toLowerCase();
+                } else if (isShift) {
+                  if (lang === 'KO') {
+                    const shiftMap: Record<string, string> = {
+                      'ㅂ': 'ㅃ', 'ㅈ': 'ㅉ', 'ㄷ': 'ㄸ', 'ㄱ': 'ㄲ', 'ㅅ': 'ㅆ', 'ㅐ': 'ㅒ', 'ㅔ': 'ㅖ'
+                    };
+                    displayChar = shiftMap[char] || char;
+                  } else {
+                    displayChar = char.toUpperCase();
+                  }
+                } else {
+                  displayChar = lang === 'EN' ? char.toLowerCase() : char;
+                }
+
+                const isShiftedChar = isShift && !forceUpper && displayChar !== (isHangulMode && lang === 'KO' ? char : char.toLowerCase());
+
+                return (
+                  <button
+                    type="button"
+                    key={char}
+                    onClick={() => handleKeyClick(char)}
+                    style={{
+                      flex: compact ? '1 1 0' : '0 0 auto',
+                      maxWidth: compact ? '64px' : undefined,
+                      width: compact ? undefined : `${keyWidthPx}px`,
+                      height: `${keyHeightPx}px`,
+                      borderRadius: compact ? '11px' : '14px',
+                      fontSize: `${keyFontPx}px`,
+                      fontWeight: 800,
+                      color: isShiftedChar ? '#ffffff' : '#1d1d1f',
+                      background: isShiftedChar ? '#1d1d1f' : '#f5f5f7',
+                      border: isShiftedChar ? '1px solid #1d1d1f' : '1px solid #e5e5ea',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.1s ease'
+                    }}
+                    className="keypad-btn"
+                  >
+                    {displayChar}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+
+          {/* 제어 키 라인 */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: compact ? '6px' : '8px', marginTop: '2px' }}>
+            {isHangulMode && (
+              <button
+                type="button"
+                onClick={() => setLang(lang === 'KO' ? 'EN' : 'KO')}
+                style={{
+                  width: compact ? '96px' : '120px',
+                  height: `${keyHeightPx}px`,
+                  borderRadius: '14px',
+                  background: '#f5f5f7',
+                  border: '1px solid #e5e5ea',
+                  color: '#1d1d1f',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  fontSize: compact ? '14px' : '16px',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+                className="keypad-btn"
+              >
+                <Globe size={17} />
+                {lang === 'KO' ? '한글' : 'ENG'}
+              </button>
+            )}
+
+            {!forceUpper && (
+              <button
+                type="button"
+                onClick={() => setIsShift(!isShift)}
+                style={{
+                  width: compact ? '106px' : '120px',
+                  height: `${keyHeightPx}px`,
+                  borderRadius: '14px',
+                  background: isShift ? '#1d1d1f' : '#f5f5f7',
+                  border: `1.5px solid ${isShift ? '#1d1d1f' : '#e5e5ea'}`,
+                  color: isShift ? '#ffffff' : '#1d1d1f',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: compact ? '14px' : '16px',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+                className="keypad-btn"
+              >
+                {isHangulMode ? '쌍자음 ⇧' : '대문자 ⇧'}
+              </button>
+            )}
+
+            {mode !== 'COUPON_CODE' && (
+              <button
+                type="button"
+                onClick={() => handleKeyClick(' ')}
+                style={{
+                  flex: compact ? 1 : undefined,
+                  maxWidth: compact ? '240px' : undefined,
+                  width: compact ? undefined : '280px',
+                  height: `${keyHeightPx}px`,
+                  borderRadius: '14px',
+                  background: '#ffffff',
+                  border: '1.5px solid #d2d2d7',
+                  color: '#1d1d1f',
+                  fontSize: compact ? '14px' : '16px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+                }}
+                className="keypad-btn"
+              >
+                스페이스 (Space)
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleDelete}
+              style={{
+                width: compact ? '116px' : '130px',
+                height: `${keyHeightPx}px`,
+                borderRadius: '14px',
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                color: '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                fontSize: compact ? '14px' : '16px',
+                fontWeight: 800,
+                cursor: 'pointer'
+              }}
+              className="keypad-btn"
+            >
+              <Delete size={18} />
+              지우기
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

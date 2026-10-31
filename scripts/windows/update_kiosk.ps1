@@ -1,5 +1,5 @@
 # ==============================================================================
-# [GOLFOS KIOSK] Windows Unmanned Kiosk One-Click Cache Clear & Restart (update_kiosk.ps1 v2.0)
+# [GOLFOS KIOSK] Windows Unmanned Kiosk One-Click Cache Clear & Restart (update_kiosk.ps1 v2.1)
 # - Pure ASCII comments to prevent Windows PowerShell 5.1 CP949 parser corruption
 # - Target: C:\GolfOS\bin\update_kiosk.ps1
 # ==============================================================================
@@ -12,6 +12,14 @@ param(
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $startTime = Get-Date
+$kioskUrl = "http://${ServerIp}:8000/kiosk"
+
+# 0. Persist target ServerIp URL for run_kiosk_app.bat & boot recovery
+$binDir = "C:\GolfOS\bin"
+if (-not (Test-Path $binDir)) {
+    New-Item -ItemType Directory -Path $binDir -Force -ErrorAction SilentlyContinue | Out-Null
+}
+Set-Content -Path (Join-Path $binDir "kiosk_server_url.txt") -Value $kioskUrl -Encoding ASCII -NoNewline -ErrorAction SilentlyContinue
 
 # 1. Terminate existing Kiosk Electron and Edge processes
 Stop-Process -Name electron, msedge -Force -ErrorAction SilentlyContinue
@@ -43,7 +51,39 @@ foreach ($baseDir in @($electronProfile, $edgeKioskProfile)) {
     }
 }
 
-# 3. Restart GolfOS Unified Hardware/VCAT Bridge (vcat_bridge.py on :8090 / :18080)
+# 3. Refresh Desktop & Startup Shortcuts (Electron Native Shell first, Batch Launcher fallback)
+$desktop = [Environment]::GetFolderPath('Desktop')
+$startup = [Environment]::GetFolderPath('Startup')
+$electronExe = "C:\GolfOS\runtime\electron\electron.exe"
+$mainCjs = "C:\GolfOS\electron\main.cjs"
+$runnerBat = "C:\GolfOS\bin\run_kiosk_app.bat"
+$kioskIco = "C:\GolfOS\bin\golfos-kiosk-icon.ico"
+$binIco = "C:\GolfOS\bin\golfos-icon.ico"
+$iconToUse = if (Test-Path $kioskIco) { "$kioskIco,0" } elseif (Test-Path $binIco) { "$binIco,0" } else { "" }
+
+try {
+    $wsh = New-Object -ComObject WScript.Shell
+    foreach ($folder in @($desktop, $startup)) {
+        if ($folder -and (Test-Path $folder)) {
+            $kioskLnk = $wsh.CreateShortcut((Join-Path $folder "GOLFOS KIOSK.lnk"))
+            if ((Test-Path $electronExe) -and (Test-Path $mainCjs)) {
+                $kioskLnk.TargetPath = $electronExe
+                $kioskLnk.Arguments = "`"$mainCjs`" $kioskUrl --kiosk"
+                $kioskLnk.WorkingDirectory = "C:\GolfOS"
+            } elseif (Test-Path $runnerBat) {
+                $kioskLnk.TargetPath = "cmd.exe"
+                $kioskLnk.Arguments = "/c `"`"$runnerBat`" $kioskUrl`""
+                $kioskLnk.WorkingDirectory = "C:\GolfOS\bin"
+                $kioskLnk.WindowStyle = 7
+            }
+            if ($iconToUse) { $kioskLnk.IconLocation = $iconToUse }
+            $kioskLnk.Description = "GOLFOS Unmanned Kiosk"
+            $kioskLnk.Save()
+        }
+    }
+} catch {}
+
+# 4. Restart GolfOS Unified Hardware/VCAT Bridge (vcat_bridge.py on :8090 / :18080)
 $bridgeScript = "C:\GolfOS\bin\vcat_bridge.py"
 $bridgeOnline = $false
 if (Test-Path $bridgeScript) {
@@ -63,7 +103,7 @@ if (Test-Path $bridgeScript) {
         Start-Sleep -Milliseconds 500
         try {
             $resp = Invoke-RestMethod -Uri "http://127.0.0.1:18080/health" -TimeoutSec 1 -ErrorAction Stop
-            if ($resp.status -eq "ONLINE") { $bridgeOnline = $true; break }
+            if ($resp.status -in @("ONLINE", "DEGRADED")) { $bridgeOnline = $true; break }
         } catch {}
     }
 
@@ -93,13 +133,63 @@ if (Test-Path $bridgeScript) {
             Start-Sleep -Milliseconds 500
             try {
                 $resp = Invoke-RestMethod -Uri "http://127.0.0.1:18080/health" -TimeoutSec 1 -ErrorAction Stop
-                if ($resp.status -eq "ONLINE") { $bridgeOnline = $true; break }
+                if ($resp.status -in @("ONLINE", "DEGRADED")) { $bridgeOnline = $true; break }
             } catch {}
         }
     }
 }
 
-# 4. Relaunch Kiosk in interactive desktop session via Scheduled Task
+# 5. Ensure LaunchGolfosKiosk Scheduled Task exists (interactive desktop session) and trigger it
+$interactiveUser = $null
+try {
+    $explorerProc = Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($explorerProc) {
+        $ownerInfo = Invoke-CimMethod -InputObject $explorerProc -MethodName GetOwner -ErrorAction SilentlyContinue
+        if ($ownerInfo -and $ownerInfo.User) {
+            $interactiveUser = $ownerInfo.User
+        }
+    }
+} catch {}
+if (-not $interactiveUser) {
+    $interactiveUser = $env:USERNAME
+}
+
+$launchExe = $null
+$launchArgs = ""
+$launchWorkDir = "C:\GolfOS"
+if ((Test-Path $electronExe) -and (Test-Path $mainCjs)) {
+    $launchExe = $electronExe
+    $launchArgs = "`"$mainCjs`" $kioskUrl --kiosk"
+    $launchWorkDir = "C:\GolfOS"
+} elseif (Test-Path $runnerBat) {
+    $launchExe = "cmd.exe"
+    $launchArgs = "/c `"`"$runnerBat`" $kioskUrl`""
+    $launchWorkDir = "C:\GolfOS\bin"
+} else {
+    $edgeCandidates = @(
+        "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        "C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+    )
+    foreach ($ec in $edgeCandidates) {
+        if (Test-Path $ec) {
+            $launchExe = $ec
+            $launchArgs = "--app=$kioskUrl --user-data-dir=`"$edgeKioskProfile`" --kiosk --no-first-run --no-default-browser-check --kiosk-printing --high-dpi-support=1 --force-device-scale-factor=1"
+            break
+        }
+    }
+}
+
+if ($launchExe) {
+    try {
+        $action = New-ScheduledTaskAction -Execute $launchExe -Argument $launchArgs -WorkingDirectory $launchWorkDir
+        $principal = New-ScheduledTaskPrincipal -UserId $interactiveUser -LogonType Interactive -RunLevel Limited
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+        Register-ScheduledTask -TaskName "LaunchGolfosKiosk" -Action $action -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+    } catch {
+        schtasks /create /tn "LaunchGolfosKiosk" /tr "`"$launchExe`" $launchArgs" /sc ONCE /st 00:00 /it /f 2>$null | Out-Null
+    }
+}
+
 $taskObj = Get-ScheduledTask -TaskName "LaunchGolfosKiosk" -ErrorAction SilentlyContinue
 if ($taskObj) {
     Start-ScheduledTask -TaskName "LaunchGolfosKiosk" -ErrorAction SilentlyContinue
@@ -107,13 +197,27 @@ if ($taskObj) {
     schtasks /run /tn "LaunchGolfosKiosk" 2>$null | Out-Null
 }
 
-# 5. Poll up to 8 seconds strictly for electron or msedge (exclude msedgewebview2)
+# 6. Poll 8s for Scheduled Task launch; fallback to direct Start-Process ONLY in interactive desktop session (SessionId != 0)
 $kioskProc = $null
 for ($i = 0; $i -lt 8; $i++) {
     Start-Sleep -Seconds 1
     $kioskProc = Get-Process -Name electron, msedge -ErrorAction SilentlyContinue | Where-Object { $_.Responding }
-    if ($kioskProc) {
-        break
+    if ($kioskProc) { break }
+}
+
+$currentSessionId = 0
+try {
+    $currentSessionId = (Get-Process -Id $PID -ErrorAction SilentlyContinue).SessionId
+} catch {
+    $currentSessionId = 0
+}
+
+if ((-not $kioskProc) -and $launchExe -and ($currentSessionId -ne 0)) {
+    Start-Process -FilePath $launchExe -ArgumentList $launchArgs -WorkingDirectory $launchWorkDir -ErrorAction SilentlyContinue
+    for ($i = 0; $i -lt 5; $i++) {
+        Start-Sleep -Seconds 1
+        $kioskProc = Get-Process -Name electron, msedge -ErrorAction SilentlyContinue | Where-Object { $_.Responding }
+        if ($kioskProc) { break }
     }
 }
 
@@ -138,7 +242,7 @@ if ($kioskProc) {
         elapsed_sec = $elapsed
         device_type = "KIOSK"
         bridge_online = $bridgeOnline
-        message = "Kiosk process (electron/msedge) did not start within 8s."
+        message = "Kiosk process (electron/msedge) did not start within 9s."
         server_ip = $ServerIp
     } | ConvertTo-Json -Compress
     Write-Output $json
