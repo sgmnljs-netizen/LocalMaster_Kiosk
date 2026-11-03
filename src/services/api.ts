@@ -1202,6 +1202,9 @@ class HybridAPIClient {
         if (res.ok) {
           const data = await res.json();
           localStorage.setItem('LM_STORE_INFO', JSON.stringify(data));
+          if (data.meta_data) {
+            this.resolveKioskFaceTerminalIp(data.meta_data);
+          }
           const resolvedTel = data.phone_no || data.tel || data.tel_no || '02-450-4500';
           const resolvedCeo = data.owner_nm || data.ceo_name || data.ceo_nm || '';
           return {
@@ -2541,6 +2544,77 @@ class HybridAPIClient {
     }).catch(() => undefined);
   }
 
+  // 로컬 하드웨어 브릿지(:18080) 키오스크 프로그램 종료(EXIT) / 재실행(RESTART) 제어 (관리자 설정 전용)
+  async controlKioskApp(action: 'EXIT' | 'RESTART'): Promise<{
+    success: boolean;
+    action: string;
+    message: string;
+    bridgeHandled: boolean;
+  }> {
+    try {
+      const resp = await fetch(`${this.getLocalBleBridgeUrl()}/api/v1/system/kiosk-app-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+        signal: AbortSignal.timeout(2500),
+      });
+      if (resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        if (data?.success) {
+          if (action === 'EXIT' && typeof window !== 'undefined' && typeof window.close === 'function') {
+            window.setTimeout(() => {
+              try {
+                window.close();
+              } catch {
+                // ignore browser popup restriction
+              }
+            }, 150);
+          }
+          return {
+            success: true,
+            action,
+            message:
+              data.message ||
+              (action === 'EXIT'
+                ? '키오스크 프로그램을 종료하고 바탕화면으로 이동합니다.'
+                : '키오스크 프로그램을 재실행합니다.'),
+            bridgeHandled: true,
+          };
+        }
+      }
+    } catch {
+      // 브릿지 오프라인 시 브라우저 레벨 Fallback 진행
+    }
+
+    if (action === 'RESTART') {
+      if (typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
+        window.setTimeout(() => {
+          window.location.reload();
+        }, 150);
+      }
+      return {
+        success: true,
+        action,
+        message: '화면을 새로고침하여 키오스크를 재실행합니다.',
+        bridgeHandled: false,
+      };
+    }
+
+    if (typeof window !== 'undefined' && typeof window.close === 'function') {
+      try {
+        window.close();
+      } catch {
+        // ignore
+      }
+    }
+    return {
+      success: false,
+      action,
+      message: '로컬 브릿지(:18080) 연결을 확인할 수 없어 브라우저 종료만 요청했습니다.',
+      bridgeHandled: false,
+    };
+  }
+
   // 6. 타석 이동 (사용 중인 타석 변경 — POST /v1/kiosk/bays/move)
   async moveBay(
     memberNo: string,
@@ -3401,9 +3475,54 @@ class HybridAPIClient {
     }
   }
 
+  /**
+   * 매장 메타데이터(integration.face_terminals)에서 무인키오스크 전용 안면인식 단말기 IP를 우선 해석합니다.
+   * 멀티 단말기 환경(포스용 + 키오스크용)에서 포스 단말기(active_ips[0])로 잘못 라우팅되는 문제를 원천 차단합니다.
+   */
+  resolveKioskFaceTerminalIp(metaData?: any): string {
+    try {
+      let rawMeta = metaData;
+      if (!rawMeta) {
+        const cachedStore = JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}');
+        rawMeta = cachedStore?.meta_data;
+      }
+      const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : rawMeta;
+      const integration = meta?.integration;
+      if (integration && Array.isArray(integration.face_terminals)) {
+        const activeTerminals = integration.face_terminals.filter(
+          (t: any) => t && t.is_active !== false && typeof t.ip === 'string' && t.ip.trim().length > 0
+        );
+        const kioskTerminal = activeTerminals.find((t: any) => {
+          const role = String(t.role || t.device_type || '').toUpperCase();
+          const name = String(t.name || '').toLowerCase();
+          const id = String(t.id || '').toLowerCase();
+          return role === 'KIOSK' || name.includes('키오스크') || name.includes('kiosk') || id.includes('kiosk');
+        });
+        if (kioskTerminal) {
+          const resolvedIp = String(kioskTerminal.ip).trim();
+          localStorage.setItem('face_terminal_ip', resolvedIp);
+          return resolvedIp;
+        }
+        if (activeTerminals.length > 0) {
+          const firstIp = String(activeTerminals[0].ip).trim();
+          localStorage.setItem('face_terminal_ip', firstIp);
+          return firstIp;
+        }
+      }
+      if (integration?.face_terminal_ip && String(integration.face_terminal_ip).trim()) {
+        const singleIp = String(integration.face_terminal_ip).trim();
+        localStorage.setItem('face_terminal_ip', singleIp);
+        return singleIp;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+  }
+
   // 13. 안면인식 스캔 API (실시간 백엔드 단말기 API GET /v1/face-terminal/scan-identity 연동)
   async scanFace(deviceIp?: string, externalSignal?: AbortSignal): Promise<Member | null> {
-    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    const ip = deviceIp || this.resolveKioskFaceTerminalIp();
     const storeCd = this.getStoreCd();
 
     try {
@@ -3415,7 +3534,7 @@ class HybridAPIClient {
         externalSignal.addEventListener('abort', () => controller.abort());
       }
 
-      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/scan-identity?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
+      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/scan-identity?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}&role=KIOSK`, {
         method: 'GET',
         headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
         signal: externalSignal || controller.signal
@@ -3443,10 +3562,10 @@ class HybridAPIClient {
 
   // 13.1. 프런트포스 표준: 안면 단말기 원격 캡처 수집 모드 시작 (출입 멘트 일시정지)
   async startFaceCaptureMode(deviceIp?: string): Promise<boolean> {
-    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    const ip = deviceIp || this.resolveKioskFaceTerminalIp();
     const storeCd = this.getStoreCd();
     try {
-      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/start-capture?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
+      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/start-capture?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}&role=KIOSK`, {
         method: 'POST',
         headers: this.getSecureHeaders({ 'Content-Type': 'application/json' })
       });
@@ -3459,10 +3578,10 @@ class HybridAPIClient {
 
   // 13.2. 프런트포스 표준: 단말기 카메라 정면 안면 감지 롱폴링 (이미지 base64 포함 반환)
   async detectFaceCamera(deviceIp?: string): Promise<{ detected: boolean; imageBase64: string }> {
-    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    const ip = deviceIp || this.resolveKioskFaceTerminalIp();
     const storeCd = this.getStoreCd();
     try {
-      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/detect-face?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
+      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/detect-face?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}&role=KIOSK`, {
         method: 'GET',
         headers: this.getSecureHeaders({ 'Content-Type': 'application/json' })
       });
@@ -3479,10 +3598,10 @@ class HybridAPIClient {
 
   // 13.3. 프런트포스 표준: 안면 단말기 출입 인증 모드 즉시 원복
   async cancelFaceCaptureMode(deviceIp?: string): Promise<boolean> {
-    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    const ip = deviceIp || this.resolveKioskFaceTerminalIp();
     const storeCd = this.getStoreCd();
     try {
-      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/cancel-capture?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}`, {
+      const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/cancel-capture?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}&role=KIOSK`, {
         method: 'POST',
         headers: this.getSecureHeaders({ 'Content-Type': 'application/json' })
       });
@@ -3495,7 +3614,7 @@ class HybridAPIClient {
 
   // 13.4. 프런트포스 표준: 회원 안면 데이터 단말기 동기화 푸시 등록
   async enrollMemberFace(memberNo: string, memberName: string, faceImageBase64?: string, deviceIp?: string): Promise<{ success: boolean; message: string }> {
-    const ip = deviceIp || localStorage.getItem('face_terminal_ip') || '192.168.45.16';
+    const ip = deviceIp || this.resolveKioskFaceTerminalIp();
     const storeCd = this.getStoreCd();
 
     if (isDemoEnvironment()) {

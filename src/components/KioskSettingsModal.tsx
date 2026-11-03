@@ -110,6 +110,9 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   >(null);
   const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [bootstrapMsg, setBootstrapMsg] = useState<string | null>(null);
+  const [confirmExitKiosk, setConfirmExitKiosk] = useState(false);
+  const [isControllingApp, setIsControllingApp] = useState(false);
+  const [appControlStatus, setAppControlStatus] = useState<string | null>(null);
   const wasOpenRef = useRef<boolean>(false);
 
   const configurableMenus = useMemo(() => {
@@ -169,6 +172,9 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       setSaveSuccess(false);
       setActiveKeyboardField(null);
       setBootstrapMsg(null);
+      setConfirmExitKiosk(false);
+      setIsControllingApp(false);
+      setAppControlStatus(null);
 
       // 백엔드 실시간 단말기 마스터 조회
       const fetchTerminals = async () => {
@@ -1314,6 +1320,175 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   * 좌측 상단 5회 탭 시 입력할 관리자 비밀번호입니다. 비워두면 기존 PIN이 그대로 유지됩니다.
                 </p>
               </div>
+
+              {/* 관리자 전용 키오스크 프로그램 종료 / 재실행 제어 카드 */}
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '16px',
+                  padding: '18px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
+                    <Monitor size={17} color="#0284c7" />
+                    키오스크 프로그램 제어 (관리자 전용)
+                  </div>
+                  <p style={{ fontSize: '12px', color: '#64748b', margin: 0, fontWeight: 500 }}>
+                    현장 점검 또는 윈도우 바탕화면 확인이 필요할 때 물리 키보드 없이 프로그램을 재실행하거나 종료할 수 있습니다.
+                  </p>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <button
+                    type="button"
+                    data-testid="settings-restart-kiosk-btn"
+                    disabled={isControllingApp}
+                    onClick={async () => {
+                      setIsControllingApp(true);
+                      setConfirmExitKiosk(false);
+                      setAppControlStatus('키오스크 프로그램을 재실행하는 중입니다...');
+                      clearKioskAdminSession();
+                      const res = await api.controlKioskApp('RESTART');
+                      setAppControlStatus(res.message);
+                      setIsControllingApp(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      padding: '13px 14px',
+                      borderRadius: '12px',
+                      border: '1.5px solid #0284c7',
+                      background: '#f0f9ff',
+                      color: '#0369a1',
+                      fontSize: '13px',
+                      fontWeight: 800,
+                      cursor: isControllingApp ? 'wait' : 'pointer',
+                    }}
+                  >
+                    <RotateCcw size={16} />
+                    키오스크 프로그램 재실행
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="settings-exit-kiosk-btn"
+                    disabled={isControllingApp}
+                    onClick={() => {
+                      setAppControlStatus(null);
+                      setConfirmExitKiosk((prev) => !prev);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      padding: '13px 14px',
+                      borderRadius: '12px',
+                      border: '1.5px solid #dc2626',
+                      background: confirmExitKiosk ? '#fee2e2' : '#fef2f2',
+                      color: '#b91c1c',
+                      fontSize: '13px',
+                      fontWeight: 800,
+                      cursor: isControllingApp ? 'wait' : 'pointer',
+                    }}
+                  >
+                    <X size={16} />
+                    키오스크 프로그램 종료 (바탕화면)
+                  </button>
+                </div>
+
+                {confirmExitKiosk && (
+                  <div
+                    data-testid="settings-exit-confirm-box"
+                    style={{
+                      background: '#fff1f2',
+                      border: '1.5px solid #fda4af',
+                      borderRadius: '12px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                    }}
+                  >
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#9f1239', lineHeight: 1.45 }}>
+                      전체화면 키오스크를 닫고 Windows 바탕화면으로 나가시겠습니까?
+                      <div style={{ fontSize: '11px', fontWeight: 500, color: '#be123c', marginTop: '2px' }}>
+                        * 바탕화면의 [GOLFOS KIOSK] 아이콘을 더블클릭하면 언제든 다시 실행할 수 있습니다.
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        data-testid="settings-cancel-exit-kiosk-btn"
+                        disabled={isControllingApp}
+                        onClick={() => setConfirmExitKiosk(false)}
+                        style={{
+                          padding: '9px 14px',
+                          borderRadius: '10px',
+                          border: '1px solid #cbd5e1',
+                          background: '#ffffff',
+                          color: '#475569',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="settings-confirm-exit-kiosk-btn"
+                        disabled={isControllingApp}
+                        onClick={async () => {
+                          setIsControllingApp(true);
+                          setAppControlStatus('키오스크 프로그램을 종료하고 바탕화면으로 이동합니다...');
+                          clearKioskAdminSession();
+                          const res = await api.controlKioskApp('EXIT');
+                          setAppControlStatus(res.message);
+                          setIsControllingApp(false);
+                        }}
+                        style={{
+                          padding: '9px 14px',
+                          borderRadius: '10px',
+                          border: 'none',
+                          background: '#dc2626',
+                          color: '#ffffff',
+                          fontSize: '12px',
+                          fontWeight: 800,
+                          cursor: isControllingApp ? 'wait' : 'pointer',
+                        }}
+                      >
+                        종료 확인
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {appControlStatus && (
+                  <div
+                    data-testid="settings-app-control-status"
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '10px',
+                      background: '#f1f5f9',
+                      border: '1px solid #cbd5e1',
+                      color: '#334155',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {appControlStatus}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1407,60 +1582,193 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
           data-testid="kiosk-settings-footer"
           style={{
             flexShrink: 0,
-            padding: '18px 28px',
+            padding: '16px 24px',
             background: '#f8fafc',
             borderTop: '1px solid #e2e8f0',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
+            flexDirection: 'column',
+            gap: '10px',
           }}
         >
-          <button
-            type="button"
-            onClick={() => {
-              clearKioskAdminSession();
-              onClose();
-            }}
+          {confirmExitKiosk && activeTab !== 'maintenance' && (
+            <div
+              data-testid="settings-footer-exit-confirm-box"
+              style={{
+                background: '#fff1f2',
+                border: '1.5px solid #fda4af',
+                borderRadius: '12px',
+                padding: '10px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px',
+              }}
+            >
+              <div style={{ fontSize: '12px', fontWeight: 800, color: '#9f1239' }}>
+                전체화면 키오스크를 종료하고 Windows 바탕화면으로 이동할까요?
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => setConfirmExitKiosk(false)}
+                  style={{
+                    padding: '7px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#475569',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  data-testid="settings-footer-confirm-exit-btn"
+                  disabled={isControllingApp}
+                  onClick={async () => {
+                    setIsControllingApp(true);
+                    setAppControlStatus('키오스크 프로그램을 종료하고 바탕화면으로 이동합니다...');
+                    clearKioskAdminSession();
+                    const res = await api.controlKioskApp('EXIT');
+                    setAppControlStatus(res.message);
+                    setIsControllingApp(false);
+                  }}
+                  style={{
+                    padding: '7px 14px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    cursor: isControllingApp ? 'wait' : 'pointer',
+                  }}
+                >
+                  종료 확인
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div
             style={{
-              padding: '12px 22px',
-              background: '#ffffff',
-              border: '1px solid #cbd5e1',
-              borderRadius: '12px',
-              color: '#475569',
-              fontSize: '13.5px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            닫기
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            style={{
-              padding: '12px 28px',
-              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-              border: 'none',
-              borderRadius: '14px',
-              color: '#ffffff',
-              fontSize: '14px',
-              fontWeight: 800,
-              cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
+              justifyContent: 'space-between',
+              gap: '10px',
+              flexWrap: 'wrap',
             }}
           >
-            {saveSuccess ? (
-              <>
-                <CheckCircle2 size={16} />
-                저장 완료!
-              </>
-            ) : (
-              '설정 저장'
-            )}
-          </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  clearKioskAdminSession();
+                  onClose();
+                }}
+                style={{
+                  padding: '12px 18px',
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '12px',
+                  color: '#475569',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                닫기
+              </button>
+
+              <button
+                type="button"
+                data-testid="settings-footer-restart-kiosk-btn"
+                disabled={isControllingApp}
+                onClick={async () => {
+                  setIsControllingApp(true);
+                  setConfirmExitKiosk(false);
+                  setAppControlStatus('키오스크 프로그램을 재실행하는 중입니다...');
+                  clearKioskAdminSession();
+                  const res = await api.controlKioskApp('RESTART');
+                  setAppControlStatus(res.message);
+                  setIsControllingApp(false);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '12px 14px',
+                  background: '#f0f9ff',
+                  border: '1.5px solid #0284c7',
+                  borderRadius: '12px',
+                  color: '#0369a1',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: isControllingApp ? 'wait' : 'pointer',
+                }}
+              >
+                <RotateCcw size={15} />
+                키오스크 재실행
+              </button>
+
+              <button
+                type="button"
+                data-testid="settings-footer-exit-kiosk-btn"
+                disabled={isControllingApp}
+                onClick={() => {
+                  setAppControlStatus(null);
+                  setConfirmExitKiosk((prev) => !prev);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '12px 14px',
+                  background: confirmExitKiosk ? '#fee2e2' : '#fef2f2',
+                  border: '1.5px solid #dc2626',
+                  borderRadius: '12px',
+                  color: '#b91c1c',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: isControllingApp ? 'wait' : 'pointer',
+                }}
+              >
+                <X size={15} />
+                키오스크 종료 (바탕화면)
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSave}
+              style={{
+                padding: '12px 24px',
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                border: 'none',
+                borderRadius: '14px',
+                color: '#ffffff',
+                fontSize: '14px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              {saveSuccess ? (
+                <>
+                  <CheckCircle2 size={16} />
+                  저장 완료!
+                </>
+              ) : (
+                '설정 저장'
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>

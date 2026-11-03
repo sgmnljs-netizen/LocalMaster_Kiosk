@@ -288,6 +288,11 @@ export default function KioskApp() {
   // 미들웨어 헬스체크 및 키오스크 설정 로드
   const [isMiddlewareOffline, setIsMiddlewareOffline] = useState(false);
   const [isNetworkOffline, setIsNetworkOffline] = useState(false);
+  const [isRetryingNetwork, setIsRetryingNetwork] = useState(false);
+  const [networkRetryFeedback, setNetworkRetryFeedback] = useState<{
+    message: string;
+    type: 'checking' | 'error' | 'success';
+  } | null>(null);
   const [isKioskActive, setIsKioskActive] = useState(true);
   const [inactiveNotice, setInactiveNotice] = useState<string>('');
   const [kioskMenuConfigs, setKioskMenuConfigs] = useState<any[]>([]);
@@ -510,6 +515,7 @@ export default function KioskApp() {
             const meta = typeof info.meta_data === 'string' ? JSON.parse(info.meta_data) : info.meta_data;
             const faceYn = meta?.integration?.face_terminal_yn ?? true;
             setFaceTerminalEnabled(faceYn);
+            api.resolveKioskFaceTerminalIp(meta);
           } catch {
             setFaceTerminalEnabled(true);
           }
@@ -604,6 +610,78 @@ export default function KioskApp() {
 
   const showToast = (message: string, success = true) => {
     setToast({ message, success });
+  };
+
+  // 🔄 [Self-Healing] 네트워크 단절(isNetworkOffline) 상태일 때 3초 주기로 백그라운드 헬스체크 및 무인 자동 복구
+  useEffect(() => {
+    if (!isNetworkOffline) {
+      setNetworkRetryFeedback(null);
+      return;
+    }
+
+    const autoRecoveryTimer = setInterval(async () => {
+      if (isRetryingNetwork) return;
+
+      const conn = await api.checkConnection();
+      if (conn) {
+        recordKioskBlackBox('HW_STATUS', '[NETWORK_AUTO_RECOVERED] 백그라운드 3초 헬스체크로 네트워크 자동 복구 완료');
+        setNetworkRetryFeedback({
+          message: lang === 'KO' ? '✅ 네트워크 연결이 자동 복구되었습니다! 화면으로 복귀합니다.' : '✅ Connection restored automatically! Returning...',
+          type: 'success',
+        });
+        setTimeout(() => {
+          setIsNetworkOffline(false);
+          setNetworkRetryFeedback(null);
+          showToast(lang === 'KO' ? '네트워크 연결이 복구되었습니다.' : 'Connection restored.', true);
+          loadBays();
+        }, 600);
+      }
+    }, 3000);
+
+    return () => clearInterval(autoRecoveryTimer);
+  }, [isNetworkOffline, isRetryingNetwork, lang]);
+
+  // 📡 수동 네트워크 연결 재시도 핸들러 (버튼 로딩 피드백 및 인라인 상태 표시)
+  const handleManualNetworkRetry = async () => {
+    if (isRetryingNetwork) return;
+    setIsRetryingNetwork(true);
+    setNetworkRetryFeedback({
+      message: lang === 'KO' ? '🔄 서버 및 인터넷 연결 상태를 확인하고 있습니다 (최대 2.5초)...' : '🔄 Checking server and internet connection (up to 2.5s)...',
+      type: 'checking',
+    });
+    recordKioskBlackBox('HW_STATUS', '[NETWORK_RETRY_START] 수동 연결 재시도 시작');
+
+    try {
+      const conn = await api.checkConnection();
+      if (conn) {
+        setNetworkRetryFeedback({
+          message: lang === 'KO' ? '✅ 네트워크 연결이 복구되었습니다! 화면으로 복귀합니다.' : '✅ Connection restored! Returning...',
+          type: 'success',
+        });
+        recordKioskBlackBox('HW_STATUS', '[NETWORK_RETRY_SUCCESS] 연결 재시도 성공 - 정상 복귀');
+        showToast(lang === 'KO' ? '네트워크 연결이 복구되었습니다.' : 'Connection restored.', true);
+        setTimeout(() => {
+          setIsNetworkOffline(false);
+          setNetworkRetryFeedback(null);
+          setIsRetryingNetwork(false);
+          loadBays();
+        }, 600);
+      } else {
+        setNetworkRetryFeedback({
+          message: lang === 'KO' ? '⚠️ 아직 서버와 통신할 수 없습니다. 랜선/공유기 연결을 확인한 뒤 다시 시도해 주세요.' : '⚠️ Network still unreachable. Please check cable or router and try again.',
+          type: 'error',
+        });
+        recordKioskBlackBox('API_ERROR', '[NETWORK_RETRY_FAIL] 연결 재시도 실패');
+        showToast(lang === 'KO' ? '아직 네트워크 연결이 복구되지 않았습니다.' : 'Network still unreachable.', false);
+        setIsRetryingNetwork(false);
+      }
+    } catch {
+      setNetworkRetryFeedback({
+        message: lang === 'KO' ? '⚠️ 연결 확인 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' : '⚠️ Error checking connection. Please try again.',
+        type: 'error',
+      });
+      setIsRetryingNetwork(false);
+    }
   };
 
   // 회원 로그아웃 및 세션 원자적 초기화 (INTRO 또는 MAIN_DASHBOARD 복귀 시 100% 대칭 클린업 보장)
@@ -2098,7 +2176,7 @@ export default function KioskApp() {
     <div className="kiosk-container" style={{ zoom: zoomScale }}>
       {/* 전역 토스트 팝업 */}
       {toast && (
-        <div className="kiosk-toast">
+        <div className={`kiosk-toast ${toast.success ? '' : 'error'}`}>
           <Sparkles size={20} />
           <span>{toast.message}</span>
         </div>
@@ -3018,7 +3096,7 @@ export default function KioskApp() {
             <h2 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', marginBottom: '14px', letterSpacing: '-0.6px' }}>
               {lang === 'KO' ? '⚠️ 네트워크 연결 장애 - 카운터 문의' : '⚠️ Network Connection Error - Please Contact Counter'}
             </h2>
-            <p style={{ fontSize: '18px', color: '#48484a', fontWeight: 600, lineHeight: '1.6', marginBottom: '32px' }}>
+            <p style={{ fontSize: '18px', color: '#48484a', fontWeight: 600, lineHeight: '1.6', marginBottom: '24px' }}>
               {lang === 'KO' ? (
                 <>
                   서버 및 인터넷 통신 연결이 일시적으로 원활하지 않습니다.<br />
@@ -3033,36 +3111,86 @@ export default function KioskApp() {
                 </>
               )}
             </p>
+
+            {/* 💡 실시간 상태 피드백 인라인 배너 */}
+            {networkRetryFeedback && (
+              <div
+                data-testid="network-feedback-banner"
+                style={{
+                  padding: '14px 20px',
+                  borderRadius: '16px',
+                  marginBottom: '24px',
+                  fontSize: '15px',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  backgroundColor:
+                    networkRetryFeedback.type === 'checking'
+                      ? '#eff6ff'
+                      : networkRetryFeedback.type === 'success'
+                      ? '#ecfdf5'
+                      : '#fef2f2',
+                  color:
+                    networkRetryFeedback.type === 'checking'
+                      ? '#1d4ed8'
+                      : networkRetryFeedback.type === 'success'
+                      ? '#047857'
+                      : '#b91c1c',
+                  border: `1px solid ${
+                    networkRetryFeedback.type === 'checking'
+                      ? '#bfdbfe'
+                      : networkRetryFeedback.type === 'success'
+                      ? '#a7f3d0'
+                      : '#fecaca'
+                  }`,
+                }}
+              >
+                <span>{networkRetryFeedback.message}</span>
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
               <button
                 type="button"
                 data-testid="network-retry-button"
-                onClick={async () => {
-                  const conn = await api.checkConnection();
-                  setIsNetworkOffline(!conn);
-                  if (conn) {
-                    showToast(lang === 'KO' ? '네트워크 연결이 복구되었습니다.' : 'Connection restored.');
-                    recordKioskBlackBox('HW_STATUS', '[NETWORK_RETRY_SUCCESS] 연결 재시도 성공 - 정상 복귀');
-                    loadBays();
-                  } else {
-                    showToast(lang === 'KO' ? '아직 네트워크 연결이 복구되지 않았습니다.' : 'Network still unreachable.', false);
-                    recordKioskBlackBox('API_ERROR', '[NETWORK_RETRY_FAIL] 연결 재시도 실패');
-                  }
-                }}
+                disabled={isRetryingNetwork}
+                onClick={handleManualNetworkRetry}
                 style={{
                   height: '64px',
                   padding: '0 44px',
                   borderRadius: '999px',
-                  backgroundColor: '#1d1d1f',
+                  backgroundColor: isRetryingNetwork ? '#8e8e93' : '#1d1d1f',
                   color: '#ffffff',
                   fontWeight: 900,
                   fontSize: '19px',
                   border: 'none',
-                  cursor: 'pointer',
+                  cursor: isRetryingNetwork ? 'not-allowed' : 'pointer',
                   boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  transition: 'background-color 0.2s, opacity 0.2s',
+                  opacity: isRetryingNetwork ? 0.8 : 1,
                 }}
               >
-                {lang === 'KO' ? '연결 재시도' : 'Retry'}
+                {isRetryingNetwork && (
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: '20px',
+                      height: '20px',
+                      border: '3px solid rgba(255,255,255,0.3)',
+                      borderTopColor: '#ffffff',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite',
+                    }}
+                  />
+                )}
+                {isRetryingNetwork
+                  ? (lang === 'KO' ? '연결 확인 중...' : 'Checking...')
+                  : (lang === 'KO' ? '연결 재시도' : 'Retry')}
               </button>
             </div>
           </div>

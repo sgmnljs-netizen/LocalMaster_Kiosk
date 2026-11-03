@@ -25,9 +25,10 @@ Set-Content -Path (Join-Path $binDir "kiosk_server_url.txt") -Value $kioskUrl -E
 Stop-Process -Name electron, msedge -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
-# 2. Clear Chromium / Electron caches (both Electron root profile & Edge Default profile)
+# 2. Clear Chromium / Electron caches (Electron root profile, Edge canonical profile, and legacy kiosk_edge_profile)
 $electronProfile = "C:\GolfOS\kiosk_electron_profile"
 $edgeKioskProfile = "C:\GolfOS\kiosk_profile"
+$legacyEdgeProfile = "C:\GolfOS\kiosk_edge_profile"
 
 $cacheSubDirs = @(
     "Cache",
@@ -37,10 +38,12 @@ $cacheSubDirs = @(
     "DawnWebGPUCache",
     "Default\Cache",
     "Default\Code Cache",
-    "Default\GPUCache"
+    "Default\GPUCache",
+    "Default\Service Worker\CacheStorage",
+    "Default\Service Worker\ScriptCache"
 )
 
-foreach ($baseDir in @($electronProfile, $edgeKioskProfile)) {
+foreach ($baseDir in @($electronProfile, $edgeKioskProfile, $legacyEdgeProfile)) {
     if (Test-Path $baseDir) {
         foreach ($sub in $cacheSubDirs) {
             $target = Join-Path $baseDir $sub
@@ -65,6 +68,12 @@ try {
     $wsh = New-Object -ComObject WScript.Shell
     foreach ($folder in @($desktop, $startup)) {
         if ($folder -and (Test-Path $folder)) {
+            # Remove legacy underscore shortcut to prevent duplicate boot windows
+            $legacyLnk = Join-Path $folder "GOLFOS_Kiosk.lnk"
+            if (Test-Path $legacyLnk) {
+                Remove-Item -Path $legacyLnk -Force -ErrorAction SilentlyContinue
+            }
+
             $kioskLnk = $wsh.CreateShortcut((Join-Path $folder "GOLFOS KIOSK.lnk"))
             if ((Test-Path $electronExe) -and (Test-Path $mainCjs)) {
                 $kioskLnk.TargetPath = $electronExe
@@ -79,6 +88,43 @@ try {
             if ($iconToUse) { $kioskLnk.IconLocation = $iconToUse }
             $kioskLnk.Description = "GOLFOS Unmanned Kiosk"
             $kioskLnk.Save()
+        }
+    }
+} catch {}
+
+# 3a. Unify legacy run_kiosk.bat and Scheduled Tasks (GolfOS_Kiosk_UI / RunKioskNow) to canonical run_kiosk_app.bat
+$legacyRunnerBat = "C:\GolfOS\bin\run_kiosk.bat"
+if (Test-Path $runnerBat) {
+    $shimContent = "@echo off`r`ncall `"$runnerBat`" $kioskUrl`r`n"
+    Set-Content -Path $legacyRunnerBat -Value $shimContent -Encoding ASCII -Force -ErrorAction SilentlyContinue
+}
+foreach ($legacyTask in @("GolfOS_Kiosk_UI", "RunKioskNow", "LaunchKioskNow")) {
+    Unregister-ScheduledTask -TaskName $legacyTask -Confirm:$false -ErrorAction SilentlyContinue
+}
+
+# 3b. Enforce NHN KCP SecureVCAT silent tray mode (POS_SelfYN=N) so standalone payment window never covers Kiosk
+$kcpIniPath = "C:\NHNKCPSecureVCAT\Config\NHNKCPSecureVCAT.ini"
+$kcpExePath = "C:\NHNKCPSecureVCAT\NHNKCPSecureVCAT.exe"
+$legacyCfgPy = "C:\GolfOS\bin\configure_kiosk_vcat.py"
+try {
+    if (Test-Path $legacyCfgPy) {
+        $pyRaw = [System.IO.File]::ReadAllText($legacyCfgPy, [System.Text.Encoding]::UTF8)
+        if ($pyRaw -match "POS_SelfYN=Y") {
+            $pyFixed = $pyRaw -replace "POS_SelfYN=Y", "POS_SelfYN=N"
+            [System.IO.File]::WriteAllText($legacyCfgPy, $pyFixed, [System.Text.Encoding]::UTF8)
+        }
+    }
+    if (Test-Path $kcpIniPath) {
+        $cp949 = [System.Text.Encoding]::GetEncoding(949)
+        $iniRaw = [System.IO.File]::ReadAllText($kcpIniPath, $cp949)
+        if ($iniRaw -match "(?m)^POS_SelfYN\s*=\s*Y") {
+            $iniFixed = [regex]::Replace($iniRaw, "(?m)^POS_SelfYN\s*=\s*Y", "POS_SelfYN=N")
+            [System.IO.File]::WriteAllText($kcpIniPath, $iniFixed, $cp949)
+            Stop-Process -Name "NHNKCPSecureVCAT" -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 500
+            if (Test-Path $kcpExePath) {
+                Start-Process -FilePath $kcpExePath -WorkingDirectory "C:\NHNKCPSecureVCAT" -ErrorAction SilentlyContinue
+            }
         }
     }
 } catch {}

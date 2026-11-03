@@ -378,12 +378,22 @@ body {
   font-weight: 700;
   font-size: 20px;
   box-shadow: 0 10px 25px rgba(16, 185, 129, 0.4);
-  z-index: 1000;
+  z-index: 100001;
   border: 1px solid rgba(255,255,255,0.2);
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   animation: fadeInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kiosk-toast.error {
+  background: rgba(239, 68, 68, 0.95);
+  box-shadow: 0 10px 25px rgba(239, 68, 68, 0.4);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @keyframes fadeInUp {

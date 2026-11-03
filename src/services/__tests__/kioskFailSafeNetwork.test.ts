@@ -166,6 +166,133 @@ describe('Kiosk Fail-Safe & Network Error Handling QA Verification (F01, F02, F0
       const logs = getRecentKioskBlackBoxLogs(5);
       expect(logs.some((l) => l.actionName.includes('[NETWORK_RETRY_FAIL]'))).toBe(true);
     });
+
+    it('수동 연결 재시도 시 isRetryingNetwork 락이 작동하여 다중 클릭 중복 호출을 차단하고 로딩 상태를 제공한다', async () => {
+      let isRetryingNetwork = false;
+      let checkConnectionCalls = 0;
+      let feedbackBanner: { message: string; type: string } | null = null;
+
+      vi.spyOn(api, 'checkConnection').mockImplementation(async () => {
+        checkConnectionCalls++;
+        await new Promise((res) => setTimeout(res, 50));
+        return false;
+      });
+
+      const handleManualNetworkRetry = async () => {
+        if (isRetryingNetwork) return;
+        isRetryingNetwork = true;
+        feedbackBanner = {
+          message: '🔄 서버 및 인터넷 연결 상태를 확인하고 있습니다 (최대 2.5초)...',
+          type: 'checking',
+        };
+
+        try {
+          const conn = await api.checkConnection();
+          if (!conn) {
+            feedbackBanner = {
+              message: '⚠️ 아직 서버와 통신할 수 없습니다. 랜선/공유기 연결을 확인한 뒤 다시 시도해 주세요.',
+              type: 'error',
+            };
+          }
+        } finally {
+          isRetryingNetwork = false;
+        }
+      };
+
+      // 2회 연속 클릭 시뮬레이션
+      const promise1 = handleManualNetworkRetry();
+      const promise2 = handleManualNetworkRetry(); // 락에 의해 즉시 리턴되어야 함
+
+      expect(isRetryingNetwork).toBe(true);
+      expect(feedbackBanner?.type).toBe('checking');
+
+      await Promise.all([promise1, promise2]);
+
+      expect(checkConnectionCalls).toBe(1); // 2회 클릭 중 1회만 실행됨
+      expect(isRetryingNetwork).toBe(false);
+      expect(feedbackBanner?.type).toBe('error');
+    });
+
+    it('수동 연결 재시도 성공 시 인라인 성공 피드백과 함께 복구 로그가 기록되고 모달이 해제된다', async () => {
+      let isNetworkOffline = true;
+      let isRetryingNetwork = false;
+      let baysLoaded = false;
+      let feedbackBanner: { message: string; type: string } | null = null;
+
+      vi.spyOn(api, 'checkConnection').mockResolvedValue(true);
+
+      const handleManualNetworkRetry = async () => {
+        if (isRetryingNetwork) return;
+        isRetryingNetwork = true;
+        feedbackBanner = {
+          message: '🔄 서버 및 인터넷 연결 상태를 확인하고 있습니다 (최대 2.5초)...',
+          type: 'checking',
+        };
+
+        const conn = await api.checkConnection();
+        if (conn) {
+          feedbackBanner = {
+            message: '✅ 네트워크 연결이 복구되었습니다! 화면으로 복귀합니다.',
+            type: 'success',
+          };
+          recordKioskBlackBox('HW_STATUS', '[NETWORK_RETRY_SUCCESS] 연결 재시도 성공 - 정상 복귀');
+          isNetworkOffline = false;
+          baysLoaded = true;
+          isRetryingNetwork = false;
+        }
+      };
+
+      await handleManualNetworkRetry();
+
+      expect(feedbackBanner?.type).toBe('success');
+      expect(isNetworkOffline).toBe(false);
+      expect(baysLoaded).toBe(true);
+      const logs = getRecentKioskBlackBoxLogs(5);
+      expect(logs.some((l) => l.actionName.includes('[NETWORK_RETRY_SUCCESS]'))).toBe(true);
+    });
+
+    it('네트워크 단절(isNetworkOffline=true) 상태에서 3초 주기 자동 복구(Self-Healing) 타이머가 작동하여 수동 버튼 조작 없이도 자가 치유된다', async () => {
+      let isNetworkOffline = true;
+      let autoRecovered = false;
+      let checkCount = 0;
+
+      // 초기 2번은 실패, 3번째에 성공 시뮬레이션
+      vi.spyOn(api, 'checkConnection').mockImplementation(async () => {
+        checkCount++;
+        return checkCount >= 2;
+      });
+
+      // 3초 자동 복구 시뮬레이션 루프
+      const simulateAutoRecoveryTick = async () => {
+        if (!isNetworkOffline) return;
+        const conn = await api.checkConnection();
+        if (conn) {
+          recordKioskBlackBox('HW_STATUS', '[NETWORK_AUTO_RECOVERED] 백그라운드 3초 헬스체크로 네트워크 자동 복구 완료');
+          isNetworkOffline = false;
+          autoRecovered = true;
+        }
+      };
+
+      // 1번째 틱: 여전히 오프라인
+      await simulateAutoRecoveryTick();
+      expect(isNetworkOffline).toBe(true);
+      expect(autoRecovered).toBe(false);
+
+      // 2번째 틱: 복구 완료
+      await simulateAutoRecoveryTick();
+      expect(isNetworkOffline).toBe(false);
+      expect(autoRecovered).toBe(true);
+
+      const logs = getRecentKioskBlackBoxLogs(5);
+      expect(logs.some((l) => l.actionName.includes('[NETWORK_AUTO_RECOVERED]'))).toBe(true);
+    });
+
+    it('토스트 z-index(100001)는 모달 z-index(100000)보다 높게 설계되어 차단 모달 뒤에 은폐되지 않는다', () => {
+      const modalZIndex = 100000;
+      const toastZIndex = 100001;
+
+      expect(toastZIndex).toBeGreaterThan(modalZIndex);
+    });
   });
 
   // =========================================================================

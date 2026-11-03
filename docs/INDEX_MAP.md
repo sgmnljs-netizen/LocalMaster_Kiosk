@@ -1,6 +1,6 @@
 # 🗺️ LocalMaster Kiosk (`LocalMaster_Kiosk`) 단일 진실 공급원(SSOT) 맵
 
-> **최종 동기화 일자**: 2026-10-31
+> **최종 동기화 일자**: 2026-11-03
 > **포트 규약**: `Port 5179` (Vite React + TypeScript + Electron/Windows Hardware Bridge)
 > **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크
 
@@ -23,7 +23,7 @@
 
 ## 2. 🎨 키오스크 화면 및 핵심 모듈 라우팅 맵 (`src/`)
 
-- **`KioskApp.tsx`**: 최상위 상태 머신 오케스트레이터 (세션 타임아웃/잠금 해제, VAN 실패 시 자동 망취소 `executeAutoReversal` 및 DLQ 보고 `reportGhostCharge`, 타석 배정/구매/라카연장 제어, 중간 빈타석 가용시간 사전 점검, 마감 단축 모달 `closingPromptModal`)
+- **`KioskApp.tsx`**: 최상위 상태 머신 오케스트레이터 (세션 타임아웃/잠금 해제, 네트워크 단절 모달 인라인 피드백 및 3초 주기 무인 자동 복구, VAN 실패 시 자동 망취소 `executeAutoReversal` 및 DLQ 보고 `reportGhostCharge`, 타석 배정/구매/라카연장 제어, 마감 단축 모달 `closingPromptModal`)
 - **`components/IntroScreen.tsx`**: 메인 대기 화면 (실시간 층별 타석 현황 위젯 및 터치 진입)
 - **`components/MainPage/KioskMainDashboard.tsx`**: 7대 표준 기능(예약 체크인, 연습타석 배정, 파3 배정, 상품 구매, 라카 연장, 타석 이동, 회원가입) 27인치 고시인성 대형 타이포 및 풀와이드 필 버튼 메인 허브
 - **`components/TopTeeboxDashboard.tsx` & `MiniTeeboxMonitor.tsx`**: 실제 매장 `floor_no`/`zone_code` 기반 자동 반응형 그리드(`AUTO`: 12석 이하 1줄 대형 / 13석+ 2줄 균등 배분, `COMPACT_1ROW`, `HIDDEN`) 층별 타석 현황판 및 미니 모니터
@@ -39,5 +39,5 @@
 - **`components/PaymentTerminal.tsx`**: 애플 미니멀 중앙 플로팅 시트, 2-Step 결제 확인, 동적 상품 스펙·조건 1줄 요약(`productSpecSummary`), 5만원 이상 할부, 다중 사업자 TID 라우팅 및 쿠폰/포인트 정산
 - **`components/AllocationCompleteModal.tsx` & `PurchaseCompleteModal.tsx` & `ReceiptPrinter.tsx`**: 영수증/타석배정표/라카확인증 3단 분리 서멀 인쇄 (`kioskSlipPrinter.ts`, FIFO 직렬화 큐 및 중복 인쇄 방지)
 - **`utils/kioskProductSpecSummary.ts` & `utils/kioskPurchaseEligibility.ts` & `utils/code128Barcode.ts`**: Exception-Only 상품 옵션·제한 조건 요약 및 일일권 사전 자격 판정 엔진, 구매 직후 즉시 배정 CTA 판별, ISO Code128B 바코드 유틸리티
-- **`components/AdminPinModal.tsx` & `KioskSettingsModal.tsx` & `MaintenanceOverlay.tsx`**: 서버 검증 관리자/엔지니어 PIN(5회 실패 `429` 잠금), 호기별 설정 분리(`kiosk_device_settings:{device_id}`), 2-Tier LAN 원클릭 부트스트랩 및 6종 내장 가상 키보드 설정 모달
+- **`components/AdminPinModal.tsx` & `KioskSettingsModal.tsx` & `MaintenanceOverlay.tsx`**: 서버 검증 관리자/엔지니어 PIN(5회 실패 `429` 잠금), 호기별 설정 분리(`kiosk_device_settings:{device_id}`), 2-Tier LAN 원클릭 부트스트랩, 6종 내장 가상 키보드 및 관리자 전용 키오스크 프로그램 종료(바탕화면 이동)·재실행 제어 모달
 - **`hooks/useKioskHardwareHeartbeat.ts` & `services/hardware/hooks/useHardwareScanner.ts`**: 멀티 VAN 상태 경로(`/vcat`·`/nice`·`/smartro`) 및 `:18080/health` `200 DEGRADED` 프린터 헬스 하트비트, USB HID/브릿지 QR 스캐너 통합 훅
