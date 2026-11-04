@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateBayHardwareState } from '../bayStatusGuard';
+import { evaluateBayHardwareState, isBayTrulyAvailableForKiosk } from '../bayStatusGuard';
+import { sortFloorsDescending, sortFloorsAscending, sortBaysByNumber, formatFloorDisplayLabel } from '../floorUtils';
 import type { Bay } from '../../services/api';
 
 describe('evaluateBayHardwareState - Kiosk Hardware Error & Ball Shortage Guard', () => {
@@ -99,5 +100,46 @@ describe('evaluateBayHardwareState - Kiosk Hardware Error & Ball Shortage Guard'
     expect(resE01.isBlocked).toBe(true);
     expect(resE01.isBallEmpty).toBe(true);
     expect(resE01.shortLabel).toBe('공부족');
+  });
+
+  it('B06: 프런트포스와 1:1 동일하게 세로 층수 배치는 내림차순(3F ➔ 2F ➔ 1F ➔ B1F)이고 타석 번호는 오름차순으로 정렬되며 단일화된 층 라벨(1F/2F/3F)을 생성한다', () => {
+    expect(sortFloorsDescending(['1F', '3F', '2F', 'B1F'])).toEqual(['3F', '2F', '1F', 'B1F']);
+    expect(sortFloorsAscending(['3F', '1F', 'B1F', '2F'])).toEqual(['B1F', '1F', '2F', '3F']);
+    expect(sortBaysByNumber([{ bay_no: 11 }, { bay_no: 2 }, { bay_no: 1 }]).map(b => b.bay_no)).toEqual([1, 2, 11]);
+    expect(formatFloorDisplayLabel('1F')).toBe('1F');
+    expect(formatFloorDisplayLabel('B1F')).toBe('B1F');
+    expect(formatFloorDisplayLabel(2)).toBe('2F');
+  });
+
+  it('B07: isBayTrulyAvailableForKiosk 는 status가 AVAILABLE이어도 점검중(통신오류/공부족/ERROR)·레슨전용·일시정지 타석을 즉시 제외한다', () => {
+    expect(isBayTrulyAvailableForKiosk({ ...baseBay, status: 'AVAILABLE' })).toBe(true);
+    expect(
+      isBayTrulyAvailableForKiosk({
+        ...baseBay,
+        status: 'AVAILABLE',
+        config_json: JSON.stringify({ has_error: true, error_code: 'E02' }),
+      })
+    ).toBe(false);
+    expect(
+      isBayTrulyAvailableForKiosk({
+        ...baseBay,
+        status: 'AVAILABLE',
+        hardware_status: 'ERROR',
+      })
+    ).toBe(false);
+    expect(
+      isBayTrulyAvailableForKiosk({
+        ...baseBay,
+        status: 'AVAILABLE',
+        is_lesson_only: true,
+      })
+    ).toBe(false);
+    expect(
+      isBayTrulyAvailableForKiosk({
+        ...baseBay,
+        status: 'AVAILABLE',
+        is_paused: true,
+      })
+    ).toBe(false);
   });
 });

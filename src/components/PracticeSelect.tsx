@@ -4,7 +4,8 @@ import { api, Bay } from '../services/api';
 import { TopTeeboxDashboard } from './TopTeeboxDashboard';
 import { TeeboxTileCard } from './TeeboxTileCard';
 import { TimeMaster } from '../utils/timeMaster';
-import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
+import { evaluateBayHardwareState, isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
+import { sortFloorsAscending, sortBaysByNumber, formatFloorDisplayLabel } from '../utils/floorUtils';
 
 interface PracticeSelectProps {
   bays: Bay[];
@@ -38,7 +39,15 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   // 연쇄 배정 정밀 시각 안내 정보 상태
   const [chainedInfo, setChainedInfo] = useState<{ startTimeStr: string; minutesWait: number } | null>(null);
   const [allocMode, setAllocMode] = useState<'SINGLE' | 'GROUP'>('SINGLE');
-  const [activeFloor, setActiveFloor] = useState<string>('1F');
+  const [activeFloor, setActiveFloor] = useState<string>(() => {
+    if (initialSelectedBayNo) {
+      const initBay = bays.find(b => b.bay_no === initialSelectedBayNo);
+      if (initBay) {
+        return initBay.floor ? String(initBay.floor) : (initBay.floor_no ? `${initBay.floor_no}F` : '1F');
+      }
+    }
+    return '1F';
+  });
   const [filterChip, setFilterChip] = useState<'ALL' | 'RIGHT' | 'LEFT' | 'GDR' | 'LESSON' | 'AVAILABLE'>('ALL');
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(initialSelectedBayNo || null);
   const [selectedBayNos, setSelectedBayNos] = useState<number[]>(
@@ -96,6 +105,11 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     } else if (initialSelectedBayNo !== null && initialSelectedBayNo !== undefined) {
       setSelectedBayNo(initialSelectedBayNo);
       setSelectedBayNos([initialSelectedBayNo]);
+      const initBay = bays.find(b => b.bay_no === initialSelectedBayNo);
+      if (initBay) {
+        const initFloor = initBay.floor ? String(initBay.floor) : (initBay.floor_no ? `${initBay.floor_no}F` : '1F');
+        setActiveFloor(initFloor);
+      }
     }
     prevInitialBayRef.current = initialSelectedBayNo;
     prevExternalBaysLenRef.current = externalSelectedBayNos?.length || 0;
@@ -153,12 +167,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     return true;
   });
 
-  // practiceBays 데이터로부터 동적으로 존재하는 층 목록 추출 (1F, 2F, 3F 등 문자열 기준 정렬)
-  const floorList = Array.from(new Set(practiceBays.map(b => b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')))).sort((a, b) => {
-    const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
-    const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
-    return numA - numB;
-  });
+  // practiceBays 데이터로부터 동적으로 존재하는 층 목록 추출 (가로 탭: B1F -> 1F -> 2F -> 3F 오름차순)
+  const floorList = sortFloorsAscending(
+    Array.from(new Set(practiceBays.map(b => b.floor ? String(b.floor) : (b.floor_no ? `${b.floor_no}F` : '1F'))))
+  );
 
   // 첫 진입 시 동적으로 추출된 층의 첫 번째 값으로 설정
   useEffect(() => {
@@ -377,6 +389,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         const success = await api.preoccupyBays(nextList);
         if (success) {
           setSelectedBayNos(nextList);
+          const bayFloor = bay.floor ? String(bay.floor) : (bay.floor_no ? `${bay.floor_no}F` : '1F');
+          if (bayFloor !== activeFloor) setActiveFloor(bayFloor);
         } else {
           setErrorMsg(lang === 'KO' ? '선택하신 타석 중 이미 다른 고객님이 선택 중인 타석이 있습니다. 다시 선택해 주세요.' : 'Some selected teeboxes are already being selected. Please choose another teebox.');
         }
@@ -426,8 +440,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     onBaySelected(selectedBayNo, purposeType);
   };
 
-  // 현재 활성 층 타석 필터링 (practiceBays 기준 전면 동적 제외)
-  const floorBays = practiceBays.filter(b => (b.floor || (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor);
+  // 현재 활성 층 타석 필터링 및 타석 번호 오름차순 정렬 (프런트포스와 좌우 위치 1:1 일치)
+  const floorBays = sortBaysByNumber(
+    practiceBays.filter(b => (b.floor ? String(b.floor) : (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor)
+  );
   const filteredBays = floorBays.filter(b => {
     const stCode = String((b as any).status_info?.code || b.status || '').toUpperCase();
     const h = String(b.handedness || (b.type === 'LEFT' ? 'LEFT' : 'RIGHT')).toUpperCase();
@@ -440,18 +456,14 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     if (filterChip === 'GDR') return String(b.simulator_type || '').toUpperCase() === 'GDR_PLUS';
     if (filterChip === 'LESSON') return !!b.is_lesson_only;
     if (filterChip === 'AVAILABLE') {
-      return (stCode === 'AVAILABLE' && !b.is_lesson_only) || selectedBayNo === b.bay_no || selectedBayNos.includes(b.bay_no);
+      return isBayTrulyAvailableForKiosk(b) || selectedBayNo === b.bay_no || selectedBayNos.includes(b.bay_no);
     }
     return true;
   });
 
   // ⚡ 빠른 자동 선택 핸들러 (현재 필터/층 우선 -> 전체 층 빈 타석 탐색)
   const handleQuickAutoSelect = async () => {
-    const isQuickAssignable = (b: Bay) => {
-      const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-      return st === 'AVAILABLE' && (b as any).is_active !== false && !b.is_lesson_only && !evaluateBayHardwareState(b).isBlocked;
-    };
-    const candidate = filteredBays.find(isQuickAssignable) || practiceBays.find(isQuickAssignable);
+    const candidate = filteredBays.find(isBayTrulyAvailableForKiosk) || practiceBays.find(isBayTrulyAvailableForKiosk);
     if (!candidate) {
       setErrorMsg(
         lang === 'KO'
@@ -627,30 +639,67 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         {/* 층 전환 iOS Segmented Control 탭바 & 퀵 필터 칩 바 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '12px' }}>
-            <div style={{ display: 'flex', padding: '4px', borderRadius: '16px', background: '#f4f4f5', gap: '4px', flexWrap: 'nowrap', overflowX: 'auto', border: '1px solid #e4e4e7' }}>
+            <div
+              style={{
+                display: 'flex',
+                padding: '6px',
+                borderRadius: '20px',
+                background: '#f1f5f9',
+                gap: '8px',
+                flexWrap: 'nowrap',
+                overflowX: 'auto',
+                border: '1.5px solid #e2e8f0',
+                boxShadow: 'inset 0 2px 4px rgba(15, 23, 42, 0.04)',
+              }}
+            >
               {floorList.map(f => {
+                const isFloorActive = activeFloor === f;
+
                 return (
                   <button
                     key={f}
+                    type="button"
                     onClick={() => setActiveFloor(f)}
                     style={{
-                      minWidth: '120px',
-                      padding: '10px 24px',
-                      fontSize: '18px',
-                      fontWeight: 800,
-                      borderRadius: '12px',
+                      height: '58px',
+                      minWidth: '140px',
+                      padding: '0 28px',
+                      fontSize: '24px',
+                      fontWeight: 900,
+                      borderRadius: '14px',
                       cursor: 'pointer',
-                      color: activeFloor === f ? '#111827' : '#71717a',
-                      background: activeFloor === f ? '#ffffff' : 'transparent',
-                      border: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '10px',
+                      color: isFloorActive ? '#ffffff' : '#334155',
+                      background: isFloorActive
+                        ? 'linear-gradient(145deg, #0f172a 0%, #1e293b 100%)'
+                        : '#ffffff',
+                      border: isFloorActive ? '2px solid #0f172a' : '1.5px solid #cbd5e1',
                       outline: 'none',
-                      boxShadow: activeFloor === f ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+                      boxShadow: isFloorActive
+                        ? '0 8px 20px rgba(15, 23, 42, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.18)'
+                        : '0 2px 6px rgba(15, 23, 42, 0.05)',
                       transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
                       whiteSpace: 'nowrap',
-                      WebkitTapHighlightColor: 'transparent'
+                      letterSpacing: '-0.3px',
+                      WebkitTapHighlightColor: 'transparent',
                     }}
                   >
-                    {f}
+                    {isFloorActive && (
+                      <span
+                        style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          backgroundColor: '#10b981',
+                          boxShadow: '0 0 10px #10b981',
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    <span>{formatFloorDisplayLabel(f)}</span>
                   </button>
                 );
               })}
@@ -662,16 +711,20 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                 onClick={handleQuickAutoSelect}
                 disabled={preoccupyLoading}
                 style={{
-                  padding: '10px 20px',
-                  borderRadius: '14px',
-                  border: '1px solid rgba(5, 150, 105, 0.3)',
+                  height: '58px',
+                  padding: '0 22px',
+                  borderRadius: '16px',
+                  border: '1.5px solid rgba(5, 150, 105, 0.4)',
                   background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
                   color: '#ffffff',
-                  fontSize: '15px',
+                  fontSize: '17px',
                   fontWeight: 800,
                   cursor: preoccupyLoading ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)',
-                  whiteSpace: 'nowrap'
+                  boxShadow: '0 6px 16px rgba(5, 150, 105, 0.25)',
+                  whiteSpace: 'nowrap',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
                 {lang === 'KO' ? '⚡ 빈 타석 자동 선택' : '⚡ Quick Auto-Select'}

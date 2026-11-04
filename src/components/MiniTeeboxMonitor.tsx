@@ -3,6 +3,7 @@ import { Layers } from 'lucide-react';
 import { Bay } from '../services/api';
 import { TimeMaster } from '../utils/timeMaster';
 import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
+import { sortFloorsDescending, sortBaysByNumber } from '../utils/floorUtils';
 
 interface MiniTeeboxMonitorProps {
   bays: Bay[];
@@ -36,10 +37,9 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
     floorsMap[floorKey].push(bay);
   });
 
-  const sortedFloors = Object.keys(floorsMap).sort((a, b) => {
-    const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
-    const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
-    return numA - numB;
+  const sortedFloors = sortFloorsDescending(Object.keys(floorsMap));
+  sortedFloors.forEach(floorKey => {
+    floorsMap[floorKey] = sortBaysByNumber(floorsMap[floorKey]);
   });
 
   const isBayBlocked = (b: Bay) => {

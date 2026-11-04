@@ -54,7 +54,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
       style={{
         position: 'relative',
         borderRadius: '22px',
-        padding: '13px 11px',
+        padding: '12px 9px',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
@@ -431,8 +431,8 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
         </span>
       </div>
 
-      {/* 3. 하단(52px 정보 박스): 상태별 최적화 표출 (1줄 강제 + 클리핑 원천 차단) */}
-      <div style={{ minHeight: '52px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      {/* 3. 하단(58px 정보 박스): 상태별 최적화 표출 (1줄 강제 + 클리핑 원천 차단) */}
+      <div style={{ minHeight: '58px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         {isCurrentMyBay && (
           <div
             style={{
@@ -481,51 +481,137 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
           <div
             style={{
               backgroundColor: isSelected ? 'rgba(255,255,255,0.14)' : '#ffffff',
-              borderRadius: '12px',
-              border: isSelected ? '1.5px solid rgba(255,255,255,0.35)' : '1.5px solid #e2e8f0',
-              boxShadow: isSelected ? 'none' : '0 2px 6px rgba(0,0,0,0.04)',
+              borderRadius: '13px',
+              border: isSelected ? '1.5px solid rgba(255,255,255,0.35)' : '1.5px solid #cbd5e1',
+              boxShadow: isSelected ? 'none' : '0 3px 8px rgba(15, 23, 42, 0.05)',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
               boxSizing: 'border-box',
             }}
           >
-            {/* 상단 2컬럼: 남은 대기 (16px) | 시작 시각 (16px) */}
+            {/* 상단 2컬럼: 남은 대기 (12px 라벨 / 20px 수치) | 시작 시각 (12px 라벨 / 20px 수치) */}
             <div
               style={{
                 display: 'flex',
-                alignItems: 'center',
-                padding: '5px 4px 4px 4px',
+                alignItems: 'stretch',
               }}
             >
-              {/* 좌측: 남은 대기 시간 */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: '10px', fontWeight: 700, color: isSelected ? 'rgba(255,255,255,0.8)' : '#64748b', letterSpacing: '-0.3px', lineHeight: 1, marginBottom: '2px', whiteSpace: 'nowrap' }}>
-                  {lang === 'KO' ? '남은 대기' : 'Wait Time'}
-                </span>
-                <span style={{ fontSize: '16px', fontWeight: 900, color: isSelected ? '#ffffff' : (bay.is_paused ? '#ea580c' : totalRemainingMin <= 15 ? '#d97706' : '#059669'), letterSpacing: '-0.5px', lineHeight: 1, whiteSpace: 'nowrap' }}>
+              {/* 좌측: 남은 대기 시간 (상태별 소프트 틴트 배경으로 우측과 시각적 위계 분리) */}
+              <div
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '6px 3px 5px 3px',
+                  backgroundColor: isSelected
+                    ? 'transparent'
+                    : bay.is_paused
+                    ? 'rgba(255, 237, 213, 0.65)'
+                    : totalRemainingMin <= 15
+                    ? 'rgba(254, 243, 199, 0.55)'
+                    : 'rgba(236, 253, 245, 0.65)',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    color: isSelected
+                      ? 'rgba(255,255,255,0.9)'
+                      : bay.is_paused
+                      ? '#c2410c'
+                      : '#475569',
+                    letterSpacing: '-0.4px',
+                    lineHeight: 1.1,
+                    marginBottom: '2px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {bay.is_paused
-                    ? (totalRemainingMin > 0 ? `${totalRemainingMin}분(정지)` : (lang === 'KO' ? '일시정지' : 'Paused'))
-                    : (totalRemainingMin > 0 ? `${totalRemainingMin}분` : (lang === 'KO' ? '1분 미만' : '< 1m'))}
+                    ? (lang === 'KO' ? '일시 정지' : 'Paused')
+                    : (lang === 'KO' ? '남은 대기' : 'Wait Time')}
+                </span>
+                <span
+                  style={{
+                    fontSize: totalRemainingMin > 0 ? '20px' : '16.5px',
+                    fontWeight: 900,
+                    color: isSelected
+                      ? '#ffffff'
+                      : bay.is_paused
+                      ? '#ea580c'
+                      : totalRemainingMin <= 15
+                      ? '#d97706'
+                      : '#059669',
+                    letterSpacing: '-0.6px',
+                    lineHeight: 1.05,
+                    fontVariantNumeric: 'tabular-nums',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {totalRemainingMin > 0
+                    ? (lang === 'KO' ? `${totalRemainingMin}분` : `${totalRemainingMin}m`)
+                    : (bay.is_paused
+                        ? (lang === 'KO' ? '정지중' : 'Hold')
+                        : (lang === 'KO' ? '1분 미만' : '< 1m'))}
                 </span>
               </div>
 
-              {/* 중앙 1px 정밀 구분선 */}
-              <div style={{ width: '1px', height: '22px', backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#e2e8f0', flexShrink: 0 }} />
+              {/* 중앙 1px 정밀 구분선 (상·하 전체 높이 연결) */}
+              <div
+                style={{
+                  width: '1px',
+                  alignSelf: 'stretch',
+                  backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
+                  flexShrink: 0,
+                }}
+              />
 
-              {/* 우측: 시작 시각 */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: '10px', fontWeight: 700, color: isSelected ? 'rgba(255,255,255,0.8)' : '#64748b', letterSpacing: '-0.3px', lineHeight: 1, marginBottom: '2px', whiteSpace: 'nowrap' }}>
+              {/* 우측: 시작 시각 (순백색 배경 고대비) */}
+              <div
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '6px 3px 5px 3px',
+                  backgroundColor: isSelected ? 'transparent' : '#ffffff',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    color: isSelected ? 'rgba(255,255,255,0.9)' : '#475569',
+                    letterSpacing: '-0.4px',
+                    lineHeight: 1.1,
+                    marginBottom: '2px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {lang === 'KO' ? '시작 시각' : 'Start At'}
                 </span>
-                <span style={{ fontSize: '16px', fontWeight: 900, color: isSelected ? '#ffffff' : (bay.is_paused ? '#ea580c' : '#1e293b'), letterSpacing: '-0.5px', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                <span
+                  style={{
+                    fontSize: bay.is_paused ? '16.5px' : '20px',
+                    fontWeight: 900,
+                    color: isSelected ? '#ffffff' : (bay.is_paused ? '#ea580c' : '#0f172a'),
+                    letterSpacing: '-0.6px',
+                    lineHeight: 1.05,
+                    fontVariantNumeric: 'tabular-nums',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {bay.is_paused ? (lang === 'KO' ? '볼회수중' : 'Paused') : finalEndTimeStr}
                 </span>
               </div>
             </div>
 
-            {/* 하단 4px 일체형 매립 프로그레스 바 (Graph Bar) */}
-            <div style={{ width: '100%', height: '4px', backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#f1f5f9', overflow: 'hidden' }}>
+            {/* 하단 5px 일체형 매립 프로그레스 바 (Graph Bar) */}
+            <div style={{ width: '100%', height: '5px', backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#f1f5f9', overflow: 'hidden' }}>
               <div
                 style={{
                   width: `${progressPercent}%`,

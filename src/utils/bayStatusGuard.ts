@@ -70,3 +70,19 @@ export function evaluateBayHardwareState(bay: Bay): BayHardwareState {
     errorDetail,
   };
 }
+
+/**
+ * 키오스크에서 실제로 즉시 배정 가능한 정상 빈 타석인지 판별하는 SSOT 헬퍼
+ * - status가 AVAILABLE이더라도 하드웨어 오류/통신단절/볼부족(evaluateBayHardwareState.isBlocked),
+ *   레슨 전용(is_lesson_only), 비활성(is_active === false), 볼회수 일시정지(is_paused)인 타석은 즉시 제외한다.
+ */
+export function isBayTrulyAvailableForKiosk(bay: Bay): boolean {
+  const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+  if (canonicalStatus !== 'AVAILABLE') return false;
+  if ((bay as any).is_active === false) return false;
+  if (Boolean(bay.is_lesson_only)) return false;
+  if (Boolean(bay.is_paused) || Boolean((bay as any).is_global_paused)) return false;
+  if (evaluateBayHardwareState(bay).isBlocked) return false;
+  return true;
+}
+

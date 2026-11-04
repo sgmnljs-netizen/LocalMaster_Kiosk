@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronRight, Hand, Play, ShieldAlert, Sparkles, Tv } from 'lucide-react';
 import { api } from '../services/api';
+import { isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
+import { KioskLiveClock } from './KioskLiveClock';
 
 interface IntroScreenProps {
   onStart: () => void;
@@ -187,6 +189,19 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
 
   return (
     <div className="kiosk-container" style={{ position: 'relative' }} onClick={onStart}>
+      {/* 우측 상단 24시간제 실시간 시계 캡슐 */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '26px',
+          right: '32px',
+          zIndex: 30,
+          pointerEvents: 'none',
+        }}
+      >
+        <KioskLiveClock lang="KO" variant="dark" />
+      </div>
+
       {/* 1. 상단 FHD 광고 영역 (16:9) */}
       <div className="kiosk-ad-area">
         {slides.map((ad, idx) => {
@@ -310,13 +325,7 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
           });
           if (practiceBays.length === 0) return null;
 
-          const isBayAvailable = (b: any) => {
-            const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-            const isBlocked =
-              (b as any).is_active === false ||
-              ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(st);
-            return st === 'AVAILABLE' && !isBlocked;
-          };
+          const isBayAvailable = (b: any) => isBayTrulyAvailableForKiosk(b);
 
           const floorMap: { [key: string]: { total: number; avail: number } } = {};
           practiceBays.forEach(b => {

@@ -1,8 +1,10 @@
 import React from 'react';
 import { CornerUpLeft } from 'lucide-react';
 import { Bay } from '../services/api';
-import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
+import { evaluateBayHardwareState, isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
+import { sortFloorsDescending, sortBaysByNumber } from '../utils/floorUtils';
 import { useKioskSettings, KioskTopDashboardMode } from '../stores/kioskSettings';
+import { KioskLiveClock } from './KioskLiveClock';
 
 interface TopTeeboxDashboardProps {
   bays: Bay[];
@@ -52,23 +54,15 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
     floorsMap[floorKey].push(bay);
   });
 
-  // 층 정렬 ('1F', '2F', '3F' ...)
-  const sortedFloors = Object.keys(floorsMap).sort((a, b) => {
-    const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
-    const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
-    return numA - numB;
+  // 층 정렬: 프런트포스(floorUtils.ts)와 1:1 동일하게 건물 물리 층수 내림차순 배치 (예: 3F 상단 -> 2F 중단 -> 1F 최하단)
+  const sortedFloors = sortFloorsDescending(Object.keys(floorsMap));
+  sortedFloors.forEach(floorKey => {
+    floorsMap[floorKey] = sortBaysByNumber(floorsMap[floorKey]);
   });
 
   const isBayBlocked = (b: Bay) => {
     return evaluateBayHardwareState(b).isBlocked;
   };
-
-  // 전체 이용 가능 타석 계산 (일반 셀프 배정 불가한 레슨 전용 타석 제외)
-  const totalAvailable = practiceBays.filter(b => {
-    const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-    return st === 'AVAILABLE' && !isBayBlocked(b) && !b.is_lesson_only;
-  }).length;
-  const totalPracticeBays = practiceBays.length;
 
   const renderBayCard = (bay: Bay, floorBayCount: number) => {
     const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
@@ -205,50 +199,30 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
       }}
     >
       {/* 헤더 및 통계 요약 (좌측: 타이틀 / 우측: 이용 가능 타석 대형 뱃지 + 우측 상단 Undo2 원형 되돌아가기 버튼) */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1, marginBottom: '18px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1, marginBottom: '18px', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', whiteSpace: 'nowrap', minWidth: 0 }}>
           <span 
             style={{ 
               width: '12px', 
               height: '12px', 
               borderRadius: '50%', 
               background: '#059669',
-              boxShadow: '0 0 10px rgba(5, 150, 105, 0.65)'
+              boxShadow: '0 0 10px rgba(5, 150, 105, 0.65)',
+              flexShrink: 0,
             }} 
             className="animate-pulse-ring"
           />
-          <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.6px', margin: 0 }}>
+          <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.6px', margin: 0, whiteSpace: 'nowrap' }}>
             {lang === 'KO' ? '실시간 타석 종합 현황판' : 'Live Teebox Status'}
           </h2>
-          <span style={{ fontSize: '15px', fontWeight: 700, color: '#64748b', marginLeft: '4px' }}>
+          <span style={{ fontSize: '15px', fontWeight: 700, color: '#64748b', marginLeft: '4px', whiteSpace: 'nowrap' }}>
             {lang === 'KO' ? '· 빈 타석(초록색)을 터치하면 즉시 배정됩니다' : '· Tap a green bay to assign immediately'}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          {/* 잔여 타석 현황 대형 뱃지 */}
-          <div 
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              height: '50px',
-              padding: '0 20px', 
-              borderRadius: '999px', 
-              background: '#ecfdf5',
-              border: '1.5px solid #6ee7b7',
-              boxSizing: 'border-box'
-            }}
-          >
-            <span style={{ fontSize: '18px', color: '#064e3b', fontWeight: 800, marginRight: '10px' }}>
-              {lang === 'KO' ? '이용 가능 타석' : 'Available'}
-            </span>
-            <span style={{ fontSize: '28px', fontWeight: 800, color: '#059669', lineHeight: 1 }}>
-              {totalAvailable}
-            </span>
-            <span style={{ fontSize: '18px', color: '#047857', opacity: 0.75, fontWeight: 800, marginLeft: '4px' }}>
-              / {totalPracticeBays}
-            </span>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+          {/* 우측 상단 실시간 24시간제 시계 (층별 라벨과 중복되는 '이용 가능 타석' 배지 대체) */}
+          <KioskLiveClock lang={lang} variant="header" />
 
           {/* 우측 상단 [↩ CornerUpLeft 되돌아가기] 볼드 원형 버튼 */}
           {onClose && (
@@ -288,10 +262,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
         {sortedFloors.map(floor => {
           const floorBays = floorsMap[floor];
           const bayCount = floorBays.length;
-          const availableCount = floorBays.filter(b => {
-            const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-            return st === 'AVAILABLE' && !isBayBlocked(b) && !b.is_lesson_only;
-          }).length;
+          const availableCount = floorBays.filter(b => isBayTrulyAvailableForKiosk(b)).length;
 
           // 지능형 열 수 산출:
           // - COMPACT_1ROW: 무조건 bayCount 1줄

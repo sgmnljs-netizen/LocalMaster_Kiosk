@@ -6,6 +6,7 @@ import {
   resolveEffectiveAuthMode,
 } from '../../stores/kioskSettings';
 import { api } from '../api';
+import { formatKioskLiveClock } from '../../components/KioskLiveClock';
 
 describe('kioskSettings menu & auth resolver helpers', () => {
   afterEach(() => {
@@ -110,5 +111,18 @@ describe('kioskSettings menu & auth resolver helpers', () => {
     expect(restartFallback.success).toBe(true);
     expect(restartFallback.bridgeHandled).toBe(false);
     expect(restartFallback.action).toBe('RESTART');
+  });
+
+  it('formats 24-hour live clock (MM.DD (요일) HH:mm) consistently in KO and EN', () => {
+    const sampleDate = new Date(2026, 10, 3, 20, 14, 9); // 2026-11-03 (Tue) 20:14:09
+    const ko = formatKioskLiveClock(sampleDate, 'KO');
+    expect(ko.dateLabel).toBe('11.03 (화)');
+    expect(ko.timeLabel).toBe('20:14');
+    expect(ko.hours).toBe('20');
+    expect(ko.minutes).toBe('14');
+
+    const en = formatKioskLiveClock(sampleDate, 'EN');
+    expect(en.dateLabel).toBe('11.03 (Tue)');
+    expect(en.timeLabel).toBe('20:14');
   });
 });

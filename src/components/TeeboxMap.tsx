@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer } from 'lucide-react';
+import { ArrowLeftRight, Check, Compass, ShieldAlert, Timer } from 'lucide-react';
 import { api, Bay, Member } from '../services/api';
 import { TeeboxTileCard } from './TeeboxTileCard';
 import { TimeMaster } from '../utils/timeMaster';
 import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
+import { sortBaysByNumber, formatFloorDisplayLabel } from '../utils/floorUtils';
 
 interface TeeboxMapProps {
   member?: Member | null;
@@ -387,23 +388,25 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     return 1;
   };
 
-  // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출
-  const floorBays = bays.filter(b => {
-    const zCode = String((b as any).zone_code || (b as any).zoneCode || '');
-    if (zCode.toUpperCase() === 'PAR3') return false;
+  // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출 및 타석 번호 오름차순 정렬
+  const floorBays = sortBaysByNumber(
+    bays.filter(b => {
+      const zCode = String((b as any).zone_code || (b as any).zoneCode || '');
+      if (zCode.toUpperCase() === 'PAR3') return false;
 
-    if (selectedZoneIds && selectedZoneIds.length > 0) {
-      const match = selectedZoneIds.some(zid => 
-        String(zid).toUpperCase() === zCode.toUpperCase() || 
-        String(zid).toUpperCase() === String((b as any).category_id || '').toUpperCase()
-      );
-      if (!match) return false;
-    } else if (zCode.toUpperCase() === 'ROOM') {
-      return false;
-    }
+      if (selectedZoneIds && selectedZoneIds.length > 0) {
+        const match = selectedZoneIds.some(zid => 
+          String(zid).toUpperCase() === zCode.toUpperCase() || 
+          String(zid).toUpperCase() === String((b as any).category_id || '').toUpperCase()
+        );
+        if (!match) return false;
+      } else if (zCode.toUpperCase() === 'ROOM') {
+        return false;
+      }
 
-    return getBayFloorNo(b) === activeFloor;
-  });
+      return getBayFloorNo(b) === activeFloor;
+    })
+  );
 
   const availableFloors = Array.from(
     new Set(
@@ -510,36 +513,62 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             style={{
               display: 'flex',
               padding: '6px',
-              borderRadius: '18px',
-              background: '#f5f5f7',
-              border: '1px solid #e5e5ea',
-              gap: '4px'
+              borderRadius: '20px',
+              background: '#f1f5f9',
+              border: '1.5px solid #e2e8f0',
+              gap: '8px',
+              boxShadow: 'inset 0 2px 4px rgba(15, 23, 42, 0.04)',
             }}
           >
-            {floorTabs.map(f => (
-              <button
-                key={f}
-                onClick={() => setActiveFloor(f)}
-                style={{
-                  padding: '10px 24px',
-                  fontSize: '16px',
-                  fontWeight: 800,
-                  borderRadius: '14px',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: activeFloor === f ? '#ffffff' : '#86868b',
-                  background: activeFloor === f ? '#1d1d1f' : 'transparent',
-                  boxShadow: activeFloor === f ? '0 4px 12px rgba(0,0,0,0.12)' : 'none',
-                  transition: 'all 0.2s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <Layers size={16} />
-                {f}층 타석
-              </button>
-            ))}
+            {floorTabs.map(f => {
+              const isFloorActive = activeFloor === f;
+
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setActiveFloor(f)}
+                  style={{
+                    height: '56px',
+                    minWidth: '124px',
+                    padding: '0 24px',
+                    fontSize: '22px',
+                    fontWeight: 900,
+                    borderRadius: '14px',
+                    border: isFloorActive ? '2px solid #0f172a' : '1.5px solid #cbd5e1',
+                    cursor: 'pointer',
+                    color: isFloorActive ? '#ffffff' : '#334155',
+                    background: isFloorActive
+                      ? 'linear-gradient(145deg, #0f172a 0%, #1e293b 100%)'
+                      : '#ffffff',
+                    boxShadow: isFloorActive
+                      ? '0 8px 20px rgba(15, 23, 42, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.18)'
+                      : '0 2px 6px rgba(15, 23, 42, 0.05)',
+                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '10px',
+                    whiteSpace: 'nowrap',
+                    letterSpacing: '-0.3px',
+                  }}
+                >
+                  {isFloorActive && (
+                    <span
+                      style={{
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        backgroundColor: '#10b981',
+                        boxShadow: '0 0 10px #10b981',
+                        flexShrink: 0,
+                      }}
+                    />
+                  )}
+                  <span>{formatFloorDisplayLabel(f)}</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

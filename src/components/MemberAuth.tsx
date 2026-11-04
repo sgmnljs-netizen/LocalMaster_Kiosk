@@ -377,13 +377,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         if (!member.masked_name && member.member_name) {
           member.masked_name = buildMaskedName(member.member_name);
         }
-        setFaceMatchResult(member);
+        // 🛡️ BUG-M06 & 즉시 반응 최적화(0ms): 안면 인식 완료 시 700ms 중간 대기 배너를 생략하고 2차 본인 확인 모달(detectedMember)을 즉각 팝업
+        setFaceMatchResult(null);
         setFaceScanning(false);
-        // 🛡️ BUG-M06: 안면 인식 후에도 오인식/지나가는 행인 자동 결제 방지를 위해 2차 본인 확인 모달(detectedMember)을 거치도록 통일
-        authTimeoutRef.current = setTimeout(() => {
-          setFaceMatchResult(null);
-          setDetectedMember(member);
-        }, 700);
+        setDetectedMember(member);
       } else {
         if (!newController.signal.aborted) {
           setErrorMsg('등록된 안면 정보가 없습니다. 다른 인증 수단(전화번호·스마트태그 등)을 이용해 주세요.');

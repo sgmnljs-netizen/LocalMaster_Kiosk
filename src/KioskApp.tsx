@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { 
   ArrowLeftRight, Calendar, Compass, CreditCard, Clock,
-  KeyRound, RefreshCw, LogOut, ShieldAlert, Sparkles, UserCheck, UserPlus
+  KeyRound, RefreshCw, ShieldAlert, Sparkles, UserCheck, UserPlus
 } from 'lucide-react';
 import { IntroScreen } from './components/IntroScreen';
 import { MemberAuth } from './components/MemberAuth';
@@ -12,6 +12,7 @@ import { LockerExtend } from './components/LockerExtend';
 import { PaymentTerminal } from './components/PaymentTerminal';
 import { Par3Allocation } from './components/Par3Allocation';
 import { TopTeeboxDashboard } from './components/TopTeeboxDashboard';
+import { KioskLiveClock } from './components/KioskLiveClock';
 import { PracticeSelect } from './components/PracticeSelect';
 import { TimeMaster } from './utils/timeMaster';
 import { CompanionSetupModal, CompanionTargetItem } from './components/CompanionSetupModal';
@@ -878,6 +879,20 @@ export default function KioskApp() {
     return () => clearInterval(heartbeatInterval);
   }, [step, selectedBayNo, selectedBayNos]);
 
+  // 🔒 [Zero-Residual Ephemeral Auth Guard]
+  // 공용 무인 키오스크에서 앞 고객의 인증 세션(authMember)이 메인/대기/타석선택 화면에 잔류하여
+  // 뒷사람이 오배정·결제하는 사고를 원천 차단 (일회성 트랜잭션 모달 이탈 시 즉시 자동 파기)
+  useEffect(() => {
+    if (!authMember) return;
+    if (step === 'INTRO' || step === 'MAIN_DASHBOARD') {
+      setAuthMember(null);
+      return;
+    }
+    if (step === 'PRACTICE_SELECT' && !showCompanionModal && !keepAuthAfterPurchaseRef.current) {
+      setAuthMember(null);
+    }
+  }, [step, authMember, showCompanionModal]);
+
   // 행위 완료 후 메인화면(MAIN_DASHBOARD)으로 세션 초기화 복귀
   const handleLogoutToHome = () => {
     resetKioskSessionState('MAIN_DASHBOARD');
@@ -933,6 +948,8 @@ export default function KioskApp() {
     } else if (purpose === 'EXTEND_LOCKER') {
       setStep('LOCKER_EXTEND');
     } else {
+      keepAuthAfterPurchaseRef.current = false;
+      setAuthMember(null);
       setStep('PRACTICE_SELECT');
     }
   };
@@ -1012,6 +1029,9 @@ export default function KioskApp() {
           setSelectedBayNo(null);
           selectedBayNoRef.current = null;
         }
+        authReturnStepRef.current = null;
+        keepAuthAfterPurchaseRef.current = false;
+        setAuthMember(null);
         setStep('PRACTICE_SELECT');
         return;
       }
@@ -1428,9 +1448,12 @@ export default function KioskApp() {
   const handleGroupBaySelected = (bayNos: number[]) => {
     setSelectedBayNos(bayNos);
     setPurpose('ALLOCATE_MEMBERSHIP');
-    if (authMember) {
+    if (keepAuthAfterPurchaseRef.current && authMember) {
+      keepAuthAfterPurchaseRef.current = false;
       setShowCompanionModal(true);
     } else {
+      keepAuthAfterPurchaseRef.current = false;
+      setAuthMember(null);
       setInitialAuthMode('FACE');
       setStep('MEMBER_AUTH');
     }
@@ -2358,8 +2381,8 @@ export default function KioskApp() {
             }}
           >
             
-            {/* 최상단 지점 및 세션 네비게이션 헤더 */}
-            {(step === 'MAIN_DASHBOARD' || authMember) && (
+            {/* 최상단 지점 및 세션 네비게이션 헤더 (전역 회원 배너는 공용 키오스크 오배정 사고 방지를 위해 제거하고, 각 세부 모달 내부에서 일회성으로만 표출) */}
+            {step !== 'PRACTICE_SELECT' && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 {step === 'MAIN_DASHBOARD' ? (
                   <div 
@@ -2386,45 +2409,12 @@ export default function KioskApp() {
                   <div />
                 )}
 
-                {/* 현재 로그인 회원 카드 요약 */}
-                {authMember && (
-                  <div 
-                    className="glass-panel" 
-                    style={{ 
-                      padding: '12px 24px', 
-                      borderRadius: '24px', 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: '14px',
-                      border: '1.5px solid rgba(52, 199, 89, 0.3)',
-                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.04)'
-                    }}
-                  >
-                    <UserCheck size={22} style={{ color: '#0071e3' }} />
-                    <span style={{ fontSize: '20px', fontWeight: 800 }}>
-                      <strong style={{ color: '#0071e3' }}>{authMember.member_name}</strong> 회원님
-                    </span>
-                    <button 
-                      onClick={handleLogout}
-                      style={{
-                        background: 'rgba(255, 59, 48, 0.1)',
-                        border: '1px solid rgba(255, 59, 48, 0.3)',
-                        color: 'var(--neon-red)',
-                        padding: '8px 18px',
-                        borderRadius: '18px',
-                        fontSize: '16px',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <LogOut size={16} />
-                      종료
-                    </button>
-                  </div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {/* 타석현황판(TopTeeboxDashboard)이 미노출되는 서브 화면 또는 HIDDEN 모드일 때만 상단 네비게이션 바 우측에 시계 표시 */}
+                  {(step !== 'MAIN_DASHBOARD' || settings.topDashboardMode === 'HIDDEN') && (
+                    <KioskLiveClock lang={lang} variant="compact" />
+                  )}
+                </div>
               </div>
             )}
 
@@ -2765,6 +2755,9 @@ export default function KioskApp() {
                 onConfirm={handleCompanionConfirm}
                 onCancel={() => {
                   setShowCompanionModal(false);
+                  keepAuthAfterPurchaseRef.current = false;
+                  setAuthMember(null);
+                  setCompanionTargets([]);
                   api.releaseBays(selectedBayNos).catch(console.error);
                   setSelectedBayNos([]);
                   selectedBayNosRef.current = [];
@@ -2796,6 +2789,8 @@ export default function KioskApp() {
                   onBaySelected={handleBaySelected}
                   onCancel={handleGoHome}
                   onGoPractice={() => {
+                    keepAuthAfterPurchaseRef.current = false;
+                    setAuthMember(null);
                     setPurpose('ALLOCATE_DAILY');
                     setStep('PRACTICE_SELECT');
                   }}
@@ -2876,6 +2871,9 @@ export default function KioskApp() {
                           setSelectedBayNo(null);
                           selectedBayNoRef.current = null;
                         }
+                        authReturnStepRef.current = null;
+                        keepAuthAfterPurchaseRef.current = false;
+                        setAuthMember(null);
                         setStep('PRACTICE_SELECT');
                       }}
                     />
@@ -3026,6 +3024,7 @@ export default function KioskApp() {
                 onConfirm={(assetId) => handleAssetSelected(assetId)}
                 onCancel={() => {
                   setSelectedAssetId(null);
+                  keepAuthAfterPurchaseRef.current = false;
                   setAuthMember(null);
                   const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
                   if (bayToRelease !== null) {
@@ -3036,6 +3035,7 @@ export default function KioskApp() {
                   setStep('PRACTICE_SELECT');
                 }}
                 onSwitchToDaily={() => {
+                  keepAuthAfterPurchaseRef.current = false;
                   setPurpose('ALLOCATE_DAILY');
                   setStep('PRODUCT_SHOP');
                 }}

@@ -1,6 +1,6 @@
 # 🗺️ LocalMaster Kiosk (`LocalMaster_Kiosk`) 단일 진실 공급원(SSOT) 맵
 
-> **최종 동기화 일자**: 2026-11-03
+> **최종 동기화 일자**: 2026-11-04
 > **포트 규약**: `Port 5179` (Vite React + TypeScript + Electron/Windows Hardware Bridge)
 > **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크
 
@@ -26,11 +26,11 @@
 - **`KioskApp.tsx`**: 최상위 상태 머신 오케스트레이터 (세션 타임아웃/잠금 해제, 네트워크 단절 모달 인라인 피드백 및 3초 주기 무인 자동 복구, VAN 실패 시 자동 망취소 `executeAutoReversal` 및 DLQ 보고 `reportGhostCharge`, 타석 배정/구매/라카연장 제어, 마감 단축 모달 `closingPromptModal`)
 - **`components/IntroScreen.tsx`**: 메인 대기 화면 (실시간 층별 타석 현황 위젯 및 터치 진입)
 - **`components/MainPage/KioskMainDashboard.tsx`**: 7대 표준 기능(예약 체크인, 연습타석 배정, 파3 배정, 상품 구매, 라카 연장, 타석 이동, 회원가입) 27인치 고시인성 대형 타이포 및 풀와이드 필 버튼 메인 허브
-- **`components/TopTeeboxDashboard.tsx` & `MiniTeeboxMonitor.tsx`**: 실제 매장 `floor_no`/`zone_code` 기반 자동 반응형 그리드(`AUTO`: 12석 이하 1줄 대형 / 13석+ 2줄 균등 배분, `COMPACT_1ROW`, `HIDDEN`) 층별 타석 현황판 및 미니 모니터
+- **`components/TopTeeboxDashboard.tsx` & `MiniTeeboxMonitor.tsx` & `KioskLiveClock.tsx` & `utils/floorUtils.ts`**: 프런트포스 1:1 물리 층수 내림차순(`3F ➔ 2F ➔ 1F`, `sortFloorsDescending`) 반응형 타석 현황판 및 우측 상단 24시간제(`MM.DD (요일) | HH:mm`) 실시간 시계
 - **`components/MemberAuth.tsx`**: `010-` 고정 휴대폰 뒷 8자리 필수 입력(가족 중복 번호 마스킹 후보 선택 `409`) / 전체번호 / QR·바코드 / 스마트태그(`authenticateSmartTag`, 본인 확인 모달 20초 자동 파기 및 레이스 방어) 회원 인증
 - **`components/MemberRegister.tsx` & `VirtualKeyboard.tsx`**: 30초 즉석 회원가입 및 4대 다중 모드(`HANGUL_NAME` 두벌식 한글·`COUPON_CODE`·`ASCII_TEXT` URL 칩·`NUMERIC`) 공용 가상 키보드(`computeVirtualKeyboardTop`, 약관 동의, 안면인식 연동)
 - **`components/CheckinSelect.tsx`**: 당일 예약 내역 조회 및 당일 상시 체크인(시작 시각 전 얼리 체크인 `CHK` 확정 & 정시 자동 기동 예약, 시작 시각 도래 시 즉시 `CoreEngine.check_in_and_start` 물리 타석 기동)
-- **`components/PracticeSelect.tsx` & `TeeboxMap.tsx` & `TeeboxTileCard.tsx`**: 층별 타석 맵 및 셀프 타석 이동 TeeboxTileCard SSOT 일원화, 내 타석 에메랄드 보전, 잔여시간/진행바 온전 가시화, 미보유 전용 뷰 및 수직 중앙 플로팅
+- **`components/PracticeSelect.tsx` & `TeeboxMap.tsx` & `TeeboxTileCard.tsx` & `utils/bayStatusGuard.ts`**: 층별 타석 맵 및 셀프 타석 이동 TeeboxTileCard 일원화, `isBayTrulyAvailableForKiosk` 기기 점검·공부족·일시정지 제외 순수 가용 필터, 내 타석 에메랄드 보전, 잔여시간/진행바 온전 가시화, 미보유 전용 뷰 및 수직 중앙 플로팅
 - **`components/AssetSelectModal.tsx`**: 보유 이용권 선택 모달 (실제 신용카드 황금비 1.58:1 가로 2열 나란히 덱, 플래티넘 스마트 IC 칩, 1회 배정시간 뱃지, 한글 유효기간 풀 표기, [✔ 선택됨] 에메랄드 림)
 - **`components/CompanionSetupModal.tsx` & `ChainedBookingModal.tsx`**: 그룹 동반자(대표자 횟수권 잔여 횟수 초과 중복 배정 차단 vs 일일권 결제) 설정 및 연속 예약(Chained Booking)
 - **`components/Par3Allocation.tsx`**: 파3 코스/티타임 선택, 보유 이용권 실시간 차감, 다중 사업자 `resolveTerminalRoute` `422` Fail-Fast 차단, 결제 중 이탈 잠금(`onVanBusyChange`) 및 WAL/망취소/DLQ 연동

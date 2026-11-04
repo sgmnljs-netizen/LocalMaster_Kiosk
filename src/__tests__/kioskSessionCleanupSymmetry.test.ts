@@ -147,4 +147,37 @@ describe('7순위: Kiosk Session Reset 3-Way Symmetry (handleLogout / handleLogo
     expect(kioskAppSrc).toContain('pauseCountdown={Boolean(hwFailAlert)}');
     expect(allocModalSrc).toContain('if (isPrinting || pauseCountdown) return;');
   });
+
+  it('6. Zero-Residual Ephemeral Auth Guard: leaving PRODUCT_SHOP (ALLOCATE_DAILY), PAYMENT, or CompanionSetupModal immediately clears authMember and omits persistent top-bar member logout pill', () => {
+    // 1) handlePaymentCancel clears authMember when returning to PRACTICE_SELECT
+    const payCancelStart = kioskAppSrc.indexOf('const handlePaymentCancel = async () => {');
+    const payCancelEnd = kioskAppSrc.indexOf('const handleGoHome = () => {', payCancelStart);
+    const payCancelBlock = kioskAppSrc.slice(payCancelStart, payCancelEnd);
+    expect(payCancelBlock).toContain('keepAuthAfterPurchaseRef.current = false;');
+    expect(payCancelBlock).toContain('setAuthMember(null);');
+
+    // 2) handleGoBack from PRODUCT_SHOP (ALLOCATE_DAILY) clears authMember
+    const goBackStart = kioskAppSrc.indexOf('const handleGoBack = () => {');
+    const goBackEnd = kioskAppSrc.indexOf('const handleStartKiosk = () => {', goBackStart);
+    const goBackBlock = kioskAppSrc.slice(goBackStart, goBackEnd);
+    const prodShopBackIdx = goBackBlock.indexOf("else if (step === 'PRODUCT_SHOP')");
+    const prodShopBackSlice = goBackBlock.slice(prodShopBackIdx, prodShopBackIdx + 650);
+    expect(prodShopBackSlice).toContain('setAuthMember(null);');
+    expect(prodShopBackSlice).toContain("setStep('PRACTICE_SELECT');");
+
+    // 3) ProductShop (ALLOCATE_DAILY) modal onCancel clears authMember
+    const dailyShopStart = kioskAppSrc.indexOf("purpose === 'ALLOCATE_DAILY' ? (");
+    const dailyShopEnd = kioskAppSrc.indexOf(') : (', dailyShopStart);
+    const dailyShopBlock = kioskAppSrc.slice(dailyShopStart, dailyShopEnd);
+    expect(dailyShopBlock).toContain('setAuthMember(null);');
+
+    // 4) CompanionSetupModal onCancel clears authMember
+    const compModalStart = kioskAppSrc.indexOf('<CompanionSetupModal');
+    const compModalBlock = kioskAppSrc.slice(compModalStart, compModalStart + 900);
+    expect(compModalBlock).toContain('setAuthMember(null);');
+
+    // 5) Automatic step-based Zero-Residual Ephemeral Auth Guard useEffect is active
+    expect(kioskAppSrc).toContain("if (step === 'PRACTICE_SELECT' && !showCompanionModal && !keepAuthAfterPurchaseRef.current)");
+    expect(kioskAppSrc).not.toContain('{authMember.member_name}</strong> 회원님');
+  });
 });
