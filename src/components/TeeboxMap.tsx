@@ -86,13 +86,19 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         IN_USE: 1,
         PREPARE: 2,
         CHK: 3,
+        QUEUE: 3,
+        QUEUED: 3,
+        WAIT: 3,
         RSV: 4,
+        CONFIRMED: 4,
         RESERVED: 4,
+        REQ: 5,
       };
       const practiceReservations = resList
         .filter((r: any) => {
           const st = String(r.status_cd || '').toUpperCase();
           if (!(st in statusPriority)) return false;
+          if (['HOLD', 'UNPAID'].includes(String(r.payment_status || '').toUpperCase())) return false;
           const facType = String(r.facility_type || r.resource_type || 'BAY').toUpperCase();
           if (facType !== 'BAY') return false;
           const catId = String(r.category_id || '').toUpperCase();
@@ -107,8 +113,9 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         });
 
       const activeRes = practiceReservations[0];
-      if (activeRes && activeRes.bay_no) {
-        const matchedBay = bays.find(b => Number(b.bay_no) === Number(activeRes.bay_no));
+      const activeResBayNo = Number(activeRes?.bay_no ?? activeRes?.resource_no ?? 0);
+      if (activeRes && activeResBayNo > 0) {
+        const matchedBay = bays.find(b => Number(b.bay_no) === activeResBayNo);
         const physStatus = String((matchedBay as any)?.status_info?.code || matchedBay?.status || '').toUpperCase();
         const physMemNo = String((matchedBay as any)?.current_member_no || matchedBay?.member_no || '').trim();
         const isPhysicallyOwnedByMe =
@@ -126,7 +133,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           const fallbackMin = Number(matchedBay?.minutes_left ?? 0);
           const durMin = Number((activeRes as any).duration_min ?? fallbackMin) || fallbackMin;
           setFallbackMoveBay({
-            bay_no: Number(activeRes.bay_no),
+            bay_no: activeResBayNo,
             floor_no: matchedBay?.floor_no || 1,
             status: resStatus as any,
             current_member_no: effMemberNo,
@@ -172,7 +179,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     ? (() => {
         const found = bays.find(b => {
           const nextCheckinSt = String((b as any).next_res_checkin_status || '').toUpperCase();
-          if (!['CHK', 'RSV', 'COMPLETED', 'PENDING', 'REQUESTED'].includes(nextCheckinSt)) return false;
+          if (!['CHK', 'RSV', 'CONFIRMED', 'QUEUE', 'QUEUED', 'WAIT', 'REQ', 'COMPLETED', 'PENDING', 'REQUESTED'].includes(nextCheckinSt)) return false;
           const nextMemNo = String((b as any).next_res_member_no || '').trim();
           if (nextMemNo !== '') {
             return Boolean(effMemberNo && nextMemNo === String(effMemberNo).trim());
@@ -211,7 +218,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const calculateRemMin = useCallback((bay: Bay | null | undefined): number => {
     if (!bay) return 0;
     const st = String((bay as any)?.status_info?.code || bay.status || '').toUpperCase();
-    if (['CHK', 'RSV', 'RESERVED'].includes(st)) {
+    if (['CHK', 'RSV', 'CONFIRMED', 'RESERVED', 'QUEUE', 'QUEUED', 'WAIT', 'REQ'].includes(st)) {
       const explicitMin = Number((bay as any).duration_min || bay.minutes_left || 0);
       if (explicitMin > 0) return explicitMin;
     }
@@ -219,7 +226,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   }, []);
 
   const currentBayStatus = String((currentBay as any)?.status_info?.code || currentBay?.status || '').toUpperCase();
-  const isReservedNotStarted = ['CHK', 'RSV', 'RESERVED'].includes(currentBayStatus);
+  const isReservedNotStarted = ['CHK', 'RSV', 'CONFIRMED', 'RESERVED', 'QUEUE', 'QUEUED', 'WAIT', 'REQ'].includes(currentBayStatus);
   const currentRemMin = calculateRemMin(currentBay);
   const isGlobalPaused = Boolean(
     bays.some(b => Boolean((b as any).is_global_paused) || String((b as any).pause_type || '').toUpperCase() === 'GLOBAL')

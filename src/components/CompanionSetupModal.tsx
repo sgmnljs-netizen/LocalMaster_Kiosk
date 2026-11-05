@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UserPlus, Timer, X, AlertCircle, UserCheck } from 'lucide-react';
 import { api, Member, MemberAsset, Bay } from '../services/api';
 import { TimeMaster } from '../utils/timeMaster';
-import { normalizeYmdDigits } from '../utils/kioskPurchaseEligibility';
+import { isKioskChannelProduct, normalizeYmdDigits } from '../utils/kioskPurchaseEligibility';
 import { checkIfKioskDailyProduct, evaluateDailyPassEligibility } from '../utils/kioskProductSpecSummary';
 
 export interface CompanionTargetItem {
@@ -19,6 +19,9 @@ export interface CompanionTargetItem {
   price: number;
   prodCd?: string;
   vatYn?: string;
+  businessUnitType?: string;
+  businessMerchantId?: string;
+  proId?: string | number;
 }
 
 interface CompanionSetupModalProps {
@@ -35,10 +38,15 @@ interface CompanionSetupModalProps {
 export const filterCompanionAssignableAssets = (
   assets: MemberAsset[] = [],
   targetZoneCodeInput?: string | null,
-  todayYmdInput?: string
+  todayYmdInput?: string,
+  targetFloorInput?: number | string | null
 ): MemberAsset[] => {
   const targetZoneCode = (targetZoneCodeInput || 'BAY').toUpperCase();
   const todayDigits = normalizeYmdDigits(todayYmdInput || TimeMaster.getKstYmd(TimeMaster.getSyncedDate()));
+  const parsedFloor = targetFloorInput !== undefined && targetFloorInput !== null && String(targetFloorInput).trim() !== ''
+    ? Number(String(targetFloorInput).toUpperCase().replace(/[^0-9-]/g, ''))
+    : NaN;
+  const targetFloorNo = Number.isFinite(parsedFloor) ? parsedFloor : null;
   return assets.filter((a) => {
     if (a.is_assignable === false) return false;
     const startDigits = normalizeYmdDigits(a.start_date);
@@ -53,6 +61,12 @@ export const filterCompanionAssignableAssets = (
     } else if (a.remain_days !== undefined && a.remain_days !== null && a.remain_days < 0) {
       return false;
     }
+    if (targetFloorNo !== null && Array.isArray(a.allowed_floors) && a.allowed_floors.length > 0) {
+      const allowedFloorNums = a.allowed_floors.map(f => Number(f)).filter(n => Number.isFinite(n));
+      if (allowedFloorNums.length > 0 && !allowedFloorNums.includes(targetFloorNo)) {
+        return false;
+      }
+    }
     if (!a.allowed_categories || a.allowed_categories.length === 0) return true;
     const allowedUpper = a.allowed_categories.map((c: string) => String(c).toUpperCase());
     return allowedUpper.includes(targetZoneCode);
@@ -60,7 +74,8 @@ export const filterCompanionAssignableAssets = (
 };
 
 const getAssignableAssets = (member?: Member | null, bay?: Bay | null) => {
-  return filterCompanionAssignableAssets(member?.assets || [], bay?.zone_code);
+  const bayFloor = bay?.floor_no ?? bay?.floor;
+  return filterCompanionAssignableAssets(member?.assets || [], bay?.zone_code, undefined, bayFloor);
 };
 
 const getFirstAssignableAsset = (member?: Member | null, bay?: Bay | null) => {
@@ -148,7 +163,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
     let mounted = true;
     api.getProducts().then((prods) => {
       if (!mounted || !Array.isArray(prods)) return;
-      const dailyProds = prods.filter((p) => checkIfKioskDailyProduct(p));
+      const dailyProds = prods.filter((p) => isKioskChannelProduct(p) && checkIfKioskDailyProduct(p));
       const refBay =
         bays.find((b) => b.bay_no === selectedBayNos[1]) ||
         bays.find((b) => b.bay_no === selectedBayNos[0]) ||
@@ -164,6 +179,9 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       const matchedDur = Number(matched?.duration_min) > 0 ? Number(matched?.duration_min) : effectiveDurationMin;
       const resolvedProdCd = matched?.prod_cd || undefined;
       const resolvedVatYn = matched?.vat_yn || 'Y';
+      const resolvedUnitType = matched?.business_unit_type || 'MAIN';
+      const resolvedMerchantId = matched?.business_merchant_id || 'MAIN';
+      const resolvedProId = matched?.pro_id ?? undefined;
       if (resolvedProdCd) {
         setDailyProdCd(resolvedProdCd);
       }
@@ -178,6 +196,9 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                   price: resolvedPrice,
                   prodCd: resolvedProdCd,
                   vatYn: resolvedVatYn,
+                  businessUnitType: resolvedUnitType,
+                  businessMerchantId: resolvedMerchantId,
+                  proId: resolvedProId,
                   durationMin: t.durationMin > 0 ? t.durationMin : matchedDur,
                   ticketName: `일일 타석권 ${t.durationMin > 0 ? t.durationMin : matchedDur}분`,
                 }

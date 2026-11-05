@@ -646,4 +646,102 @@ describe('🏛️ 키오스크 애플 미니멀 결제 시트(v6.3) 다각도 �
       expect(activeList[0].benefit_val).toBe(10000);
     });
   });
+
+  // =========================================================================
+  // P-QA-12: 서브 가맹점/프로 TID 동기 라우팅 및 면세(vat=0) 망취소 정합성 검증
+  // =========================================================================
+  describe('P-QA-12 [서브 가맹점/프로 TID 동기 바인딩 & 면세(vat=0) 자동 망취소 정합성 검증]', () => {
+    it('resolveTerminalRoute 응답 직후 첫 번째 결제 요청부터 Stale State 덮어쓰기 없이 전용 TID가 전달되고 면세 망취소 시 vat=0이 보장된다', async () => {
+      vi.spyOn(api, 'resolveTerminalRoute').mockResolvedValue({
+        terminal_id: 'TID-PRO-7777',
+        van_provider: 'KCP_VAN',
+        vcat_port: '9099',
+      });
+
+      const cancelSpy = vi.spyOn(kioskVanClient, 'cancelCardPayment').mockResolvedValue({
+        success: true,
+        auth_code: 'APPR-PRO-01',
+        amount: 300000,
+      });
+
+      const route = await api.resolveTerminalRoute('dev-3', 'PRO_01', 'PRO', 'PRO_01');
+      const effectiveTerminalId = route?.terminal_id || '';
+      expect(effectiveTerminalId).toBe('TID-PRO-7777');
+
+      const revResult = await executeKioskAutoReversal({
+        cardApproval: {
+          success: true,
+          auth_code: 'APPR-PRO-01',
+          amount: 300000,
+          approved_at: '2026-11-05T14:30:00+09:00',
+          terminal_id: effectiveTerminalId,
+          van_tr_no: 'TR-9988',
+          installment_months: 3,
+        },
+        payAmount: 300000,
+        reason: '백엔드 타임아웃 테스트',
+        isTaxFree: true,
+        vat: 0,
+        terminalId: '88010003',
+        memberNo: '10101',
+        prodCd: 'PROD-LESSON-PRO01',
+      });
+
+      expect(revResult.success).toBe(true);
+      expect(cancelSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 300000,
+          orgAuthCode: 'APPR-PRO-01',
+          terminalId: 'TID-PRO-7777',
+          installmentMonths: 3,
+          isTaxFree: true,
+          vat: 0,
+        })
+      );
+    });
+  });
+
+  // =========================================================================
+  // P-QA-13: 라카 연장 0원 결제(POINT/COUPON) approval_no·payment_method 전파 및 WAL 가드 검증
+  // =========================================================================
+  describe('P-QA-13 [라카 연장 0원(POINT/COUPON) 결제 메타데이터 전파 및 WAL 클린업 검증]', () => {
+    it('extendLocker 0원 전액 포인트 결제 시 payment_method=POINT 및 approval_no=POINT-...가 전달되고 WAL에 불필요 적재되지 않는다', async () => {
+      storageMap.clear();
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            success: true,
+            start_date: '2026-11-05',
+            end_date: '2026-12-05',
+            locker_no: '15',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+
+      const res = await api.extendLocker(
+        15,
+        30,
+        0,
+        'RES-LOCKER-01',
+        undefined,
+        0,
+        30000,
+        0,
+        {
+          prodCd: 'PROD-LOCKER-30',
+          apprNo: 'POINT-778899',
+        }
+      );
+
+      expect(res.success).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [, reqInit] = fetchMock.mock.calls[0];
+      const parsedBody = JSON.parse(String(reqInit?.body || '{}'));
+      expect(parsedBody.payment_method).toBe('POINT');
+      expect(parsedBody.approval_no).toBe('POINT-778899');
+      expect(parsedBody.used_points).toBe(30000);
+      expect(storageMap.get('LM_PAYMENT_OUTBOX') || '[]').toBe('[]');
+    });
+  });
 });

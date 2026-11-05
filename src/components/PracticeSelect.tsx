@@ -270,6 +270,15 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
     if (isBlockedStatus) return;
 
+    if (bay.is_paused || bay.is_global_paused) {
+      setErrorMsg(
+        bay.is_global_paused
+          ? (lang === 'KO' ? '현재 매장 전체 볼 수거/점검(일시정지) 중입니다. 잠시 후 이용해 주세요.' : 'All teeboxes are temporarily paused for ball collection.')
+          : (lang === 'KO' ? `${bayNo}번 타석은 현재 일시정지 상태입니다. 다른 타석을 선택해 주세요.` : 'This teebox is currently paused.')
+      );
+      return;
+    }
+
     // 🎓 레슨 전용 타석 일반 셀프 배정 차단 (BUG-P03)
     if (bay.is_lesson_only) {
       setErrorMsg(lang === 'KO' ? '레슨 전용 타석입니다. 일반 연습 배정은 다른 타석을 선택해 주세요.' : 'This teebox is reserved for lessons only.');

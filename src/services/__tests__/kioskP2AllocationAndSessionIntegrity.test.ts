@@ -58,6 +58,7 @@ import {
   CompanionSetupModal,
   filterCompanionAssignableAssets,
 } from '../../components/CompanionSetupModal';
+import { AssetSelectModal } from '../../components/AssetSelectModal';
 import {
   ErrorMessageModal,
   buildErrorModalTimerSessionKey,
@@ -245,5 +246,58 @@ describe('Kiosk P2 Allocation, Membership Asset, Locker & Session Integrity Suit
     );
     expect(html).toContain('통신 지연 안내');
     expect(html.replace(/<!--\s*-->/g, '')).toContain('12초 후 닫힘');
+  });
+
+  it('[P2-6] filterCompanionAssignableAssets filters out floor-restricted assets when target bay floor does not match allowed_floors', () => {
+    const assets: Member['assets'] = [
+      {
+        member_item_id: '701',
+        item_name: '2층 전용 정기권',
+        logic_type: 'PERIOD',
+        rem_count: 0,
+        remain_days: 30,
+        is_assignable: true,
+        allowed_categories: ['BAY'],
+        allowed_floors: [2],
+      },
+      {
+        member_item_id: '702',
+        item_name: '전층 공용 횟수권',
+        logic_type: 'COUNT',
+        rem_count: 5,
+        remain_days: 60,
+        is_assignable: true,
+        allowed_categories: ['BAY'],
+        allowed_floors: [],
+      },
+    ];
+
+    const floor1Assignable = filterCompanionAssignableAssets(assets, 'BAY', '2026-10-31', '1F');
+    expect(floor1Assignable.map((a) => a.member_item_id)).toEqual(['702']);
+
+    const floor2Assignable = filterCompanionAssignableAssets(assets, 'BAY', '2026-10-31', 2);
+    expect(floor2Assignable.map((a) => a.member_item_id)).toEqual(['701', '702']);
+
+    const modalHtml = renderToString(
+      React.createElement(AssetSelectModal, {
+        authMember: {
+          member_no: 'M_FL_01',
+          member_name: '층검증회원',
+          hp: '010-2222-3333',
+          email: '',
+          status_cd: '10',
+          assets,
+        },
+        selectedBayNo: 1,
+        bays: [{ bay_id: 1, bay_no: 1, floor_no: 1, floor: '1F', zone_code: 'BAY', type: 'RIGHT', status: 'AVAILABLE' } as Bay],
+        selectedAssetId: 702,
+        onSelectAsset: () => {},
+        onConfirm: () => {},
+        onCancel: () => {},
+        onSwitchToDaily: () => {},
+        onChangeBay: () => {},
+      })
+    );
+    expect(modalHtml).toContain('2층 전용 이용권입니다.');
   });
 });

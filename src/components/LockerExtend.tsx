@@ -2,6 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { CalendarRange, Check, KeyRound, ShieldAlert } from 'lucide-react';
 import { api, Locker, Member, Product } from '../services/api';
 import { TimeMaster } from '../utils/timeMaster';
+import {
+  evaluateLockerRenewalWindow,
+  isKioskLockerExtensionProduct,
+  resolveLockerExtendDays,
+} from '../utils/kioskPurchaseEligibility';
 
 interface LockerExtendProps {
   member?: Member | null;
@@ -39,6 +44,22 @@ const normalizeGenderCode = (val?: string | null): 'M' | 'F' | '' => {
   if (v === 'M' || v === 'MALE' || v === '남' || v === '남성' || v === '남자') return 'M';
   if (v === 'F' || v === 'FEMALE' || v === '여' || v === '여성' || v === '여자') return 'F';
   return '';
+};
+
+const parseProductJsonSafe = (raw: unknown): Record<string, any> => {
+  if (!raw) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, any>;
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
 };
 
 const getLockerKey = (locker: Locker): string => {
@@ -108,21 +129,9 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
         setSelectedLockerKey(null);
       }
 
-      // 2. 라카 연장 전용 상품 목록 로드 (일일 타석/파3 FACILITY 상품 혼입 차단)
+      // 2. 라카 연장 전용 상품 목록 로드 (주차권 PARKING / 보관함 STORAGE / 단독 보증금 DEPOSIT / 일일 타석·파3 FACILITY 혼입 차단 + KIOSK 판매채널 검증)
       const allProds = await api.getProducts();
-      const lockerProds = allProds.filter(p => {
-        const lt = (p.logic_type || '').toUpperCase();
-        const nm = (p.prod_nm || '').toLowerCase();
-        const cd = (p.prod_cd || '').toUpperCase();
-        if (lt === 'RENTAL') return true;
-        if (nm.includes('라카') || nm.includes('락커') || nm.includes('사물함') || cd.startsWith('LC') || cd.startsWith('RNT')) {
-          return true;
-        }
-        if (lt === 'FACILITY' && (p.days ?? 0) > 0 && !nm.includes('일일') && !nm.includes('당일') && !nm.includes('타석') && !nm.includes('par3') && !nm.includes('파3')) {
-          return true;
-        }
-        return false;
-      });
+      const lockerProds = allProds.filter((p) => isKioskLockerExtensionProduct(p));
       setLockerProducts(lockerProds);
 
     } catch {
@@ -141,7 +150,8 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
 
   // 🛡️ [BUG-L04 FIX] 선택된 라카의 구역(group_id) 및 회원의 성별(gender)에 맞지 않는 상품은 사전 필터링하여 결제 후 망취소 방지
   const visibleLockerProducts = lockerProducts.filter(prod => {
-    const allowedZones = prod.access_rules?.allowed_zones;
+    const rulesObj = parseProductJsonSafe(prod.access_rules);
+    const allowedZones = rulesObj.allowed_zones;
     if (Array.isArray(allowedZones) && allowedZones.length > 0 && selectedLockerObj?.group_id) {
       const normalizedAllowed = allowedZones.map(z => String(z).trim().toUpperCase());
       const lockerGroup = String(selectedLockerObj.group_id).trim().toUpperCase();
@@ -150,7 +160,7 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
       }
     }
     const memberGender = normalizeGenderCode(member?.gender);
-    const prodGender = normalizeGenderCode(prod.access_rules?.restricted_gender || prod.target_gender);
+    const prodGender = normalizeGenderCode(rulesObj.restricted_gender || prod.target_gender);
     if (memberGender && prodGender && memberGender !== prodGender) {
       return false;
     }
@@ -160,6 +170,11 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
   const todayKstYmd = TimeMaster.getKstYmd(new Date());
   const todayDate = parseLocalYmd(todayKstYmd) || new Date();
   todayDate.setHours(0, 0, 0, 0);
+
+  const selectedLockerParsedEnd = parseLocalYmd(selectedLockerObj?.end_dt);
+  const selectedLockerDiffDays = selectedLockerParsedEnd
+    ? Math.round((selectedLockerParsedEnd.getTime() - todayDate.getTime()) / 86400000)
+    : null;
 
   const computeProjectedEndYmd = (locker: Locker | undefined, extendDays: number): { currentYmd: string; nextYmd: string } => {
     const currentYmd = formatYmdDisplay(locker?.end_dt);
@@ -198,6 +213,18 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
       return;
     }
 
+    // 🛡️ [P1-3-B] 어드민 연장 가능 기간(renewal_available_days) 사전 가드
+    const renewalEval = evaluateLockerRenewalWindow(prod, selectedLockerDiffDays, lang);
+    if (!renewalEval.canRenewNow) {
+      setErrorMsg(
+        renewalEval.reasonMessage ||
+          (isEn
+            ? 'This locker is not yet within the renewal window.'
+            : '아직 연장 가능한 기간이 아닙니다.')
+      );
+      return;
+    }
+
     // 🛡️ [BUG-L01 FIX] 다중 라카 보유 시 member.locker_info(첫 번째 라카)가 아닌 사용자가 선택한 라카(selectedObj)를 최우선 참조
     const displayLockerNo = String(
       (selectedObj as any)?.display_no ||
@@ -217,9 +244,10 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
       return;
     }
 
+    const resolvedExtendDays = resolveLockerExtendDays(prod);
     isSubmittingRef.current = true;
     try {
-      await onLockerPaymentTriggered(targetLockerId, prod, prod.days || 30, displayLockerNo || String(targetLockerId));
+      await onLockerPaymentTriggered(targetLockerId, prod, resolvedExtendDays, displayLockerNo || String(targetLockerId));
     } finally {
       isSubmittingRef.current = false;
     }
@@ -436,7 +464,10 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                   <div 
                     key={lockerKey}
                     data-testid={`locker-item-${badgeLabel}`}
-                    onClick={() => setSelectedLockerKey(lockerKey)}
+                    onClick={() => {
+                      setSelectedLockerKey(lockerKey);
+                      setErrorMsg('');
+                    }}
                     style={{
                       padding: '22px 24px',
                       borderRadius: '22px',
@@ -530,8 +561,9 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {visibleLockerProducts.length > 0 ? visibleLockerProducts.map(prod => {
-                const canExtend = myLockers.length > 0;
-                const extendDays = prod.days || 30;
+                const renewalWindow = evaluateLockerRenewalWindow(prod, selectedLockerDiffDays, lang);
+                const canExtend = myLockers.length > 0 && renewalWindow.canRenewNow;
+                const extendDays = resolveLockerExtendDays(prod);
                 const effectivePrice =
                   prod.sale_price !== undefined && prod.sale_price !== null && prod.sale_price > 0
                     ? prod.sale_price
@@ -541,12 +573,13 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                     ? Math.max(0, effectivePrice - Math.round(effectivePrice * (effDiscountRate / 100)))
                     : effectivePrice;
                 const hasSaleDiscount = prod.standard_price > finalPrice;
-                const projected = canExtend ? computeProjectedEndYmd(selectedLockerObj, extendDays) : null;
+                const projected = myLockers.length > 0 ? computeProjectedEndYmd(selectedLockerObj, extendDays) : null;
                 
                 return (
                   <div
                     key={prod.prod_cd}
                     data-testid="locker-prod-card"
+                    data-disabled={canExtend ? 'false' : 'true'}
                     className="locker-product-card"
                     onClick={() => handleExtendClick(prod)}
                     style={{
@@ -555,7 +588,7 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                       background: '#ffffff',
                       border: '1.5px solid #e5e5ea',
                       cursor: canExtend ? 'pointer' : 'not-allowed',
-                      opacity: canExtend ? 1 : 0.6,
+                      opacity: canExtend ? 1 : 0.65,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
@@ -579,24 +612,41 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
                       <div style={{ background: '#f5f5f7', padding: '14px', borderRadius: '18px' }}>
-                        <CalendarRange size={30} color="#0071e3" strokeWidth={2} />
+                        <CalendarRange size={30} color={canExtend ? '#0071e3' : '#9ca3af'} strokeWidth={2} />
                       </div>
                       <div>
                         <h4 style={{ fontSize: '24px', fontWeight: 800, color: '#1d1d1f', margin: '0 0 4px 0' }}>
-                          {prod.meta_data?.display_nm || prod.prod_nm}
+                          {prod.display_nm || parseProductJsonSafe(prod.meta_data).display_nm || parseProductJsonSafe(prod.meta_data).short_nm || prod.prod_nm}
                         </h4>
                         <p style={{ fontSize: '18px', color: '#4b5563', margin: 0, fontWeight: 600 }}>
                           {isEn
                             ? `Extend ${extendDays} days${effDiscountRate > 0 ? ` (${effDiscountRate}% grade discount)` : ''}`
                             : `사물함 ${extendDays}일 연장${effDiscountRate > 0 ? ` (${effDiscountRate}% 등급할인 적용)` : ''}`}
                         </p>
-                        {projected && (
+                        {renewalWindow.badgeText ? (
+                          <p
+                            data-testid="locker-renewal-window-badge"
+                            style={{
+                              fontSize: '15px',
+                              color: '#ea580c',
+                              background: '#fff7ed',
+                              border: '1px solid #fed7aa',
+                              display: 'inline-block',
+                              padding: '4px 10px',
+                              borderRadius: '8px',
+                              margin: '8px 0 0 0',
+                              fontWeight: 800,
+                            }}
+                          >
+                            ⏳ {renewalWindow.badgeText}
+                          </p>
+                        ) : projected ? (
                           <p style={{ fontSize: '16px', color: '#0071e3', margin: '6px 0 0 0', fontWeight: 800 }}>
                             {isEn
                               ? `New Expiry: ${projected.currentYmd} → ${projected.nextYmd}`
                               : `연장 후 만료예정일: ${projected.currentYmd} → ${projected.nextYmd}`}
                           </p>
-                        )}
+                        ) : null}
                       </div>
                     </div>
 

@@ -7,6 +7,7 @@
  */
 
 import { TimeMaster } from '../utils/timeMaster';
+import { isKioskChannelProduct } from '../utils/kioskPurchaseEligibility';
 import type { CardApprovalResult } from './van/van_types';
 import { getKioskSettings, saveKioskSettings, normalizeApiUrl, hydrateKioskDeviceSettingsFromServer } from '../stores/kioskSettings';
 import {
@@ -54,6 +55,7 @@ export interface MemberAsset {
   logic_type?: string;
   pass_type?: string;
   allowed_categories?: string[];
+  allowed_floors?: number[];
   is_assignable?: boolean;
   unassignable_reason?: string;
 }
@@ -201,6 +203,8 @@ export interface Product {
   target_gender?: string | null;
   access_rules?: Record<string, any> | null;
   rules_detail?: Record<string, any> | null;
+  badge?: string | null;
+  display_nm?: string | null;
   schedule_notice?: string | null;
   bundle_summary?: string[] | null;
   zone_labels?: Record<string, string> | null;
@@ -1677,7 +1681,7 @@ class HybridAPIClient {
     const now = new Date();
     const todayStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     const nowHhMm = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-    const allowedStatuses = ['RSV', 'CONFIRMED', 'WAIT', 'REQ', 'CHK', 'PREPARE', 'USE'];
+    const allowedStatuses = ['RSV', 'CONFIRMED', 'WAIT', 'REQ', 'QUEUE', 'QUEUED', 'CHK', 'PREPARE', 'USE'];
     const reservations = JSON.parse(localStorage.getItem('LM_RESERVATIONS') || '[]') as any[];
     return reservations.filter(r => {
       if (r.member_no !== memberNo) return false;
@@ -2026,7 +2030,13 @@ class HybridAPIClient {
     const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
 
     if (isConnected) {
-      const walId = paymentApproval?.auth_code
+      const isRealBayCardWal =
+        (amount ?? 0) > 0 &&
+        Boolean(paymentApproval?.auth_code) &&
+        !String(paymentApproval?.auth_code).startsWith('FREE-') &&
+        !String(paymentApproval?.auth_code).startsWith('POINT-') &&
+        paymentApproval?.auth_code !== 'MEMBERSHIP';
+      const walId = isRealBayCardWal && paymentApproval?.auth_code
         ? PaymentOutboxManager.recordWalInFlight({
             storeCd,
             terminalId: paymentApproval?.terminal_id || this.getTerminalId(),
@@ -2349,7 +2359,13 @@ class HybridAPIClient {
 
       const totalCardAmount = items.reduce((sum, item) => sum + (item.amount ?? 0), 0);
       const leaderMemberNo = targets[0]?.memberNo || '';
-      const groupWalId = paymentApproval?.auth_code
+      const isRealGroupCardWal =
+        totalCardAmount > 0 &&
+        Boolean(paymentApproval?.auth_code) &&
+        !String(paymentApproval?.auth_code).startsWith('FREE-') &&
+        !String(paymentApproval?.auth_code).startsWith('POINT-') &&
+        paymentApproval?.auth_code !== 'MEMBERSHIP';
+      const groupWalId = isRealGroupCardWal && paymentApproval?.auth_code
         ? PaymentOutboxManager.recordWalInFlight({
             storeCd,
             terminalId: paymentApproval?.terminal_id || this.getTerminalId(),
@@ -2630,6 +2646,8 @@ class HybridAPIClient {
     remain_min?: number;
     start_time?: string;
     end_time?: string;
+    status_cd?: string;
+    auto_checked_in?: boolean;
   }> {
     try {
       const storeCd = this.getStoreCd();
@@ -2664,6 +2682,8 @@ class HybridAPIClient {
           remain_min: data.remain_min,
           start_time: data.start_time,
           end_time: data.end_time,
+          status_cd: data.status_cd,
+          auto_checked_in: Boolean(data.auto_checked_in),
         };
       } else {
         const errData = await res.json().catch(() => ({ detail: `타석 이동에 실패했습니다. (HTTP ${res.status})` }));
@@ -2691,18 +2711,20 @@ class HybridAPIClient {
         });
         if (res.ok) {
           const prods = await res.json();
-          if (Array.isArray(prods) && prods.length > 0) {
-            const normalizedProds: Product[] = prods.map((p: any) => ({
-              ...p,
-              vat_yn: p.vat_yn,
-              tax_rate: p.tax_rate,
-              business_unit_type: p.business_unit_type,
-              business_merchant_id: p.business_merchant_id,
-              pro_id: p.pro_id,
-              total_count: p.total_count,
-              target_gender: p.target_gender || p.access_rules?.restricted_gender || 'ALL',
-              access_rules: p.access_rules,
-            }));
+          if (Array.isArray(prods)) {
+            const normalizedProds: Product[] = prods
+              .filter((p: any) => isKioskChannelProduct(p))
+              .map((p: any) => ({
+                ...p,
+                vat_yn: p.vat_yn,
+                tax_rate: p.tax_rate,
+                business_unit_type: p.business_unit_type,
+                business_merchant_id: p.business_merchant_id,
+                pro_id: p.pro_id,
+                total_count: p.total_count,
+                target_gender: p.target_gender || p.access_rules?.restricted_gender || 'ALL',
+                access_rules: p.access_rules,
+              }));
             localStorage.setItem('LM_PRODUCTS', JSON.stringify(normalizedProds));
             return normalizedProds;
           }
@@ -2711,7 +2733,8 @@ class HybridAPIClient {
         console.error('Failed to fetch kiosk products catalog:', err);
       }
     }
-    return JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]') as Product[];
+    const cachedRaw = JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]') as Product[];
+    return Array.isArray(cachedRaw) ? cachedRaw.filter((p) => isKioskChannelProduct(p)) : [];
   }
 
   // 8. 신규 회원권/일일권 구매 처리
@@ -2770,7 +2793,13 @@ class HybridAPIClient {
     if (isConnected || !isDemoEnvironment()) {
       const effectiveApprNo = apprNo || cardApp?.auth_code || null;
       const effectiveVanTrNo = vanTrNo || cardApp?.van_tr_no || effectiveApprNo || null;
-      const walId = effectiveApprNo
+      const isRealPurchaseCardWal =
+        payAmt > 0 &&
+        Boolean(effectiveApprNo) &&
+        !String(effectiveApprNo).startsWith('FREE-') &&
+        !String(effectiveApprNo).startsWith('POINT-') &&
+        effectiveApprNo !== 'MEMBERSHIP';
+      const walId = isRealPurchaseCardWal && effectiveApprNo
         ? PaymentOutboxManager.recordWalInFlight({
             storeCd,
             terminalId: extraPaymentInfo?.terminalId || cardApp?.terminal_id || this.getTerminalId(),
@@ -3024,10 +3053,11 @@ class HybridAPIClient {
       usedPoints?: number;
       gradeDiscountAmount?: number;
       prodCd?: string;
+      apprNo?: string;
       cardApproval?: Partial<CardApprovalResult>;
     } | number,
     gradeDiscountAmount?: number,
-    cardApprovalArg?: Partial<CardApprovalResult> & { prodCd?: string }
+    cardApprovalArg?: Partial<CardApprovalResult> & { prodCd?: string; apprNo?: string }
   ): Promise<{ success: boolean; message: string; start_date?: string; end_date?: string; locker_no?: string }> {
     if (!resId) {
       return { success: false, message: '라카 연장 예약 번호(resId)가 누락되었습니다.' };
@@ -3039,6 +3069,7 @@ class HybridAPIClient {
           usedPoints: typeof extraOrUsedPoints === 'number' ? extraOrUsedPoints : 0,
           gradeDiscountAmount: gradeDiscountAmount ?? 0,
           prodCd: cardApprovalArg?.prodCd,
+          apprNo: cardApprovalArg?.apprNo,
           cardApproval: cardApprovalArg,
         };
 
@@ -3049,7 +3080,14 @@ class HybridAPIClient {
 
     if (isConnected || !isDemoEnvironment()) {
       const cardApp = extraPaymentInfo?.cardApproval;
-      const lockerWalId = cardApp?.auth_code
+      const effectiveApprNo = cardApp?.auth_code || extraPaymentInfo?.apprNo || null;
+      const isRealLockerCardWal =
+        payAmt > 0 &&
+        Boolean(cardApp?.auth_code) &&
+        !String(cardApp?.auth_code).startsWith('FREE-') &&
+        !String(cardApp?.auth_code).startsWith('POINT-') &&
+        cardApp?.auth_code !== 'MEMBERSHIP';
+      const lockerWalId = isRealLockerCardWal && cardApp?.auth_code
         ? PaymentOutboxManager.recordWalInFlight({
             storeCd: this.getStoreCd(),
             terminalId: cardApp?.terminal_id || this.getTerminalId(),
@@ -3062,6 +3100,10 @@ class HybridAPIClient {
           })
         : null;
       try {
+        const resolvedLockerPayMethod =
+          payAmt === 0
+            ? ((extraPaymentInfo?.usedPoints ?? 0) > 0 ? 'POINT' : 'COUPON')
+            : 'CARD';
         const webhookRes = await fetchWithPaymentRetry(
           `${this.getBaseUrl()}/v1/kiosk/payment-webhook?store_cd=${encodeURIComponent(this.getStoreCd())}`,
           {
@@ -3070,15 +3112,15 @@ class HybridAPIClient {
             body: JSON.stringify({
               res_id: resId,
               amount: payAmt,
-              payment_method: 'CARD',
+              payment_method: resolvedLockerPayMethod,
               terminal_id: cardApp?.terminal_id || this.getTerminalId(),
               coupon_no: couponNo || null,
               coupon_discount: couponDiscount || 0,
               used_points: extraPaymentInfo?.usedPoints ?? 0,
               grade_discount_amount: extraPaymentInfo?.gradeDiscountAmount ?? 0,
               prod_cd: extraPaymentInfo?.prodCd || null,
-              approval_no: cardApp?.auth_code || null,
-              van_tr_no: cardApp?.van_tr_no || cardApp?.auth_code || null,
+              approval_no: effectiveApprNo,
+              van_tr_no: cardApp?.van_tr_no || effectiveApprNo || null,
               card_no_masked: cardApp?.card_no_masked || null,
               issuer_name: cardApp?.issuer_name || null,
               acquirer_name: cardApp?.acquirer_name || null,
@@ -3088,7 +3130,7 @@ class HybridAPIClient {
           },
           {
             label: '라카 연장 결제 확정',
-            idempotencyKey: cardApp?.van_tr_no || cardApp?.auth_code || resId,
+            idempotencyKey: cardApp?.van_tr_no || effectiveApprNo || resId,
           }
         );
         if (!webhookRes.ok) {
@@ -3103,7 +3145,7 @@ class HybridAPIClient {
           return { success: false, message: webhookData.message || '라카 연장 처리에 실패했습니다.' };
         }
         PaymentOutboxManager.removeEntry(lockerWalId);
-        PaymentOutboxManager.removeByAuthCode(cardApp?.auth_code);
+        PaymentOutboxManager.removeByAuthCode(effectiveApprNo || undefined);
         backendStartDate = webhookData?.start_date || webhookData?.start_dt;
         backendEndDate = webhookData?.end_date || webhookData?.end_dt;
         backendLockerNo = webhookData?.locker_no ? String(webhookData.locker_no) : undefined;
@@ -4230,17 +4272,19 @@ class HybridAPIClient {
                 : Array.isArray(cat.items)
                   ? cat.items
                   : [];
-              const normalized = rawItems.map((p: any) => ({
-                ...p,
-                vat_yn: p.vat_yn || 'Y',
-                tax_rate: p.tax_rate ?? 0.1,
-                business_unit_type: p.business_unit_type || 'STORE',
-                business_merchant_id: p.business_merchant_id || null,
-                pro_id: p.pro_id || null,
-                total_count: p.total_count ?? p.count_val ?? 0,
-                target_gender: p.target_gender || p.access_rules?.restricted_gender || 'ALL',
-                access_rules: p.access_rules || null,
-              }));
+              const normalized = rawItems
+                .filter((p: any) => isKioskChannelProduct(p))
+                .map((p: any) => ({
+                  ...p,
+                  vat_yn: p.vat_yn || 'Y',
+                  tax_rate: p.tax_rate ?? 0.1,
+                  business_unit_type: p.business_unit_type || 'STORE',
+                  business_merchant_id: p.business_merchant_id || null,
+                  pro_id: p.pro_id || null,
+                  total_count: p.total_count ?? p.count_val ?? 0,
+                  target_gender: p.target_gender || p.access_rules?.restricted_gender || 'ALL',
+                  access_rules: p.access_rules || null,
+                }));
               return {
                 ...cat,
                 products: normalized,

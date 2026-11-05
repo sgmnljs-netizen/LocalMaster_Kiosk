@@ -427,5 +427,42 @@ describe('Kiosk Move Bay Gates & Security Specialist (M05, M06, M07, M08, M10)',
       expect(res.success).toBe(false);
       expect(res.message).toBe('다른 키오스크 단말기에서 선점하여 결제 진행 중인 타석입니다.');
     });
+
+    it('M11: 사전예약 미사용 매장 대기예약(QUEUE) 빈 타석 이동 시 auto_checked_in 응답 및 HOLD 제외 필터링 검증', async () => {
+      global.fetch = vi.fn().mockImplementation(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          old_bay_no: 1,
+          new_bay_no: 5,
+          remain_min: 60,
+          start_time: '1430',
+          end_time: '1533',
+          status_cd: 'PREPARE',
+          auto_checked_in: true,
+          message: '1번 타석에서 5번 타석으로 이동이 완료되었습니다.',
+        }),
+      }));
+
+      const res = await api.moveBay('M_M11_QUEUE', 5, 1);
+      expect(res.success).toBe(true);
+      expect(res.auto_checked_in).toBe(true);
+      expect(res.status_cd).toBe('PREPARE');
+
+      // Offline fallback filter test: QUEUE included, HOLD excluded
+      vi.spyOn(api, 'checkConnection').mockResolvedValue(false);
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+      localStorage.setItem(
+        'LM_RESERVATIONS',
+        JSON.stringify([
+          { res_id: 'R_Q1', member_no: 'M_M11_QUEUE', status_cd: 'QUEUE', resource_type: 'BAY', resource_no: '1', res_date: todayStr, start_time: '2300', end_time: '2359' },
+          { res_id: 'R_HOLD1', member_no: 'M_M11_QUEUE', status_cd: 'HOLD', resource_type: 'BAY', resource_no: '2', res_date: todayStr, start_time: '2300', end_time: '2359' },
+        ])
+      );
+      const list = await api.getMemberCheckinReservations('M_M11_QUEUE');
+      expect(list.map((r: any) => r.res_id)).toEqual(['R_Q1']);
+    });
   });
 });

@@ -8,6 +8,7 @@ import { kioskVanClient } from '../services/van/van_client';
 import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC, extractKstYyyyMmDd } from '../services/van/adapters/BaseVanAdapter';
 import { PaymentOutboxManager } from '../services/paymentResilience';
 import { useKioskSettings } from '../stores/kioskSettings';
+import { isKioskChannelProduct } from '../utils/kioskPurchaseEligibility';
 
 interface Par3AllocationProps {
   memberNo?: string;
@@ -492,10 +493,12 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   const getMatchedCourseProduct = useCallback((): Product | null => {
     const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;
     const par3Products = products.filter(p =>
-      p.prod_nm.includes('Par3') ||
-      p.prod_nm.includes('파3') ||
-      p.prod_nm.includes('PAR3') ||
-      String(p.logic_type || '').toUpperCase() === 'PAR3'
+      isKioskChannelProduct(p) && (
+        p.prod_nm.includes('Par3') ||
+        p.prod_nm.includes('파3') ||
+        p.prod_nm.includes('PAR3') ||
+        String(p.logic_type || '').toUpperCase() === 'PAR3'
+      )
     );
     if (par3Products.length === 0) return null;
 
@@ -670,7 +673,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       setAuthProgress(50);
       await new Promise((resolve) => setTimeout(resolve, 500));
       setAuthProgress(100);
-      await executeConfirmWebhook(resId, 0, 'MEMBERSHIP_TICKET', undefined, {
+      const hasTicketPlayer = players.some((p) => Boolean(p.use_ticket_id));
+      const zeroPayMethod = hasTicketPlayer ? 'MEMBERSHIP_TICKET' : 'COUPON';
+      await executeConfirmWebhook(resId, 0, zeroPayMethod, undefined, {
         prodCd,
         gradeDiscountAmount: calculateTotalGradeDiscount(),
       });
@@ -681,6 +686,19 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     setAuthProgress(20);
 
     try {
+      // [Layer 1 Pre-Flight Gate] VAN 리더기 활성화 전 백엔드 온라인 가용성 검증
+      if (typeof (api as any).verifyBackendReadyForPayment === 'function') {
+        const preflight = await api.verifyBackendReadyForPayment();
+        if (preflight && preflight.ready === false) {
+          await api.cancelHoldReservation(resId).catch(() => {});
+          currentHoldResIdRef.current = null;
+          fetchSlots();
+          setErrorMsg(preflight.message || '전산 서버와 통신이 원활하지 않아 결제를 시작할 수 없습니다.');
+          resetPaymentState();
+          return;
+        }
+      }
+
       // [C-4] 다중 사업자/서브가맹점 단말기 라우팅(resolveTerminalRoute) 정합 인자 전달 및 422 Fail-Fast 차단
       let routedTerminalId: string | undefined = undefined;
       const businessUnitType = matchedProd?.business_unit_type || 'MAIN';
@@ -779,6 +797,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       }
 
       setAuthProgress(100);
+      const committedPar3Tid = approval.terminal_id || routedTerminalId || settings.terminalId || '';
       await executeConfirmWebhook(
         resId,
         amount,
@@ -786,6 +805,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         approval.card_no_masked,
         {
           ...approval,
+          terminal_id: committedPar3Tid,
           prodCd,
           gradeDiscountAmount: calculateTotalGradeDiscount(),
         }

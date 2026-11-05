@@ -17,8 +17,11 @@ export interface ExecuteAutoReversalParams {
   payAmount: number;
   reason: string;
   isTaxFree?: boolean;
+  vat?: number;
   terminalId?: string;
   storeCd?: string;
+  memberNo?: string | null;
+  prodCd?: string | null;
 }
 
 export interface AutoReversalResult {
@@ -32,7 +35,7 @@ export interface AutoReversalResult {
 export async function executeKioskAutoReversal(
   params: ExecuteAutoReversalParams
 ): Promise<AutoReversalResult> {
-  const { cardApproval, payAmount, reason, isTaxFree = false, terminalId, storeCd } = params;
+  const { cardApproval, payAmount, reason, isTaxFree = false, vat, terminalId, storeCd, memberNo, prodCd } = params;
   const apprStr = String((cardApproval as any)?.apprNo || cardApproval?.auth_code || '');
 
   // 1. 0원 결제, 무료 쿠폰(FREE-), 전액 포인트(POINT-), 회원권(MEMBERSHIP) 등은 망취소 대상 아님
@@ -45,6 +48,9 @@ export async function executeKioskAutoReversal(
     (cardApproval.amount !== undefined && cardApproval.amount <= 0) ||
     payAmount <= 0
   ) {
+    if (apprStr) {
+      PaymentOutboxManager.removeByAuthCode(apprStr);
+    }
     return {
       success: false,
       reversalAttempted: false,
@@ -53,16 +59,20 @@ export async function executeKioskAutoReversal(
   }
 
   // 2. VAN 단말기 망취소 시도 (2-Phase Commit 보상 트랜잭션)
+  const effectiveAmt = payAmount || cardApproval.amount;
+  const effectiveVat = vat !== undefined ? vat : (isTaxFree ? 0 : Math.round(effectiveAmt / 11));
+  const effectiveTid = cardApproval.terminal_id || terminalId;
   try {
     const orgDate = extractKstYyyyMmDd(cardApproval.approved_at);
     const cancelRes = await kioskVanClient.cancelCardPayment({
-      amount: payAmount || cardApproval.amount,
+      amount: effectiveAmt,
       orgAuthCode: cardApproval.auth_code,
       orgApprovedDate: orgDate,
-      terminalId: cardApproval.terminal_id || terminalId,
+      terminalId: effectiveTid,
       vanTrNo: cardApproval.van_tr_no,
       installmentMonths: cardApproval.installment_months || 0,
       isTaxFree,
+      vat: effectiveVat,
       reason: `무인 키오스크 장애: ${reason}`,
     });
 
@@ -80,10 +90,12 @@ export async function executeKioskAutoReversal(
       try {
         const dlqRes = await api.reportGhostCharge({
           store_cd: storeCd,
-          terminalId: cardApproval.terminal_id || terminalId || 'KIOSK-01',
+          member_no: memberNo || undefined,
+          prod_cd: prodCd || undefined,
+          terminalId: effectiveTid || 'KIOSK-01',
           deviceType: 'KIOSK',
           authNo: cardApproval.auth_code,
-          amount: payAmount || cardApproval.amount,
+          amount: effectiveAmt,
           cardName: cardApproval.issuer_name || '',
           cardNoMasked: cardApproval.card_no_masked || '',
           vanTrNo: cardApproval.van_tr_no,
@@ -112,10 +124,12 @@ export async function executeKioskAutoReversal(
     try {
       const dlqRes = await api.reportGhostCharge({
         store_cd: storeCd,
-        terminalId: cardApproval.terminal_id || terminalId || 'KIOSK-01',
+        member_no: memberNo || undefined,
+        prod_cd: prodCd || undefined,
+        terminalId: effectiveTid || 'KIOSK-01',
         deviceType: 'KIOSK',
         authNo: cardApproval.auth_code,
-        amount: payAmount || cardApproval.amount,
+        amount: effectiveAmt,
         cardName: cardApproval.issuer_name || '',
         cardNoMasked: cardApproval.card_no_masked || '',
         vanTrNo: cardApproval.van_tr_no,

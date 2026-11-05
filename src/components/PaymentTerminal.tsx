@@ -477,6 +477,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       ['PRO', 'SUB', 'LESSON', 'FNB'].includes(unitUpper) ||
       (Boolean(businessMerchantId) && businessMerchantId !== 'MAIN') ||
       Boolean(proId);
+    let effectiveTerminalId = activeTerminalId || settings.terminalId;
     if ((api as any).resolveTerminalRoute) {
       try {
         const route = await api.resolveTerminalRoute(
@@ -492,6 +493,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           return;
         }
         if (route.terminal_id) {
+          effectiveTerminalId = route.terminal_id;
           setActiveTerminalId(route.terminal_id);
           kioskVanClient.setConfig({
             provider: String(route.van_provider || settings.providerType || 'KCP').replace('_VAN', '') as any,
@@ -523,17 +525,18 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       vatAmount: vatAmt,
       taxFreeAmount: isTaxFree ? actualPayAmt : 0,
       isTaxFree,
-      terminalId: activeTerminalId || undefined,
+      terminalId: effectiveTerminalId || undefined,
       installmentMonths: effectiveInst,
     });
 
     if (res.success) {
+      const committedTerminalId = res.terminal_id || effectiveTerminalId || settings.terminalId || '';
       // 🛡️ [Layer 4: WAL 선기록] 실물 카드 승인이 떨어지는 즉시 로컬 Outbox에 원거래 WAL 기록
       // 정전/강제종료(장비 OFF)가 800ms 대기 또는 백엔드 전산 등록 도중 발생하더라도 재기동 시 유실 없이 추적 가능
       if (res.auth_code && actualPayAmt > 0) {
         PaymentOutboxManager.recordWalInFlight({
           storeCd: api.getStoreCd(),
-          terminalId: res.terminal_id || activeTerminalId || settings.terminalId || '',
+          terminalId: committedTerminalId,
           authCode: res.auth_code,
           vanTrNo: res.van_tr_no,
           amount: actualPayAmt,
@@ -560,6 +563,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         if (resId) {
           const webhookRes = await api.processPaymentWebhook(resId, actualPayAmt, 'CARD', {
             ...res,
+            terminal_id: committedTerminalId,
             installment_months: res.installment_months ?? effectiveInst,
             couponNo: appliedCoupon?.coupon_no,
             couponDiscount: couponDiscountAmt,
@@ -585,6 +589,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           installmentMonths: res.installment_months ?? effectiveInst,
           cardApproval: {
             ...res,
+            terminal_id: committedTerminalId,
             installment_months: res.installment_months ?? effectiveInst,
           }
         });
@@ -597,7 +602,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             amount: actualPayAmt,
             orgAuthCode: res.auth_code,
             orgApprovedDate: orgDate,
-            terminalId: res.terminal_id,
+            terminalId: committedTerminalId,
             vanTrNo: res.van_tr_no,
             installmentMonths: resolvedInst,
             isTaxFree,
@@ -617,7 +622,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               issuer_name: res.issuer_name || '',
               van_tr_no: res.van_tr_no || '',
               approvedAt: res.approved_at,
-              terminal_id: res.terminal_id || activeTerminalId || settings.terminalId || '',
+              terminal_id: committedTerminalId,
               backendErrorReason: backendReason,
               reversalErrorReason: revReason,
               error_reason: `${backendReason} / Cancel failed: ${revReason}`
@@ -640,7 +645,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             issuer_name: res.issuer_name || '',
             van_tr_no: res.van_tr_no || '',
             approvedAt: res.approved_at,
-            terminal_id: res.terminal_id || activeTerminalId || settings.terminalId || '',
+            terminal_id: committedTerminalId,
             backendErrorReason: backendReason,
             reversalErrorReason: revReason,
             error_reason: `${backendReason} / Cancel exception: ${revReason}`

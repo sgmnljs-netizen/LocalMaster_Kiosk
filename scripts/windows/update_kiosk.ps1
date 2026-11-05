@@ -133,6 +133,12 @@ try {
     }
 } catch {}
 
+# 3c. Terminate unnecessary Windows 11 consumer bloatware on Kiosk Mini-PC
+$bloatProcesses = @("copilotapp", "Copilot", "copilotapphost", "PhoneExperienceHost", "Widgets", "WidgetService", "OneDrive")
+foreach ($bp in $bloatProcesses) {
+    Stop-Process -Name $bp -Force -ErrorAction SilentlyContinue
+}
+
 # 4. Restart GolfOS Unified Hardware/VCAT Bridge (vcat_bridge.py on :8090 / :18080)
 $bridgeScript = "C:\GolfOS\bin\vcat_bridge.py"
 $bridgeOnline = $false
@@ -140,6 +146,8 @@ if (Test-Path $bridgeScript) {
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -match 'vcat_bridge\.py' } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Stop-Process -Name "ble_watcher" -Force -ErrorAction SilentlyContinue
+    cmd /c "taskkill /F /IM ble_watcher.exe /T >nul 2>&1"
     Start-Sleep -Milliseconds 400
 
     $bridgeTask = Get-ScheduledTask -TaskName "GolfOS_VCAT_Bridge" -ErrorAction SilentlyContinue

@@ -9,6 +9,7 @@ import {
   normalizeTargetGenderLabel,
   resolveKioskProductDurationMin,
 } from '../utils/kioskProductSpecSummary';
+import { isKioskChannelProduct } from '../utils/kioskPurchaseEligibility';
 
 /** 샴페인 플래티넘 메탈 스마트 IC 칩 (EMV Chip) 그래픽 */
 const EmvChip: React.FC = () => (
@@ -82,10 +83,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   const [warningTitle, setWarningTitle] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
-  // 일일 타석 배정권 여부 판별 헬퍼 (상품 DB 속성 직접 참조)
-  const checkIfDaily = (prod: Product) => checkIfKioskDailyProduct(prod);
+  // 일일 타석 배정권 여부 판별 헬퍼 (상품 DB 속성 + KIOSK 판매채널 허용 여부 직접 참조)
+  const checkIfDaily = (prod: Product) => isKioskChannelProduct(prod) && checkIfKioskDailyProduct(prod);
 
   const nonDailyFilter = (p: Product) => {
+    if (!isKioskChannelProduct(p)) return false;
     const lt = (p.logic_type || '').toUpperCase();
     return lt !== 'DAILY' && lt !== 'RENTAL' && !checkIfDaily(p);
   };

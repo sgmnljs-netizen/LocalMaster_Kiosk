@@ -10,6 +10,7 @@ export interface CompletedPurchaseInfo {
   memberNo?: string;
   memberName: string;
   memberHp?: string;
+  itemId?: string | number | null;
   productName: string;
   amount: number;
   originalAmount?: number;
@@ -23,6 +24,7 @@ export interface CompletedPurchaseInfo {
   totalCount?: number;
   logicType?: string;
   allowedCategories?: string[];
+  bundleSummary?: string[] | null;
   purchaseType?: 'MEMBERSHIP' | 'LOCKER' | 'PRODUCT';
   lockerNo?: number | string;
   cardIssuer?: string;

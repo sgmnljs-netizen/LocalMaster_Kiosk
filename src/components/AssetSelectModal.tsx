@@ -49,10 +49,26 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
 }) => {
   const currentBayObj = bays.find(b => b.bay_no === selectedBayNo);
   const targetZoneCode = currentBayObj?.zone_code?.toUpperCase() || 'BAY';
+  const rawFloor = currentBayObj?.floor_no ?? currentBayObj?.floor;
+  const parsedFloorNo = rawFloor !== undefined && rawFloor !== null
+    ? Number(String(rawFloor).toUpperCase().replace(/[^0-9-]/g, ''))
+    : NaN;
+  const targetFloorNo = Number.isFinite(parsedFloorNo) ? parsedFloorNo : null;
   const bayMaxMin = currentBayObj?.max_assignable_min;
   const nextResStartStr = currentBayObj?.next_limit_res_start_time || '예정';
 
   const todayDigits = normalizeYmdDigits(TimeMaster.getKstYmd(TimeMaster.getSyncedDate()));
+
+  const getFloorMismatchReason = (asset: MemberAsset): string | null => {
+    if (targetFloorNo === null || !Array.isArray(asset.allowed_floors) || asset.allowed_floors.length === 0) {
+      return null;
+    }
+    const allowedFloorNums = asset.allowed_floors.map(f => Number(f)).filter(n => Number.isFinite(n));
+    if (allowedFloorNums.length > 0 && !allowedFloorNums.includes(targetFloorNo)) {
+      return `${allowedFloorNums.join('·')}층 전용 이용권입니다.`;
+    }
+    return null;
+  };
 
   // 1. 유효 배정 가능 이용권 필터링 (SSOT logic_type / access_rules / 미래 개시일 이중 방어)
   const validAssets = (authMember.assets || []).filter(asset => {
@@ -69,14 +85,22 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
     } else if (asset.remain_days !== undefined && asset.remain_days !== null && asset.remain_days < 0) {
       return false;
     }
+    if (getFloorMismatchReason(asset) !== null) return false;
     if (!asset.allowed_categories || asset.allowed_categories.length === 0) return true;
     const allowedUpper = asset.allowed_categories.map(c => c.toUpperCase());
     return allowedUpper.includes(targetZoneCode);
   });
 
-  // 배정 불가(제약 위반) 이용권 목록
-  const disabledAssets = (authMember.assets || []).filter(asset => {
-    return asset.is_assignable === false && Boolean(asset.unassignable_reason);
+  // 배정 불가(제약 위반 및 층 불일치) 이용권 목록
+  const disabledAssets = (authMember.assets || []).flatMap(asset => {
+    if (asset.is_assignable === false && Boolean(asset.unassignable_reason)) {
+      return [asset];
+    }
+    const floorReason = getFloorMismatchReason(asset);
+    if (floorReason) {
+      return [{ ...asset, unassignable_reason: floorReason }];
+    }
+    return [];
   });
 
   // 현재 선택된 이용권 객체
