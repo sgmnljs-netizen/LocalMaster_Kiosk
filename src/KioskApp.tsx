@@ -531,13 +531,22 @@ export default function KioskApp() {
     syncMasterAndStoreInfo();
     loadBays();
 
+    let wsBayDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleWsLoadBays = () => {
+      if (wsBayDebounceTimer) clearTimeout(wsBayDebounceTimer);
+      wsBayDebounceTimer = setTimeout(() => {
+        wsBayDebounceTimer = null;
+        loadBays();
+      }, 250);
+    };
+
     // [Phase 2: WS-2] WebSocket 실시간 수신 연결
     // bay_updated 이벤트를 받으면 폴링 없이 즉시 setBays 및 loadBays 실행
     const wsCleanup = api.connectBayWebSocket(
       (updatedBay) => {
         // 단일 타석 온라인 업데이트 — 전체 재조회 없이 O(n) 부분 갱신 + loadBays 확정 갱신
         setBays(prev => prev.map(b => b.bay_no === updatedBay.bay_no ? { ...b, ...updatedBay } : b));
-        loadBays();
+        scheduleWsLoadBays();
       },
       (msg) => {
         const data = msg as Record<string, unknown>;
@@ -561,7 +570,7 @@ export default function KioskApp() {
           }
         }
         if (['bay_release', 'bay_update', 'bay_updated', 'bay_status_updated', 'bay_preoccupy', 'bay_created', 'bay_deleted', 'global_pause', 'checkin_complete', 'checkin_status', 'reservation_update', 'settings_updated', 'master_updated', 'store_updated', 'product_updated'].includes(data.type as string)) {
-          loadBays();
+          scheduleWsLoadBays();
           if (['settings_updated', 'global_pause', 'master_updated', 'store_updated', 'product_updated'].includes(data.type as string)) {
             syncMasterAndStoreInfo();
           }
@@ -587,6 +596,7 @@ export default function KioskApp() {
     window.addEventListener('online', handleOnlineResync);
 
     return () => {
+      if (wsBayDebounceTimer) clearTimeout(wsBayDebounceTimer);
       wsCleanup();
       clearInterval(bayInterval);
       clearInterval(masterSyncInterval);

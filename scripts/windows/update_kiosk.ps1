@@ -117,10 +117,14 @@ try {
     if (Test-Path $kcpIniPath) {
         $cp949 = [System.Text.Encoding]::GetEncoding(949)
         $iniRaw = [System.IO.File]::ReadAllText($kcpIniPath, $cp949)
-        if ($iniRaw -match "(?m)^POS_SelfYN\s*=\s*Y") {
-            $iniFixed = [regex]::Replace($iniRaw, "(?m)^POS_SelfYN\s*=\s*Y", "POS_SelfYN=N")
+        $iniFixed = $iniRaw
+        $iniFixed = [regex]::Replace($iniFixed, "(?m)^POS_SelfYN\s*=\s*Y", "POS_SelfYN=N")
+        $iniFixed = [regex]::Replace($iniFixed, "(?m)^Sign_YN\s*=\s*N", "Sign_YN=Y")
+        $iniFixed = [regex]::Replace($iniFixed, "(?m)^Sign_SelfYN\s*=\s*N", "Sign_SelfYN=Y")
+        $iniFixed = [regex]::Replace($iniFixed, "(?m)^Sign_Port\s*=\s*\S+", "Sign_Port=")
+        if ($iniFixed -ne $iniRaw) {
             [System.IO.File]::WriteAllText($kcpIniPath, $iniFixed, $cp949)
-            Stop-Process -Name "NHNKCPSecureVCAT" -Force -ErrorAction SilentlyContinue
+            Stop-Process -Name "NHNKCPSecureVCATMonit","NHNKCPSecureVCAT" -Force -ErrorAction SilentlyContinue
             Start-Sleep -Milliseconds 500
             if (Test-Path $kcpExePath) {
                 Start-Process -FilePath $kcpExePath -WorkingDirectory "C:\NHNKCPSecureVCAT" -ErrorAction SilentlyContinue

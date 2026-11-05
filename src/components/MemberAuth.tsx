@@ -94,6 +94,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   // 키오스크 ↔ 로컬 하드웨어 브릿지 NFC/BLE 시퀀스 및 WebSocket 연결 ref
   const nfcBleWsRef = useRef<WebSocket | null>(null);
   const lastHandledBleSeqRef = useRef<number>(_lastGlobalHandledBleSeq);
+  const onAuthErrorRef = useRef(onAuthError);
+  onAuthErrorRef.current = onAuthError;
 
   // [H-4] 인증 화면 언마운트(뒤로가기/홈/인증완료) 시 로컬 BLE 잔류 캐시 즉시 클리어
   useEffect(() => {
@@ -267,7 +269,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       }
     };
 
-    const timer = setInterval(pollBleBridge, 1000);
+    void pollBleBridge();
+    const timer = setInterval(pollBleBridge, 600);
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -395,12 +398,12 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       if (!newController.signal.aborted) {
         setErrorMsg('안면인식 장치 응답 지연이 발생했습니다.');
         setFaceScanning(false);
-        if (onAuthError) {
-          onAuthError('ERR_HARDWARE_TIMEOUT', '안면인식 스캔 모듈로부터 데이터를 수신하는 데 실패했습니다. 응답 타임아웃.');
+        if (onAuthErrorRef.current) {
+          onAuthErrorRef.current('ERR_HARDWARE_TIMEOUT', '안면인식 스캔 모듈로부터 데이터를 수신하는 데 실패했습니다. 응답 타임아웃.');
         }
       }
     }
-  }, [onAuthError]);
+  }, []);
 
   // 🛡️ 컴포넌트 언마운트 시 또는 authMode 전환 시 타이머 전면 클린업
   useEffect(() => {
