@@ -17,8 +17,10 @@ Object.defineProperty(globalThis, 'localStorage', {
 import {
   PAYMENT_RESILIENCE_CONFIG,
   PaymentOutboxManager,
+  buildAttemptIdempotencyKey,
   fetchWithPaymentRetry,
 } from '../paymentResilience';
+import { api } from '../api';
 
 describe('[Wave 3 Pass 2][Kiosk/Services] PaymentOutboxManager 동시성 유실 방어 및 Stale WAL 승격 복원력 검증', () => {
   beforeEach(() => {
@@ -134,5 +136,41 @@ describe('[Wave 3 Pass 2][Kiosk/Services] PaymentOutboxManager 동시성 유실 
     const recoveredRes = await fetchWithPaymentRetry('http://127.0.0.1:8000/api/test', { method: 'POST' });
     expect(recoveredRes.status).toBe(200);
     expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('holdLockerExtension·verifyKioskCheckin 등 합성 멱등키는 단일 호출 재시도 간 동일성을 유지하되 재진입 호출 간에는 고유 키를 발급해 24h 캐시 오재생을 차단한다', async () => {
+    const k1 = buildAttemptIdempotencyKey('LOCKER_HOLD_S1_T1_3_LC01');
+    const k2 = buildAttemptIdempotencyKey('LOCKER_HOLD_S1_T1_3_LC01');
+    expect(k1).not.toBe(k2);
+    expect(k1.startsWith('LOCKER_HOLD_S1_T1_3_LC01_')).toBe(true);
+
+    const capturedKeys: string[] = [];
+    vi.spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(async (_url, init) => {
+        const hdrs = (init?.headers || {}) as Record<string, string>;
+        capturedKeys.push(hdrs['x-idempotency-key'] || '');
+        return new Response('Bad Gateway', { status: 502 });
+      })
+      .mockImplementationOnce(async (_url, init) => {
+        const hdrs = (init?.headers || {}) as Record<string, string>;
+        capturedKeys.push(hdrs['x-idempotency-key'] || '');
+        return new Response(JSON.stringify({ success: true, res_id: 'RES_HOLD_1' }), { status: 200 });
+      })
+      .mockImplementationOnce(async (_url, init) => {
+        const hdrs = (init?.headers || {}) as Record<string, string>;
+        capturedKeys.push(hdrs['x-idempotency-key'] || '');
+        return new Response(JSON.stringify({ success: true, res_id: 'RES_HOLD_2' }), { status: 200 });
+      });
+
+    const firstHold = await api.holdLockerExtension(3, 10000, 'LC01', 'M260501', 3, '71000000');
+    const secondHoldAfterCancel = await api.holdLockerExtension(3, 10000, 'LC01', 'M260501', 3, '71000000');
+
+    expect(firstHold.res_id).toBe('RES_HOLD_1');
+    expect(secondHoldAfterCancel.res_id).toBe('RES_HOLD_2');
+    expect(capturedKeys).toHaveLength(3);
+    // 1차 호출의 502 재시도 2건은 동일한 x-idempotency-key를 유지해야 함
+    expect(capturedKeys[0]).toBe(capturedKeys[1]);
+    // 취소 후 2차 재진입 호출은 반드시 새로운 x-idempotency-key를 발급해 이전 취소된 res_id 오재생을 방지해야 함
+    expect(capturedKeys[2]).not.toBe(capturedKeys[0]);
   });
 });

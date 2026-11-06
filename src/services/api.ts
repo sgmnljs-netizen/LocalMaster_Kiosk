@@ -16,6 +16,7 @@ import {
   type KioskBlackBoxCategory,
 } from '../utils/kioskBlackBox';
 import {
+  buildAttemptIdempotencyKey,
   fetchWithPaymentRetry,
   PaymentOutboxManager,
   PAYMENT_RESILIENCE_CONFIG,
@@ -1857,7 +1858,7 @@ class HybridAPIClient {
           },
           {
             label: '타석 선점 요청',
-            idempotencyKey: `PREOCCUPY_${storeCd}_${terminalId}_${bayNos.join('-')}`,
+            idempotencyKey: buildAttemptIdempotencyKey(`PREOCCUPY_${storeCd}_${terminalId}_${bayNos.join('-')}`),
           }
         );
         if (res.ok) {
@@ -2006,7 +2007,7 @@ class HybridAPIClient {
           },
           {
             label: '사전 예약 체크인 승인',
-            idempotencyKey: `CHECKIN_${storeCd}_${memberNo}_${resId || 'TODAY'}`,
+            idempotencyKey: buildAttemptIdempotencyKey(`CHECKIN_${storeCd}_${memberNo}_${resId || 'TODAY'}`),
           }
         );
         if (res.ok) {
@@ -2080,7 +2081,7 @@ class HybridAPIClient {
           },
           {
             label: '타석 선점 해제',
-            idempotencyKey: `RELEASE_${storeCd}_${terminalId}_${bayNos.join('-')}`,
+            idempotencyKey: buildAttemptIdempotencyKey(`RELEASE_${storeCd}_${terminalId}_${bayNos.join('-')}`),
           }
         );
       } catch (err) {
@@ -2295,7 +2296,7 @@ class HybridAPIClient {
         const idempotencyKey =
           paymentApproval?.van_tr_no ||
           effectiveBayAuthCode ||
-          `ALLOC_${storeCd}_${bayNo}_${memberNo || 'GUEST'}_${parsedItemId ?? 'DAILY'}_${amount ?? 0}`;
+          buildAttemptIdempotencyKey(`ALLOC_${storeCd}_${bayNo}_${memberNo || 'GUEST'}_${parsedItemId ?? 'DAILY'}_${amount ?? 0}`);
         const res = await fetchWithPaymentRetry(
           `${this.getBaseUrl()}/v1/kiosk/allocate-bay?store_cd=${encodeURIComponent(storeCd)}`,
           {
@@ -2652,7 +2653,7 @@ class HybridAPIClient {
             idempotencyKey:
               paymentApproval?.van_tr_no ||
               effectiveGroupAuthCode ||
-              `GRP_${storeCd}_${leaderMemberNo || 'GUEST'}_${targets.map((t) => t.bayNo).join('-')}`,
+              buildAttemptIdempotencyKey(`GRP_${storeCd}_${leaderMemberNo || 'GUEST'}_${targets.map((t) => t.bayNo).join('-')}`),
           }
         );
 
@@ -2917,7 +2918,7 @@ class HybridAPIClient {
         },
         {
           label: '셀프 타석 이동',
-          idempotencyKey: `MOVE_${storeCd}_${memberNo}_${oldBayNo ?? 'AUTO'}_${targetBayNo}`,
+          idempotencyKey: buildAttemptIdempotencyKey(`MOVE_${storeCd}_${memberNo}_${oldBayNo ?? 'AUTO'}_${targetBayNo}`),
         }
       );
 
@@ -3259,7 +3260,7 @@ class HybridAPIClient {
           },
           {
             label: '라카 연장 대기 등록',
-            idempotencyKey: `LOCKER_HOLD_${storeCd}_${effTerminal}_${payloadLockerId || lockerId}_${prodCd}`,
+            idempotencyKey: buildAttemptIdempotencyKey(`LOCKER_HOLD_${storeCd}_${effTerminal}_${payloadLockerId || lockerId}_${prodCd}`),
           }
         );
         if (res.ok) {
@@ -4090,7 +4091,7 @@ class HybridAPIClient {
           },
           {
             label: '파3 슬롯 선점',
-            idempotencyKey: `PAR3_${storeCd}_${zoneCode}_${resDate}_${cleanTime}_${leader.member_no || leader.hp_no || 'GUEST'}`,
+            idempotencyKey: buildAttemptIdempotencyKey(`PAR3_${storeCd}_${zoneCode}_${resDate}_${cleanTime}_${leader.member_no || leader.hp_no || 'GUEST'}`),
           }
         );
         if (res.ok) {

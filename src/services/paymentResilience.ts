@@ -146,6 +146,19 @@ export interface FetchWithPaymentRetryOptions {
   idempotencyKey?: string | null;
 }
 
+let idempotencyAttemptSeq = 0;
+
+/**
+ * 단일 API 호출(내부 네트워크 재시도 1~3회 전체) 안에서는 동일한 X-Idempotency-Key를 유지하면서,
+ * 별도의 사용자 클릭/세션(예: 라카·파3 HOLD 취소 후 재진입, 동일 회원 24시간 내 재배정/재선점) 간에는
+ * 백엔드 24시간 멱등성 캐시가 과거 응답을 오재생(Stale Replay)하지 않도록 호출별 고유 키를 생성합니다.
+ */
+export function buildAttemptIdempotencyKey(prefix: string): string {
+  idempotencyAttemptSeq = (idempotencyAttemptSeq + 1) % 1_000_000;
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${prefix}_${Date.now()}_${idempotencyAttemptSeq}_${rand}`;
+}
+
 /**
  * 카드 승인 직후 서버 매출/배정/웹훅 전송을 수행하는 지수 백오프 재시도 래퍼입니다.
  * 1회 순단이나 일시적 응답 지연으로 인해 이미 뽑힌 카드가 억울하게 망취소되는 사고를 방지합니다.
