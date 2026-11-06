@@ -160,7 +160,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
   const [faceImageBase64, setFaceImageBase64] = useState('');
 
   // 🛡️ 비동기 타이머 & 폴링 해제를 위한 Refs
-  const captureCountdownRef = useRef<any>(null);
+  const captureCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isFetchingRef = useRef<boolean>(false);
   const isSubmittingRef = useRef<boolean>(false);
@@ -226,7 +226,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
         );
         api.cancelFaceCaptureMode().catch(console.warn);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('Face capture exception:', err);
       if (!isFaceEnrollStepRef.current) return;
       if (captureCountdownRef.current) clearInterval(captureCountdownRef.current);
@@ -354,9 +354,15 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
         setLoading(false);
         return;
       }
-    } catch (err: any) {
-      const status = err?.status || err?.response?.status;
-      if (status === 403 || err?.inactive) {
+    } catch (err: unknown) {
+      const lookupErr = err as {
+        status?: number;
+        inactive?: boolean;
+        duplicate?: boolean;
+        response?: { status?: number };
+      } | null;
+      const status = lookupErr?.status || lookupErr?.response?.status;
+      if (status === 403 || lookupErr?.inactive) {
         setErrorMsg(
           lang === 'EN'
             ? 'This phone number belongs to a dormant or restricted account. Please contact the front desk.'
@@ -366,7 +372,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
         setLoading(false);
         return;
       }
-      if (status === 409 || err?.duplicate) {
+      if (status === 409 || lookupErr?.duplicate) {
         setErrorMsg(
           lang === 'EN'
             ? 'This phone number is already registered. Please sign in or contact the front desk.'

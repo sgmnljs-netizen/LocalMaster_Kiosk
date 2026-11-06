@@ -50,7 +50,7 @@ interface DisplayCategoryItem {
   category_id: number;
   name: string;
   sort_order: number;
-  items: any[];
+  items: Array<Partial<Product> & { prod_cd?: string; prod_nm?: string }>;
 }
 
 export const ProductShop: React.FC<ProductShopProps> = ({
@@ -116,7 +116,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           ? categories
           : categories.filter((cat: DisplayCategoryItem) => {
               const items = Array.isArray(cat.items) ? cat.items : [];
-              return items.some((item: any) => {
+              return items.some((item) => {
                 const resolved = products.find(p => p.prod_cd === item.prod_cd) || (item?.prod_nm ? item as Product : undefined);
                 return Boolean(resolved && nonDailyFilter(resolved));
               });

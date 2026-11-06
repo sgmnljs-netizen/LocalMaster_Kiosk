@@ -180,7 +180,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   }, [bays, selectedZoneIds, floorList, activeFloor]);
 
   // 타석별 동반자 배정 허용 여부 체크 헬퍼
-  const isCompanionAllowed = (bayObj: any) => {
+  const isCompanionAllowed = (bayObj: Bay) => {
     if (bayObj.allow_companion === true) return true;
     if (bayObj.config_json) {
       try {

@@ -113,9 +113,9 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   const [faceCountdown, setFaceCountdown] = useState<number>(15);
 
   // 🛡️ 비동기 타이머 및 네트워크 중단 제어용 refs
-  const faceScanTimeoutRef = useRef<any>(null);
-  const faceTimerRef = useRef<any>(null);
-  const authTimeoutRef = useRef<any>(null);
+  const faceScanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const faceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const faceAbortControllerRef = useRef<AbortController | null>(null);
   // 키오스크 ↔ 로컬 하드웨어 브릿지 NFC/BLE 시퀀스 및 WebSocket 연결 ref
   const nfcBleWsRef = useRef<WebSocket | null>(null);
@@ -188,16 +188,24 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       } else {
         setErrorMsg('등록되지 않은 모바일 회원이거나 스마트 체크인 신호를 찾을 수 없습니다.');
       }
-    } catch (err: any) {
-      const status = err?.response?.status || err?.status;
-      const detail = String(err?.response?.data?.detail || err?.message || '');
-      const candidates = err?.candidates || err?.response?.data?.candidates;
-      if (status === 403 || err?.inactive) {
+    } catch (err: unknown) {
+      const lookupErr = err as {
+        status?: number;
+        inactive?: boolean;
+        duplicate?: boolean;
+        message?: string;
+        candidates?: Member[];
+        response?: { status?: number; data?: { detail?: string; candidates?: Member[] } };
+      } | null;
+      const status = lookupErr?.response?.status || lookupErr?.status;
+      const detail = String(lookupErr?.response?.data?.detail || lookupErr?.message || '');
+      const candidates = lookupErr?.candidates || lookupErr?.response?.data?.candidates;
+      if (status === 403 || lookupErr?.inactive) {
         setErrorMsg(detail || '현재 휴면 또는 이용 제한(일시정지/탈퇴) 상태인 회원입니다. 프런트 데스크에 문의해 주세요.');
       } else if (Array.isArray(candidates) && candidates.length > 0) {
         setDuplicateCandidates(candidates);
         setErrorMsg('');
-      } else if (status === 409 || err?.duplicate || detail.includes('DUPLICATE') || detail.includes('중복') || detail.includes('여러 명')) {
+      } else if (status === 409 || lookupErr?.duplicate || detail.includes('DUPLICATE') || detail.includes('중복') || detail.includes('여러 명')) {
         setPhoneDigits('');
         setErrorMsg(detail || '동일한 번호를 사용하는 회원이 여러 명 있습니다. 본인 계정을 선택해 주세요.');
       } else if (status === 400) {

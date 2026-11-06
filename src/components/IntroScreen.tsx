@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronRight, Hand, Play, ShieldAlert, Sparkles, Tv } from 'lucide-react';
-import { api } from '../services/api';
+import { api, type Bay } from '../services/api';
 import { isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
 import { KioskLiveClock } from './KioskLiveClock';
 
 interface IntroScreenProps {
   onStart: () => void;
   storeName: string;
-  bays?: any[];
+  bays?: Bay[];
   photoUrl?: string;
   logoUrl?: string;
 }
@@ -129,9 +129,9 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
         if (!res.ok) return;
         const data = await res.json();
         if (!Array.isArray(data) || !mounted) return;
-        const mapped: KioskIntroSlide[] = data
-          .filter((item: any) => item && item.image_url)
-          .map((item: any) => ({
+        const mapped: KioskIntroSlide[] = (data as Array<Record<string, unknown>>)
+          .filter((item) => Boolean(item && item.image_url))
+          .map((item) => ({
             type: 'image' as const,
             url: resolveIntroBannerImageUrl(String(item.image_url), baseUrl),
             title: String(item.title ?? ''),
@@ -325,7 +325,7 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
           });
           if (practiceBays.length === 0) return null;
 
-          const isBayAvailable = (b: any) => isBayTrulyAvailableForKiosk(b);
+          const isBayAvailable = (b: Bay) => isBayTrulyAvailableForKiosk(b);
 
           const floorMap: { [key: string]: { total: number; avail: number } } = {};
           practiceBays.forEach(b => {

@@ -337,6 +337,7 @@ export interface KioskDisplayCategory {
 
 export interface KioskCouponItem {
   coupon_no: string;
+  code?: string;
   policy_id?: string;
   coupon_name?: string;
   coupon_nm?: string;

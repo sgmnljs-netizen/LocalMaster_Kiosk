@@ -82,7 +82,9 @@ const getFirstAssignableAsset = (member?: Member | null, bay?: Bay | null) => {
   return getAssignableAssets(member, bay)[0];
 };
 
-const resolveAssetTicketName = (asset?: any): string => {
+const resolveAssetTicketName = (
+  asset?: (Partial<MemberAsset> & { product_nm?: string }) | null
+): string => {
   return asset?.product_nm || asset?.item_name || asset?.prod_nm || '정기 회원권 / 잔여 횟수 차감';
 };
 
@@ -324,8 +326,8 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
     try {
       const fullMember = await api.getMember(candidate.member_no);
       applyResolvedCompanionMember(fullMember || candidate);
-    } catch (err: any) {
-      setSearchError(err?.message || '동반 회원 선택 처리 중 오류가 발생했습니다.');
+    } catch (err: unknown) {
+      setSearchError(err instanceof Error && err.message ? err.message : '동반 회원 선택 처리 중 오류가 발생했습니다.');
     } finally {
       setSearchLoading(false);
     }
@@ -353,19 +355,27 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       } else {
         setSearchError(lang === 'KO' ? '일치하는 회원을 찾을 수 없습니다. 번호를 다시 확인하거나 비회원으로 진행해주세요.' : 'Member not found.');
       }
-    } catch (err: any) {
-      if (err?.inactive || err?.status === 403) {
-        setSearchError(err.message || '현재 휴면 또는 이용 제한(일시정지/탈퇴) 상태인 회원입니다.');
-      } else if (err?.duplicate || err?.status === 409) {
-        const cands = err?.candidates || err?.response?.data?.candidates;
+    } catch (err: unknown) {
+      const lookupErr = err as {
+        message?: string;
+        inactive?: boolean;
+        duplicate?: boolean;
+        status?: number;
+        candidates?: Member[];
+        response?: { data?: { candidates?: Member[] } };
+      } | null;
+      if (lookupErr?.inactive || lookupErr?.status === 403) {
+        setSearchError(lookupErr?.message || '현재 휴면 또는 이용 제한(일시정지/탈퇴) 상태인 회원입니다.');
+      } else if (lookupErr?.duplicate || lookupErr?.status === 409) {
+        const cands = lookupErr?.candidates || lookupErr?.response?.data?.candidates;
         if (Array.isArray(cands) && cands.length > 0) {
           setCompanionCandidates(cands);
           setSearchError('동일 번호로 등록된 가족/다중 회원이 있습니다. 아래에서 동반 회원을 선택해 주세요.');
         } else {
-          setSearchError(err.message || '동일한 번호를 사용하는 회원이 2명 이상 존재합니다.');
+          setSearchError(lookupErr?.message || '동일한 번호를 사용하는 회원이 2명 이상 존재합니다.');
         }
       } else {
-        setSearchError(err?.message || (lang === 'KO' ? '회원 검색 중 오류가 발생했습니다.' : 'Failed to search member.'));
+        setSearchError(lookupErr?.message || (lang === 'KO' ? '회원 검색 중 오류가 발생했습니다.' : 'Failed to search member.'));
       }
     } finally {
       setSearchLoading(false);

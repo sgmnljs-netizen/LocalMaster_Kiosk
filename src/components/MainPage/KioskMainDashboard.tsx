@@ -8,6 +8,7 @@ import {
   isKioskMenuEnabled,
   KioskMenuVisibilityMap,
 } from '../../stores/kioskSettings';
+import type { KioskMenuConfig } from '../../services/api';
 
 const TRANSLATIONS = {
   KO: {
@@ -67,7 +68,7 @@ interface KioskMainDashboardProps {
   onMoveBay: () => void;
   onLockerExtend: () => void;
   onSignUp: () => void;
-  kioskMenuConfigs?: any[];
+  kioskMenuConfigs?: KioskMenuConfig[];
   menuOverrides?: KioskMenuVisibilityMap;
   onMenuClick?: (menuId: string, zoneIds: (string | number)[]) => void;
 }
@@ -100,10 +101,10 @@ export default function KioskMainDashboard({
   ];
 
   // 활성화된 메뉴 목록 동적 필터링 및 정렬 (파트너센터 설정 + 기기별 로컬 오버라이드 결합)
-  const rawMenus = (kioskMenuConfigs && kioskMenuConfigs.length > 0) ? kioskMenuConfigs : defaultMenus;
+  const rawMenus: KioskMenuConfig[] = (kioskMenuConfigs && kioskMenuConfigs.length > 0) ? kioskMenuConfigs : defaultMenus;
   const activeMenus = rawMenus
-    .filter((m: any) => isKioskMenuEnabled(m.menu_id, effectiveOverrides, m.is_active !== false))
-    .sort((a: any, b: any) => (a.sort_order || 99) - (b.sort_order || 99));
+    .filter((m) => isKioskMenuEnabled(m.menu_id, effectiveOverrides, m.is_active !== false))
+    .sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99));
 
   const effectiveOnCheckin =
     onCheckin && isKioskMenuEnabled('CHECKIN', effectiveOverrides, true)
@@ -125,10 +126,10 @@ export default function KioskMainDashboard({
   };
 
   // 연습타석(ALLOCATE_DAILY) 및 회원가입(SIGNUP) 메뉴 분리 (CHECKIN 중복 렌더링 방어 포함)
-  const heroMenu = activeMenus.find((m: any) => m.menu_id === 'ALLOCATE_DAILY' || m.menu_id === 'ALLOCATION');
-  const signupMenu = activeMenus.find((m: any) => m.menu_id === 'SIGNUP' || m.menu_id === 'REGISTER');
+  const heroMenu = activeMenus.find((m) => m.menu_id === 'ALLOCATE_DAILY' || m.menu_id === 'ALLOCATION');
+  const signupMenu = activeMenus.find((m) => m.menu_id === 'SIGNUP' || m.menu_id === 'REGISTER');
   const gridSubMenus = activeMenus.filter(
-    (m: any) =>
+    (m) =>
       m.menu_id !== 'ALLOCATE_DAILY' &&
       m.menu_id !== 'ALLOCATION' &&
       m.menu_id !== 'SIGNUP' &&
@@ -385,8 +386,8 @@ export default function KioskMainDashboard({
               animationDelay: '0.3s' 
             }}
           >
-            {gridSubMenus.map((menu: any, index: number) => {
-              const IconComp = ICON_MAP[menu.icon_type] || Target;
+            {gridSubMenus.map((menu, index: number) => {
+              const IconComp = ICON_MAP[menu.icon_type || ''] || Target;
               const theme = getSubMenuTheme(menu.menu_id);
               const isPar3 = menu.menu_id === 'PAR3';
 

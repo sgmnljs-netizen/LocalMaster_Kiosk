@@ -17,7 +17,7 @@ import {
   bootstrapLocalKioskSettings,
   saveKioskSettings,
 } from '../stores/kioskSettings';
-import { api } from '../services/api';
+import { api, type KioskMenuConfig } from '../services/api';
 import { kioskVanClient } from '../services/van/van_client';
 import { normalizeVanProvider } from '../services/van/van_types';
 import { VirtualKeyboard, type VirtualKeyboardMode } from './VirtualKeyboard';
@@ -25,7 +25,7 @@ import { VirtualKeyboard, type VirtualKeyboardMode } from './VirtualKeyboard';
 interface KioskSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  kioskMenuConfigs?: any[];
+  kioskMenuConfigs?: KioskMenuConfig[];
   checkinPolicy?: string;
   faceTerminalEnabled?: boolean;
 }
@@ -129,8 +129,8 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const configurableMenus = useMemo(() => {
     const builtinCanonicalSet = new Set(STANDARD_KIOSK_MENUS.map((m) => m.id));
     const customMenus = (kioskMenuConfigs || [])
-      .filter((m: any) => m?.menu_id && !builtinCanonicalSet.has(canonicalizeKioskMenuId(m.menu_id)))
-      .map((m: any) => ({
+      .filter((m) => Boolean(m?.menu_id && !builtinCanonicalSet.has(canonicalizeKioskMenuId(m.menu_id))))
+      .map((m) => ({
         id: String(m.menu_id),
         label: m.menu_name || String(m.menu_id),
         desc: m.description || '파트너센터 커스텀 메뉴',
@@ -146,7 +146,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
     }
     if (kioskMenuConfigs && kioskMenuConfigs.length > 0) {
       const matched = kioskMenuConfigs.find(
-        (m: any) => canonicalizeKioskMenuId(m.menu_id) === canonical || m.menu_id === menuId
+        (m) => canonicalizeKioskMenuId(m.menu_id) === canonical || m.menu_id === menuId
       );
       if (matched) {
         return matched.is_active !== false;

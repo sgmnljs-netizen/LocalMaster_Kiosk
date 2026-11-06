@@ -46,10 +46,17 @@ const normalizeGenderCode = (val?: string | null): 'M' | 'F' | '' => {
   return '';
 };
 
-const parseProductJsonSafe = (raw: unknown): Record<string, any> => {
+interface LockerProductJsonMeta {
+  restricted_gender?: string;
+  display_nm?: string;
+  short_nm?: string;
+  [key: string]: unknown;
+}
+
+const parseProductJsonSafe = (raw: unknown): LockerProductJsonMeta => {
   if (!raw) return {};
   if (typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, any>;
+    return raw as LockerProductJsonMeta;
   }
   if (typeof raw === 'string') {
     try {

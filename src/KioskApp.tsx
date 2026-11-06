@@ -21,7 +21,7 @@ import { CheckinSelect } from './components/CheckinSelect';
 import { AllocationCompleteModal } from './components/AllocationCompleteModal';
 import { AssetSelectModal } from './components/AssetSelectModal';
 import { PurchaseCompleteModal, CompletedPurchaseInfo } from './components/PurchaseCompleteModal';
-import { api, Member, Product, Bay } from './services/api';
+import { api, Member, Product, Bay, type KioskMenuConfig } from './services/api';
 import type { CardApprovalResult } from './services/van/van_types';
 import { kioskVanClient } from './services/van/van_client';
 import { executeKioskAutoReversal } from './services/van/kioskPaymentReversal';
@@ -211,7 +211,7 @@ export default function KioskApp() {
   // UI 상태
   const [justAllocatedBayNo, setJustAllocatedBayNo] = useState<number | null>(null);
   const [feedbackCountdown, setFeedbackCountdown] = useState<number | null>(null);
-  const feedbackTimerRef = useRef<any>(null);
+  const feedbackTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const cancelFeedbackCountdown = () => {
     if (feedbackTimerRef.current) {
@@ -298,7 +298,7 @@ export default function KioskApp() {
   } | null>(null);
   const [isKioskActive, setIsKioskActive] = useState(true);
   const [inactiveNotice, setInactiveNotice] = useState<string>('');
-  const [kioskMenuConfigs, setKioskMenuConfigs] = useState<any[]>([]);
+  const [kioskMenuConfigs, setKioskMenuConfigs] = useState<KioskMenuConfig[]>([]);
   const [customMenuNotice, setCustomMenuNotice] = useState<{ title: string; desc: string } | null>(null);
 
   useEffect(() => {
@@ -1348,12 +1348,13 @@ export default function KioskApp() {
           await loadBays();
           showErrorModal(res.message || '타석 이동을 진행할 수 없습니다.');
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         await api.releaseBay(bayNo).catch(() => {});
         setSelectedBayNo(null);
         selectedBayNoRef.current = null;
         await loadBays();
-        showErrorModal(err?.message || (lang === 'KO' ? '타석 이동 처리 중 오류가 발생했습니다.' : 'Failed to move teebox.'));
+        const errMessage = err instanceof Error && err.message ? err.message : '';
+        showErrorModal(errMessage || (lang === 'KO' ? '타석 이동 처리 중 오류가 발생했습니다.' : 'Failed to move teebox.'));
       } finally {
         isAllocatingRef.current = false;
       }
@@ -1395,6 +1396,7 @@ export default function KioskApp() {
           await api.writeKioskLog('BAY_ALLOCATE_MEMBERSHIP', `회원권 타석배정 완료 (${selectedBayNo}번 타석, 이용권 ID: ${memberItemId}, ${effectiveDur}분)`, authMember.member_no);
           await loadBays();
           if (res.hardware_success === false) {
+            recordKioskBlackBox('HW_STATUS', `[HW_START_ERROR] ${selectedBayNo}번 타석 배정 후 기동 지연`, `res_id=${res.res_id || ''}`);
             api.writeKioskLog('HW_START_ERROR', `[타석 기기 자동 재가동] ${selectedBayNo}번 타석 배정 완료 후 초기 기동 지연 (res_id=${res.res_id || ''})`, authMember.member_no).catch(() => {});
             setHwFailAlert({ bayNo: selectedBayNo, resId: res.res_id || '' });
           }
@@ -1459,8 +1461,9 @@ export default function KioskApp() {
           }
           showErrorModal(res.message || '회원 이용권 타석 배정에 실패했습니다.');
         }
-      } catch (err: any) {
-        showErrorModal(err?.message || (lang === 'KO' ? '타석 배정 처리 중 시스템 오류가 발생했습니다.' : 'Failed to allocate teebox.'));
+      } catch (err: unknown) {
+        const errMessage = err instanceof Error && err.message ? err.message : '';
+        showErrorModal(errMessage || (lang === 'KO' ? '타석 배정 처리 중 시스템 오류가 발생했습니다.' : 'Failed to allocate teebox.'));
       } finally {
         isAllocatingRef.current = false;
       }
@@ -1861,9 +1864,10 @@ export default function KioskApp() {
       setCurrentHoldResId(heldResId);
       currentHoldResIdRef.current = heldResId;
       setStep('PAYMENT');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('Locker hold failed:', e);
-      showErrorModal(e?.message || '라카 연장 예약 생성 중 통신 오류가 발생했습니다.');
+      const errMessage = e instanceof Error && e.message ? e.message : '';
+      showErrorModal(errMessage || '라카 연장 예약 생성 중 통신 오류가 발생했습니다.');
       return;
     }
   };
@@ -1958,6 +1962,7 @@ export default function KioskApp() {
               return;
             } else {
               if (allocResult.hardware_success === false) {
+                recordKioskBlackBox('HW_STATUS', `[HW_START_ERROR] ${selectedBayNo}번 타석 일일권 배정 후 기동 지연`, `res_id=${allocResult.res_id || ''}`);
                 api.writeKioskLog('HW_START_ERROR', `[타석 기기 자동 재가동] ${selectedBayNo}번 타석 일일권 결제 완료 후 초기 기동 지연 (res_id=${allocResult.res_id || ''})`, authMember?.member_no).catch(() => {});
                 setHwFailAlert({ bayNo: selectedBayNo, resId: allocResult.res_id || '' });
               }
@@ -1998,17 +2003,18 @@ export default function KioskApp() {
               });
             }
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.error('[BUG-1 FIX] 일일권 타석 배정 실패:', err);
           hasCustomModal = false;
+          const errMessage = err instanceof Error && err.message ? err.message : '';
           // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소)
           let cancelInfo = '';
           if (payResult?.cardApproval) {
-            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualPaidAmount, err?.message || '통신 오류');
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualPaidAmount, errMessage || '통신 오류');
             cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
           }
           showErrorModal(
-            (err?.message || '타석 배정 중 오류가 발생했습니다. 직원에게 문의해주세요.') + cancelInfo,
+            (errMessage || '타석 배정 중 오류가 발생했습니다. 직원에게 문의해주세요.') + cancelInfo,
             '타석 배정 오류 및 결제 취소',
             false,
             undefined,
@@ -2094,18 +2100,19 @@ export default function KioskApp() {
             installmentMonths: payResult?.installmentMonths ?? payResult?.cardApproval?.installment_months ?? 0,
             vatYn: selectedProduct?.vat_yn || 'Y',
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.error('동반자 결제 후 배정 실패:', err);
           hasCustomModal = false;
+          const errMessage = err instanceof Error && err.message ? err.message : '';
           // 🚨 [P1-13] 통합 카드 결제 자동 망취소: 실제 카드 승인 금액 최우선 사용
           let cancelInfo = '';
           if (payResult?.cardApproval) {
             const actualPaidAmt = payResult?.cardApproval?.amount ?? payResult?.amount ?? companionTargets.reduce((sum, c) => sum + (c.price || 0), 0);
-            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualPaidAmt, err?.message || '동반자 배정 오류');
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualPaidAmt, errMessage || '동반자 배정 오류');
             cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
           }
           showErrorModal(
-            (err?.message || '동반자 타석 배정 처리 중 오류가 발생했습니다.') + cancelInfo,
+            (errMessage || '동반자 타석 배정 처리 중 오류가 발생했습니다.') + cancelInfo,
             '동반자 배정 실패 및 결제 취소',
             false,
             undefined,
@@ -2129,7 +2136,7 @@ export default function KioskApp() {
         );
         try {
           const gradeOnlyDisc = Math.max(0, (payResult?.discountAmount || 0) - (payResult?.couponDiscount || 0));
-          const res: any = await api.purchaseProduct(
+          const res = await api.purchaseProduct(
             authMember.member_no, 
             selectedProduct.prod_cd, 
             actualProductPaid,
@@ -2180,16 +2187,17 @@ export default function KioskApp() {
           });
           setAuthMember(null);
           setStep('MAIN_DASHBOARD');
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.error('회원권 구매 등록 실패:', err);
           hasCustomModal = false;
+          const errMessage = err instanceof Error && err.message ? err.message : '';
           let cancelInfo = '';
           if (payResult?.cardApproval) {
-            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualProductPaid, err?.message || '회원권 등록 실패');
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualProductPaid, errMessage || '회원권 등록 실패');
             cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
           }
           showErrorModal(
-            (err?.message || '회원권 전산 등록 중 오류가 발생했습니다.') + cancelInfo,
+            (errMessage || '회원권 전산 등록 중 오류가 발생했습니다.') + cancelInfo,
             '회원권 구매 실패 및 결제 취소',
             false,
             undefined,
@@ -2260,9 +2268,10 @@ export default function KioskApp() {
           });
           setAuthMember(null);
           setStep('MAIN_DASHBOARD');
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.error('라카 연장 등록 실패:', err);
           hasCustomModal = false;
+          const errMessage = err instanceof Error && err.message ? err.message : '';
           const holdToCancel = currentHoldResId || currentHoldResIdRef.current;
           if (holdToCancel) {
             await api.cancelHoldReservation(holdToCancel).catch(console.error);
@@ -2271,11 +2280,11 @@ export default function KioskApp() {
           }
           let cancelInfo = '';
           if (payResult?.cardApproval) {
-            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualLockerPaid, err?.message || '라카 연장 등록 실패');
+            const cancelRes = await executeAutoReversal(payResult.cardApproval, actualLockerPaid, errMessage || '라카 연장 등록 실패');
             cancelInfo = `\n\n[결제 취소 결과] ${cancelRes.message}`;
           }
           showErrorModal(
-            (err?.message || '라카 연장 전산 등록 중 오류가 발생했습니다.') + cancelInfo,
+            (errMessage || '라카 연장 전산 등록 중 오류가 발생했습니다.') + cancelInfo,
             '라카 연장 실패 및 결제 취소',
             false,
             undefined,
@@ -2653,7 +2662,7 @@ export default function KioskApp() {
                   setSelectedZoneIds(zIds);
                   const builtinIds = ['ALLOCATE_DAILY', 'PAR3', 'PURCHASE_PRODUCT', 'LOCKER', 'MOVE_BAY', 'SIGNUP'];
                   if (!builtinIds.includes(menuId)) {
-                    const customMenu = kioskMenuConfigs.find((m: any) => m.menu_id === menuId);
+                    const customMenu = kioskMenuConfigs.find((m) => m.menu_id === menuId);
                     if (customMenu) {
                       if (zIds.length > 0) {
                         setPurpose('ALLOCATE_DAILY');

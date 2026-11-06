@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { CreditCard, Printer, ShieldAlert, Sparkles, ShieldCheck, RefreshCw, Ticket, CheckCircle2, UserCheck, X, ArrowLeft, Hand } from 'lucide-react';
-import { api } from '../services/api';
+import { api, type KioskCouponItem } from '../services/api';
+import { recordKioskBlackBox } from '../utils/kioskBlackBox';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { useKioskVanPayment } from '../hooks/useKioskVanPayment';
 import { kioskVanClient } from '../services/van/van_client';
@@ -56,6 +57,8 @@ interface PaymentTerminalProps {
   onCancel: () => void;
 }
 
+type PaymentSuccessPayload = Parameters<PaymentTerminalProps['onPaymentSuccess']>[0];
+
 export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   productName,
   productSpecSummary,
@@ -101,7 +104,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   const isPayRequested = useRef(false);
   const isSilentCancelRef = useRef(false);
   const hasCompletedRef = useRef(false);
-  const lastPayResultRef = useRef<any>(null);
+  const lastPayResultRef = useRef<PaymentSuccessPayload>(undefined);
 
   useEffect(() => {
     return subscribePaymentRetryStatus((st) => setWebhookRetryStatus(st));
@@ -138,7 +141,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     };
   }, [vanState, payStep, onVanBusyChange]);
 
-  const completePaymentOnce = useCallback((payload: any) => {
+  const completePaymentOnce = useCallback((payload: PaymentSuccessPayload) => {
     lastPayResultRef.current = payload;
     if (hasCompletedRef.current) return;
     hasCompletedRef.current = true;
@@ -148,10 +151,10 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   // 🎟️ 쿠폰 관련 상태 (보유 쿠폰 목록 자동 조회 + 수기 번호 입력 + 터치 화상키보드)
   const [couponCode, setCouponCode] = useState('');
   const [isCouponKeyboardOpen, setIsCouponKeyboardOpen] = useState(false);
-  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+  const [appliedCoupon, setAppliedCoupon] = useState<KioskCouponItem | null>(null);
   const [couponError, setCouponError] = useState('');
   const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
-  const [memberCoupons, setMemberCoupons] = useState<any[]>([]);
+  const [memberCoupons, setMemberCoupons] = useState<KioskCouponItem[]>([]);
   const [isLoadingMemberCoupons, setIsLoadingMemberCoupons] = useState(false);
 
   // 회원 인증 시 보유 할인쿠폰 목록 실시간 로드
@@ -180,7 +183,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   }, [memberNo]);
 
   // 쿠폰 사용 가능 여부(최소 주문 금액 & 대상 카테고리) 판별 헬퍼
-  const checkCouponEligibility = useCallback((coupon: any): { eligible: boolean; reason: string } => {
+  const checkCouponEligibility = useCallback((coupon: KioskCouponItem | null | undefined): { eligible: boolean; reason: string } => {
     if (!coupon) return { eligible: false, reason: '유효하지 않은 쿠폰입니다.' };
     if (coupon.min_order_amt && amount < coupon.min_order_amt) {
       return {
@@ -227,7 +230,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   }, [amount, assignedBayNo, assignedBayNos, assignedLockerNo, productCategory]);
 
   // 보유 쿠폰 목록에서 원터치 선택 핸들러
-  const handleSelectMemberCoupon = (coupon: any) => {
+  const handleSelectMemberCoupon = (coupon: KioskCouponItem) => {
     const check = checkCouponEligibility(coupon);
     if (!check.eligible) {
       setCouponError(check.reason);
@@ -290,10 +293,11 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     setCouponError('');
     setIsVerifyingCoupon(true);
     try {
-      let coupon: any;
+      let coupon: KioskCouponItem | undefined;
       try {
         coupon = await api.verifyCoupon(targetCode);
-      } catch (verifyErr: any) {
+      } catch (verifyErr: unknown) {
+        const verifyMsg = verifyErr instanceof Error ? verifyErr.message : '유효하지 않은 쿠폰입니다.';
         // 🎯 일반 쿠폰 조회가 실패한 경우, 시리얼 쿠폰 자동 등록 시도
         if (memberNo) {
           try {
@@ -303,11 +307,18 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               if (typeof api.getMemberCoupons === 'function') {
                 api.getMemberCoupons(memberNo).then((list) => {
                   if (Array.isArray(list)) setMemberCoupons(list);
-                }).catch(() => {});
+                }).catch((refreshErr: unknown) => {
+                  recordKioskBlackBox(
+                    'API_ERROR',
+                    '[COUPON_REFRESH_WARN] 시리얼 쿠폰 등록 후 보유 쿠폰 목록 갱신 실패',
+                    refreshErr instanceof Error ? refreshErr.message : String(refreshErr)
+                  );
+                });
               }
             }
-          } catch (serialErr: any) {
-            throw new Error(serialErr.message || verifyErr.message);
+          } catch (serialErr: unknown) {
+            const serialMsg = serialErr instanceof Error ? serialErr.message : '';
+            throw new Error(serialMsg || verifyMsg);
           }
         } else {
           if (!targetCode.startsWith('CPN-')) {
@@ -368,9 +379,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       }
       setErrorMsg('');
       setIsReadyToPay(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setAppliedCoupon(null);
-      setCouponError(err.message || '유효하지 않거나 이미 사용된 쿠폰입니다.');
+      setCouponError(err instanceof Error && err.message ? err.message : '유효하지 않거나 이미 사용된 쿠폰입니다.');
     } finally {
       setIsVerifyingCoupon(false);
     }
@@ -499,8 +510,9 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             terminalId: route.terminal_id,
           });
         }
-      } catch (routeErr: any) {
-        setErrorMsg(routeErr?.response?.data?.detail || routeErr?.message || '가맹점 단말기(TID) 라우팅 검증에 실패하여 결제가 차단되었습니다.');
+      } catch (routeErr: unknown) {
+        const errObj = routeErr as { message?: string; response?: { data?: { detail?: string } } } | null;
+        setErrorMsg(errObj?.response?.data?.detail || errObj?.message || '가맹점 단말기(TID) 라우팅 검증에 실패하여 결제가 차단되었습니다.');
         setPayStep('INSERT_CARD');
         isPayRequested.current = false;
         return;
@@ -590,7 +602,8 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             installment_months: res.installment_months ?? effectiveInst,
           }
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const backendReason = err instanceof Error && err.message ? err.message : 'Webhook failed';
         // 🚨 2-Phase Commit 보상 트랜잭션 (자동 망취소 + 실패 시 유령결제 긴급 리포트)
         const orgDate = extractKstYyyyMmDd(res.approved_at);
         const resolvedInst = res.installment_months ?? effectiveInst;
@@ -607,7 +620,6 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             reason: '타석 배정 전산 오류로 인한 자동 망취소',
           });
           if (!cancelRes || !cancelRes.success) {
-            const backendReason = err?.message || 'Webhook failed';
             const revReason = cancelRes?.error_message || 'Unknown';
             await api.reportGhostCharge({
               store_cd: api.getStoreCd(),
@@ -629,9 +641,8 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             PaymentOutboxManager.removeByAuthCode(res.auth_code);
             setErrorMsg('타석 배정 처리 실패로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 회수해 주세요.');
           }
-        } catch (cancelErr: any) {
-          const backendReason = err?.message || 'Webhook failed';
-          const revReason = cancelErr?.message || String(cancelErr);
+        } catch (cancelErr: unknown) {
+          const revReason = cancelErr instanceof Error && cancelErr.message ? cancelErr.message : String(cancelErr);
           await api.reportGhostCharge({
             store_cd: api.getStoreCd(),
             member_no: memberNo,
@@ -1221,7 +1232,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                         paddingRight: '2px'
                       }}
                     >
-                      {memberCoupons.map((cpn: any) => {
+                      {memberCoupons.map((cpn) => {
                         const cpnNo = cpn.coupon_no || cpn.code || '';
                         const cpnName = cpn.coupon_nm || cpn.coupon_name || '할인 쿠폰';
                         const isRate = cpn.benefit_type === 'RATE' || cpn.coupon_type === 'PERCENT';

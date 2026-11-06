@@ -409,9 +409,15 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         } else {
           setModalError('등록된 회원 정보를 찾을 수 없습니다. 번호를 확인해 주세요.');
         }
-      } catch (err: any) {
-        if (err?.inactive || err?.status === 403 || err?.duplicate || err?.status === 409) {
-          setModalError(err.message || '동일 번호 중복 또는 이용 제한 회원입니다.');
+      } catch (err: unknown) {
+        const lookupErr = err as {
+          inactive?: boolean;
+          duplicate?: boolean;
+          status?: number;
+          message?: string;
+        } | null;
+        if (lookupErr?.inactive || lookupErr?.status === 403 || lookupErr?.duplicate || lookupErr?.status === 409) {
+          setModalError(lookupErr?.message || '동일 번호 중복 또는 이용 제한 회원입니다.');
         } else {
           setModalError('회원 조회 중 서버 통신 에러가 발생했습니다.');
         }
@@ -910,7 +916,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     amount: number,
     authNo?: string,
     cardMasked?: string,
-    vanResult?: any,
+    vanResult?: Partial<CardApprovalResult> & {
+      prodCd?: string;
+      gradeDiscountAmount?: number;
+      usedPoints?: number;
+    },
     usedPoints: number = 0
   ) => {
     try {
@@ -977,8 +987,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         );
         resetPaymentState();
       }
-    } catch (err: any) {
-      const rollbackSucceeded = await rollbackVanApprovalIfNeeded(resId, amount, vanResult, err?.message || 'Par3 webhook exception');
+    } catch (err: unknown) {
+      const errMessage = err instanceof Error && err.message ? err.message : 'Par3 webhook exception';
+      const rollbackSucceeded = await rollbackVanApprovalIfNeeded(resId, amount, vanResult, errMessage);
       await api.cancelHoldReservation(resId).catch(() => {});
       currentHoldResIdRef.current = null;
       fetchSlots();
