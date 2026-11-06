@@ -100,3 +100,22 @@ export function isBayTrulyAvailableForKiosk(bay: Bay): boolean {
   return true;
 }
 
+/**
+ * 배정/그룹배정 비동기 요청 중 더블탭 중복 호출 및 내비게이션 이탈을 원천 차단하는 뮤텍스 실행기
+ */
+export async function runWithAllocationMutex<T>(
+  lockRef: { current: boolean },
+  task: () => Promise<T>
+): Promise<{ executed: boolean; value?: T }> {
+  if (lockRef.current) {
+    return { executed: false };
+  }
+  lockRef.current = true;
+  try {
+    const value = await task();
+    return { executed: true, value };
+  } finally {
+    lockRef.current = false;
+  }
+}
+

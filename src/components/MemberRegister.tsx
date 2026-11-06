@@ -86,6 +86,15 @@ export interface MemberRegisterValidationResult {
   cleanHp?: string;
 }
 
+/**
+ * 회원가입 완료 토스트 상태 판별 (안면 단말기 등록 경고가 없을 때만 성공 녹색 토스트 표시)
+ */
+export function resolveSignupToastSuccess(
+  member?: { face_enroll_warning?: string | boolean | null } | null
+): boolean {
+  return !member?.face_enroll_warning;
+}
+
 export function validateMemberRegisterForm(inputs: MemberRegisterFormInputs): MemberRegisterValidationResult {
   const lang = (inputs.lang || 'KO').toUpperCase();
   const trimmedName = (inputs.name || '').trim();

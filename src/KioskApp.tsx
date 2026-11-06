@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { IntroScreen } from './components/IntroScreen';
 import { MemberAuth } from './components/MemberAuth';
-import { MemberRegister } from './components/MemberRegister';
+import { MemberRegister, resolveSignupToastSuccess } from './components/MemberRegister';
 import { TeeboxMap } from './components/TeeboxMap';
 import { ProductShop } from './components/ProductShop';
 import { LockerExtend } from './components/LockerExtend';
@@ -52,6 +52,7 @@ import {
   buildKioskProductSpecSummary,
   evaluateDailyPassEligibility,
 } from './utils/kioskProductSpecSummary';
+import { runWithAllocationMutex } from './utils/bayStatusGuard';
 
 type KioskStep = 
   | 'INTRO' 
@@ -631,6 +632,7 @@ export default function KioskApp() {
       return;
     }
 
+    let recoveryCloseTimer: ReturnType<typeof setTimeout> | null = null;
     const autoRecoveryTimer = setInterval(async () => {
       if (isRetryingNetwork) return;
 
@@ -641,7 +643,8 @@ export default function KioskApp() {
           message: lang === 'KO' ? '✅ 네트워크 연결이 자동 복구되었습니다! 화면으로 복귀합니다.' : '✅ Connection restored automatically! Returning...',
           type: 'success',
         });
-        setTimeout(() => {
+        if (recoveryCloseTimer) clearTimeout(recoveryCloseTimer);
+        recoveryCloseTimer = setTimeout(() => {
           setIsNetworkOffline(false);
           setNetworkRetryFeedback(null);
           showToast(lang === 'KO' ? '네트워크 연결이 복구되었습니다.' : 'Connection restored.', true);
@@ -650,7 +653,10 @@ export default function KioskApp() {
       }
     }, 3000);
 
-    return () => clearInterval(autoRecoveryTimer);
+    return () => {
+      clearInterval(autoRecoveryTimer);
+      if (recoveryCloseTimer) clearTimeout(recoveryCloseTimer);
+    };
   }, [isNetworkOffline, isRetryingNetwork, lang]);
 
   // 📡 수동 네트워크 연결 재시도 핸들러 (버튼 로딩 피드백 및 인라인 상태 표시)
@@ -1175,7 +1181,7 @@ export default function KioskApp() {
         lang === 'KO'
           ? `${member.member_name} 님 가입이 완료되었습니다! 선택하신 ${activeBayNo}번 타석 일일권 결제로 이동합니다.${warnSuffix}`
           : `Welcome ${member.member_name}! Proceeding to Bay ${activeBayNo} Daily Pass.${warnSuffix}`,
-        Boolean(member?.face_enroll_warning)
+        resolveSignupToastSuccess(member)
       );
       if (authReturnStepRef.current === 'PAYMENT' && selectedProduct) {
         authReturnStepRef.current = null;
@@ -1195,7 +1201,7 @@ export default function KioskApp() {
         lang === 'KO'
           ? `${member.member_name} 님 가입이 완료되었습니다! 회원권 및 상품 구매 화면으로 이동합니다.${warnSuffix}`
           : `Welcome ${member.member_name}! Proceeding to Membership Shop.${warnSuffix}`,
-        Boolean(member?.face_enroll_warning)
+        resolveSignupToastSuccess(member)
       );
       setStep('PRODUCT_SHOP');
       return;
@@ -1220,7 +1226,7 @@ export default function KioskApp() {
       lang === 'KO'
         ? `${member.member_name} 님, 환영합니다! 신규 회원가입이 완료되었습니다.${warnSuffix}`
         : `Welcome ${member.member_name}! Registration successful.${warnSuffix}`,
-      Boolean(member?.face_enroll_warning)
+      resolveSignupToastSuccess(member)
     );
     setStep('MAIN_DASHBOARD');
   };
@@ -1504,57 +1510,102 @@ export default function KioskApp() {
     const totalPrice = targets.reduce((sum, t) => sum + t.price, 0);
 
     if (totalPrice === 0) {
-      // 모두 회원권 차감인 경우 즉시 다중 배정 수행
-      showToast(lang === 'KO' ? '동반자 타석 일괄 배정을 진행 중입니다...' : 'Allocating group teeboxes...');
-      try {
-        const groupRes = await api.allocateGroupBays(
-          targets.map(t => ({
-            bayNo: t.bayNo,
-            durationMin: t.durationMin ?? DEFAULT_SESSION_MIN,
-            memberNo: t.memberNo,
-            memberName: t.memberName,
-            hp: t.hp,
-            memberItemId: t.memberItemId,
-            paymentMethod: 'TICKET',
-            amount: 0
-          })),
-          undefined,
-          { acceptClosingTruncate }
-        );
-        if (!groupRes.success) {
-          if (groupRes.closingPrompt && groupRes.closingPrompt.max_available_min >= 10) {
-            const prompt = groupRes.closingPrompt;
-            const isNextResLimit = prompt.reason === 'NEXT_RESERVATION_LIMIT';
-            setClosingPromptModal({
-              isVisible: true,
-              maxMin: prompt.max_available_min,
-              closeTime: prompt.close_time,
-              reason: prompt.reason,
-              title: isNextResLimit ? '⚠️ 다음 예약 이용시간 안내' : '⏰ 영업 마감 이용시간 안내',
-              message: prompt.message,
-              noticeText: '※ 동반자 이용권이 정상 차감되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다.',
-              onConfirm: async () => {
-                setClosingPromptModal(null);
-                const truncatedTargets = targets.map(t => ({ ...t, durationMin: prompt.max_available_min }));
-                await handleCompanionConfirm(truncatedTargets, true);
-              },
-              onCancel: () => {
-                setClosingPromptModal(null);
-                const baysToRelease = targets.map(t => t.bayNo);
-                if (baysToRelease.length > 0) {
-                  api.releaseBays(baysToRelease).catch(console.error);
+      // 모두 회원권 차감인 경우 즉시 다중 배정 수행 (isAllocatingRef 뮤텍스로 더블탭 중복 배정 및 화면 이탈 방지)
+      await runWithAllocationMutex(isAllocatingRef, async () => {
+        showToast(lang === 'KO' ? '동반자 타석 일괄 배정을 진행 중입니다...' : 'Allocating group teeboxes...');
+        try {
+          const groupRes = await api.allocateGroupBays(
+            targets.map(t => ({
+              bayNo: t.bayNo,
+              durationMin: t.durationMin ?? DEFAULT_SESSION_MIN,
+              memberNo: t.memberNo,
+              memberName: t.memberName,
+              hp: t.hp,
+              memberItemId: t.memberItemId,
+              paymentMethod: 'TICKET',
+              amount: 0
+            })),
+            undefined,
+            { acceptClosingTruncate }
+          );
+          if (!groupRes.success) {
+            if (groupRes.closingPrompt && groupRes.closingPrompt.max_available_min >= 10) {
+              const prompt = groupRes.closingPrompt;
+              const isNextResLimit = prompt.reason === 'NEXT_RESERVATION_LIMIT';
+              setClosingPromptModal({
+                isVisible: true,
+                maxMin: prompt.max_available_min,
+                closeTime: prompt.close_time,
+                reason: prompt.reason,
+                title: isNextResLimit ? '⚠️ 다음 예약 이용시간 안내' : '⏰ 영업 마감 이용시간 안내',
+                message: prompt.message,
+                noticeText: '※ 동반자 이용권이 정상 차감되며, 단축된 잔여 시간에 대한 부분 환불은 불가합니다.',
+                onConfirm: async () => {
+                  setClosingPromptModal(null);
+                  const truncatedTargets = targets.map(t => ({ ...t, durationMin: prompt.max_available_min }));
+                  await handleCompanionConfirm(truncatedTargets, true);
+                },
+                onCancel: () => {
+                  setClosingPromptModal(null);
+                  const baysToRelease = targets.map(t => t.bayNo);
+                  if (baysToRelease.length > 0) {
+                    api.releaseBays(baysToRelease).catch(console.error);
+                  }
+                  setSelectedBayNo(null);
+                  selectedBayNoRef.current = null;
+                  setSelectedBayNos([]);
+                  selectedBayNosRef.current = [];
+                  setCompanionTargets([]);
+                  keepAuthAfterPurchaseRef.current = true;
+                  setStep('PRACTICE_SELECT');
                 }
-                setSelectedBayNo(null);
-                selectedBayNoRef.current = null;
-                setSelectedBayNos([]);
-                selectedBayNosRef.current = [];
-                setCompanionTargets([]);
-                keepAuthAfterPurchaseRef.current = true;
-                setStep('PRACTICE_SELECT');
-              }
-            });
+              });
+              return;
+            }
+            const baysToRelease = targets.map(t => t.bayNo);
+            if (baysToRelease.length > 0) {
+              api.releaseBays(baysToRelease).catch(console.error);
+            }
+            setSelectedBayNo(null);
+            selectedBayNoRef.current = null;
+            setSelectedBayNos([]);
+            selectedBayNosRef.current = [];
+            setCompanionTargets([]);
+            showErrorModal(groupRes.message || '동반자 타석 배정에 실패했습니다.');
             return;
           }
+          const firstRes = groupRes.results?.[0] || {};
+          const leaderName = authMember?.member_name || targets[0]?.memberName || '회원';
+          const leaderNo = authMember?.member_no || targets[0]?.memberNo;
+          await loadBays();
+          const failedHwRow = (groupRes.results || []).find(
+            (r: { hardware_success?: boolean; bay_no?: number; res_id?: string }) => r.hardware_success === false
+          );
+          if (failedHwRow) {
+            api.writeKioskLog('HW_START_ERROR', `[타석 기기 자동 재가동] 동반자 배정 완료 후 초기 기동 지연 (bay=${failedHwRow.bay_no ?? targets[0]?.bayNo}, res_id=${failedHwRow.res_id || ''})`, leaderNo).catch(() => {});
+            setHwFailAlert({ bayNo: failedHwRow.bay_no ?? targets[0]?.bayNo, resId: failedHwRow.res_id || '' });
+          }
+          showToast(lang === 'KO' ? '동반자 타석 배정이 모두 완료되었습니다!' : 'Group teebox allocation completed!');
+          setAuthMember(null);
+          setSelectedBayNo(null);
+          selectedBayNoRef.current = null;
+          setSelectedBayNos([]);
+          selectedBayNosRef.current = [];
+          setCompanionTargets([]);
+          setStep('PRACTICE_SELECT');
+          setCompletedAllocationInfo({
+            bayNo: targets.length > 1 ? targets.map(t => t.bayNo).join(', ') : targets[0].bayNo,
+            durationMin: firstRes.duration_min ?? targets[0].durationMin ?? DEFAULT_SESSION_MIN,
+            startTime: firstRes.start_time || firstRes.startTime,
+            endTime: firstRes.end_time || firstRes.endTime,
+            resId: firstRes.res_id,
+            memberName: `${leaderName} 외 ${targets.length - 1}명 (${targets.map(t => t.bayNo).join(', ')}번)`,
+            memberNo: leaderNo,
+            productName: `동반자 ${targets.length}석 회원권 배정`,
+            actionLabel: '동반자 그룹 배정',
+            payAmount: 0
+          });
+        } catch (err: unknown) {
           const baysToRelease = targets.map(t => t.bayNo);
           if (baysToRelease.length > 0) {
             api.releaseBays(baysToRelease).catch(console.error);
@@ -1564,52 +1615,10 @@ export default function KioskApp() {
           setSelectedBayNos([]);
           selectedBayNosRef.current = [];
           setCompanionTargets([]);
-          showErrorModal(groupRes.message || '동반자 타석 배정에 실패했습니다.');
-          return;
+          const errMsg = err instanceof Error ? err.message : '';
+          showErrorModal(errMsg || (lang === 'KO' ? '동반자 타석 배정 처리 중 오류가 발생했습니다.' : 'Group allocation failed.'));
         }
-        const firstRes = groupRes.results?.[0] || {};
-        const leaderName = authMember?.member_name || targets[0]?.memberName || '회원';
-        const leaderNo = authMember?.member_no || targets[0]?.memberNo;
-        await loadBays();
-        const failedHwRow = (groupRes.results || []).find(
-          (r: { hardware_success?: boolean; bay_no?: number; res_id?: string }) => r.hardware_success === false
-        );
-        if (failedHwRow) {
-          api.writeKioskLog('HW_START_ERROR', `[타석 기기 자동 재가동] 동반자 배정 완료 후 초기 기동 지연 (bay=${failedHwRow.bay_no ?? targets[0]?.bayNo}, res_id=${failedHwRow.res_id || ''})`, leaderNo).catch(() => {});
-          setHwFailAlert({ bayNo: failedHwRow.bay_no ?? targets[0]?.bayNo, resId: failedHwRow.res_id || '' });
-        }
-        showToast(lang === 'KO' ? '동반자 타석 배정이 모두 완료되었습니다!' : 'Group teebox allocation completed!');
-        setAuthMember(null);
-        setSelectedBayNo(null);
-        selectedBayNoRef.current = null;
-        setSelectedBayNos([]);
-        selectedBayNosRef.current = [];
-        setCompanionTargets([]);
-        setStep('PRACTICE_SELECT');
-        setCompletedAllocationInfo({
-          bayNo: targets.length > 1 ? targets.map(t => t.bayNo).join(', ') : targets[0].bayNo,
-          durationMin: firstRes.duration_min ?? targets[0].durationMin ?? DEFAULT_SESSION_MIN,
-          startTime: firstRes.start_time || firstRes.startTime,
-          endTime: firstRes.end_time || firstRes.endTime,
-          resId: firstRes.res_id,
-          memberName: `${leaderName} 외 ${targets.length - 1}명 (${targets.map(t => t.bayNo).join(', ')}번)`,
-          memberNo: leaderNo,
-          productName: `동반자 ${targets.length}석 회원권 배정`,
-          actionLabel: '동반자 그룹 배정',
-          payAmount: 0
-        });
-      } catch (err: any) {
-        const baysToRelease = targets.map(t => t.bayNo);
-        if (baysToRelease.length > 0) {
-          api.releaseBays(baysToRelease).catch(console.error);
-        }
-        setSelectedBayNo(null);
-        selectedBayNoRef.current = null;
-        setSelectedBayNos([]);
-        selectedBayNosRef.current = [];
-        setCompanionTargets([]);
-        showErrorModal(err?.message || (lang === 'KO' ? '동반자 타석 배정 처리 중 오류가 발생했습니다.' : 'Group allocation failed.'));
-      }
+      });
     } else {
       // [BUG-09 FIX] 동반자 유료 결제 포함 시에도 결제 진입 전 중간 빈타석 한도 및 영업 마감시간 사전 점검 수행
       if (!acceptClosingTruncate) {

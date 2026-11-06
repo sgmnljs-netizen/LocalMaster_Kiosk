@@ -115,6 +115,16 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const [isControllingApp, setIsControllingApp] = useState(false);
   const [appControlStatus, setAppControlStatus] = useState<string | null>(null);
   const wasOpenRef = useRef<boolean>(false);
+  const saveCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (saveCloseTimerRef.current) {
+        clearTimeout(saveCloseTimerRef.current);
+        saveCloseTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const configurableMenus = useMemo(() => {
     const builtinCanonicalSet = new Set(STANDARD_KIOSK_MENUS.map((m) => m.id));
@@ -384,7 +394,11 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       newAdminPin: trimmedNewPin.length === 4 ? trimmedNewPin : undefined,
     });
     setSaveSuccess(true);
-    setTimeout(() => {
+    if (saveCloseTimerRef.current) {
+      clearTimeout(saveCloseTimerRef.current);
+    }
+    saveCloseTimerRef.current = setTimeout(() => {
+      saveCloseTimerRef.current = null;
       clearKioskAdminSession();
       onClose();
     }, 600);
