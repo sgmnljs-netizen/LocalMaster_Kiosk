@@ -8,11 +8,23 @@ export interface BayHardwareState {
   errorDetail?: string; // 상세 메시지
 }
 
-export function parseBayConfigJson(bay: Bay): Record<string, any> {
+export interface BayConfigMeta {
+  ball_box_detected?: boolean | null;
+  ball_box_status?: string | null;
+  error_short_label?: string | null;
+  error_code?: string | number | null;
+  has_error?: boolean | null;
+  status?: string | null;
+  error_text?: string | null;
+  error_msg?: string | null;
+  [key: string]: unknown;
+}
+
+export function parseBayConfigJson(bay: Bay): BayConfigMeta {
   if (!bay.config_json) return {};
   try {
-    const parsed = typeof bay.config_json === 'string' ? JSON.parse(bay.config_json) : bay.config_json;
-    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+    const parsed: unknown = typeof bay.config_json === 'string' ? JSON.parse(bay.config_json) : bay.config_json;
+    return typeof parsed === 'object' && parsed !== null ? (parsed as BayConfigMeta) : {};
   } catch {
     return {};
   }
@@ -20,29 +32,30 @@ export function parseBayConfigJson(bay: Bay): Record<string, any> {
 
 export function evaluateBayHardwareState(bay: Bay): BayHardwareState {
   const cfg = parseBayConfigJson(bay);
-  const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+  const statusCode = typeof bay.status_info?.code === 'string' ? bay.status_info.code : '';
+  const canonicalStatus = String(statusCode || bay.status || '').toUpperCase();
 
   // 1. 볼 공급 부족 (E01 or ball_box_detected === false or ball_box_status === 'EMPTY' or error_short_label === '볼부족')
   const isBallEmpty =
-    (bay as any).ball_box_detected === false ||
-    (bay as any).ball_box_status === 'EMPTY' ||
+    bay.ball_box_detected === false ||
+    bay.ball_box_status === 'EMPTY' ||
     cfg.ball_box_detected === false ||
     cfg.ball_box_status === 'EMPTY' ||
     cfg.error_short_label === '볼부족' ||
     String(cfg.error_code) === 'E01' ||
-    String((bay as any).error_code) === 'E01';
+    String(bay.error_code) === 'E01';
 
   // 2. 하드웨어 에러 / 통신 오류
   const isHwError =
-    (bay as any).hardware_status === 'ERROR' ||
+    bay.hardware_status === 'ERROR' ||
     cfg.has_error === true ||
     cfg.status === 'communication_error' ||
-    (bay as any).has_error === true ||
-    Boolean((bay as any).error_code && String((bay as any).error_code) !== '0');
+    bay.has_error === true ||
+    Boolean(bay.error_code && String(bay.error_code) !== '0');
 
   // 3. 상태 기반 점검/비활성 여부
   const isStatusBlocked =
-    (bay as any).is_active === false ||
+    bay.is_active === false ||
     ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
 
   const isBlocked = isStatusBlocked || isHwError || isBallEmpty;
@@ -59,7 +72,7 @@ export function evaluateBayHardwareState(bay: Bay): BayHardwareState {
   const errorDetail =
     cfg.error_text ||
     cfg.error_msg ||
-    (bay as any).error_msg ||
+    bay.error_msg ||
     (isBallEmpty ? '볼 공급 불량 (볼박스 공 부족)' : isHwError ? '타석기 하드웨어 점검 중' : undefined);
 
   return {
@@ -77,11 +90,12 @@ export function evaluateBayHardwareState(bay: Bay): BayHardwareState {
  *   레슨 전용(is_lesson_only), 비활성(is_active === false), 볼회수 일시정지(is_paused)인 타석은 즉시 제외한다.
  */
 export function isBayTrulyAvailableForKiosk(bay: Bay): boolean {
-  const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+  const statusCode = typeof bay.status_info?.code === 'string' ? bay.status_info.code : '';
+  const canonicalStatus = String(statusCode || bay.status || '').toUpperCase();
   if (canonicalStatus !== 'AVAILABLE') return false;
-  if ((bay as any).is_active === false) return false;
+  if (bay.is_active === false) return false;
   if (Boolean(bay.is_lesson_only)) return false;
-  if (Boolean(bay.is_paused) || Boolean((bay as any).is_global_paused)) return false;
+  if (Boolean(bay.is_paused) || Boolean(bay.is_global_paused)) return false;
   if (evaluateBayHardwareState(bay).isBlocked) return false;
   return true;
 }

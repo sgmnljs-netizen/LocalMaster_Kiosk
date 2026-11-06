@@ -78,6 +78,7 @@ export interface Member {
   status_cd: string;
   gender?: string;
   recent_product_nm?: string | null;
+  item_name?: string | null;
   expiry_date?: string | null;
   remain_days?: number;
   locker_no?: number | null;
@@ -121,7 +122,24 @@ export interface Bay {
   floor?: string; // 백엔드 실제 데이터 필드 (e.g. '1F', '2F')
   zone_code?: string; // 타석 소속 구역 (e.g. 'BAY', 'PAR3')
   type: 'RIGHT' | 'LEFT'; // 우타, 좌타
-  status: 'AVAILABLE' | 'PRE_OCCUPIED' | 'OCCUPIED' | 'PREPARE' | 'USE' | 'UNDER_MAINTENANCE' | 'MAINTENANCE' | 'DISABLED';
+  status:
+    | 'AVAILABLE'
+    | 'PRE_OCCUPIED'
+    | 'OCCUPIED'
+    | 'PREPARE'
+    | 'USE'
+    | 'UNDER_MAINTENANCE'
+    | 'MAINTENANCE'
+    | 'REPAIR'
+    | 'ERROR'
+    | 'DISABLED'
+    | 'OFFLINE'
+    | 'FAULT'
+    | 'OUT_OF_SERVICE'
+    | 'HOLD'
+    | 'BUFFER'
+    | 'RESERVED'
+    | string;
   is_active?: boolean;
   member_no?: string | null;
   current_user_name?: string | null;
@@ -163,6 +181,7 @@ export interface Bay {
   next_limit_res_start_time?: string | null;
   prepare_time_min?: number;
   hardware_status?: string;
+  has_error?: boolean | null;
   error_code?: string | number | null;
   error_msg?: string | null;
   error_short_label?: string | null;
