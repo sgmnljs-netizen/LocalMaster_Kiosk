@@ -38,11 +38,13 @@ export interface MemberAsset {
   id?: number | string;
   member_item_id: string;
   item_name: string;
+  prod_nm?: string;
   rem_count?: number;
   remain_cnt?: number;
   total_count?: number;
   remain_min?: number;
   start_date?: string;
+  start_dt?: string;
   expiry_date?: string;
   end_date?: string;
   end_dt?: string;
@@ -86,20 +88,25 @@ export interface Member {
   locker_info?: {
     locker_id?: number;
     locker_no?: number | string;
+    display_no?: number | string;
+    group_id?: string;
+    zone_name?: string | null;
     end_dt?: string | null;
+    expiry_date?: string | null;
     status?: string;
     [key: string]: any;
   } | null;
   assets?: MemberAsset[];
   face_registered?: boolean;
   face_vector_id?: string | null;
+  face_enroll_warning?: string;
   store_cd?: string;
   total_point?: number;
   discount_rate?: number;
   point_rate?: number;
   grade_cd?: string;
   use_yn?: string;
-  deleted_at?: number;
+  deleted_at?: number | string | null;
 }
 
 export interface KioskZone {
@@ -115,12 +122,22 @@ export interface Par3Slot {
   current_party_size?: number;
 }
 
+export interface BayStatusInfo {
+  code?: string;
+  is_transferable?: boolean;
+  [key: string]: any;
+}
+
 export interface Bay {
   bay_id: number;
   bay_no: number;
   floor_no: number;
   floor?: string; // 백엔드 실제 데이터 필드 (e.g. '1F', '2F')
+  zone?: string | null;
+  zone_name?: string | null;
   zone_code?: string; // 타석 소속 구역 (e.g. 'BAY', 'PAR3')
+  zoneCode?: string;
+  category_id?: string | number | null;
   type: 'RIGHT' | 'LEFT'; // 우타, 좌타
   status:
     | 'AVAILABLE'
@@ -142,8 +159,11 @@ export interface Bay {
     | string;
   is_active?: boolean;
   member_no?: string | null;
+  current_member_no?: string | null;
+  member_name?: string | null;
   current_user_name?: string | null;
   current_user_hp?: string | null;
+  res_id?: string | null;
   start_time?: string | null;
   end_time?: string | null; // HHmm or ISO
   minutes_left?: number;
@@ -156,7 +176,7 @@ export interface Bay {
   prepare_expired_epoch_ms?: number | null;
   lock_terminal_id?: string | null;
   lock_expired_at?: string | null;
-  status_info?: Record<string, any> | null;
+  status_info?: BayStatusInfo | null;
   bay_name?: string;
   simulator_type?: string;
   handedness?: string;
@@ -166,6 +186,9 @@ export interface Bay {
   max_occupancy?: number;
   config_json?: string;
   next_res_start_time?: string | null;
+  next_res_end_time?: string | null;
+  next_res_duration_min?: number | null;
+  next_res_member_no?: string | null;
   next_res_name?: string | null;
   next_res_checkin_status?: string | null;
   is_paused?: boolean;
@@ -191,8 +214,9 @@ export interface Bay {
 }
 
 export interface Locker {
-  locker_id: number;
+  locker_id?: number;
   locker_no: number | string;
+  display_no?: number | string;
   group_id?: string;
   zone_name?: string | null;
   floor_no?: number;
@@ -209,7 +233,9 @@ export interface Product {
   standard_price: number;
   sale_price?: number;
   logic_type: 'MEMBERSHIP' | 'PERIOD' | 'COUNT' | 'DAILY' | 'LESSON' | 'RETAIL' | 'FACILITY' | 'RENTAL' | string;
+  category?: string;
   duration_min?: number;
+  durationMin?: number;
   time_min?: number;
   days?: number;
   total_count?: number;
@@ -240,6 +266,63 @@ export interface Product {
     };
     [key: string]: any;
   } | null;
+}
+
+export interface KioskStoreInfo {
+  store_nm: string;
+  checkin_policy: string;
+  address: string;
+  tel: string;
+  tel_no?: string;
+  biz_no: string;
+  biz_reg_no?: string;
+  business_no?: string;
+  ceo_name: string;
+  owner_nm?: string;
+  owner_name?: string;
+  ceo_nm?: string;
+  close_time: string;
+  logo_url?: string;
+  photo_url?: string;
+  meta_data?: any;
+}
+
+export interface KioskCheckinReservation {
+  res_id: string;
+  resource_no: string;
+  resource_type?: string;
+  facility_type?: string;
+  category_id?: string | number | null;
+  bay_no?: number | string;
+  res_date: string;
+  start_time: string;
+  end_time: string;
+  duration_min: number;
+  status_cd: string;
+  payment_status?: string;
+  member_no?: string;
+  guest_nm?: string;
+}
+
+interface EdgeHoldReservation {
+  res_id: string;
+  parent_res_id?: string;
+  bay_no: number;
+  duration_min: number;
+  member_no?: string | null;
+  guest_nm?: string | null;
+  hp_no?: string | null;
+  status_cd?: string;
+}
+
+interface EdgeSaleRecord {
+  sale_id: string;
+  sale_dt: string;
+  total_amt: number;
+  pay_amt: number;
+  pay_method: string;
+  items: string;
+  status: string;
 }
 
 export interface KioskMasterResponse {
@@ -518,8 +601,10 @@ class HybridAPIClient {
   ): Promise<{
     terminal_id: string;
     provider_type?: string;
+    van_provider?: string;
     vcat_port?: number | string;
     merchant_id?: string;
+    success?: boolean;
     error?: boolean;
     status?: number;
     message?: string;
@@ -925,9 +1010,15 @@ class HybridAPIClient {
                   const nextPaused = typeof bayObj.is_paused === 'boolean'
                     ? bayObj.is_paused
                     : (typeof data.is_paused === 'boolean' ? data.is_paused : (newStatus === 'AVAILABLE' ? false : bays[idx].is_paused));
+                  const nextErrorCode =
+                    typeof bayObj.error_code === 'string' || typeof bayObj.error_code === 'number'
+                      ? bayObj.error_code
+                      : typeof data.error_code === 'string' || typeof data.error_code === 'number'
+                        ? data.error_code
+                        : bays[idx].error_code;
                   bays[idx] = {
                     ...bays[idx],
-                    status: newStatus as any,
+                    status: newStatus,
                     member_no: (bayObj.member_no as string) ?? (data.member_no as string) ?? (newStatus === 'AVAILABLE' ? null : bays[idx].member_no),
                     current_user_name: (bayObj.member_name as string) || (bayObj.user_name as string) || (data.user_name as string) || (newStatus === 'AVAILABLE' ? null : bays[idx].current_user_name),
                     end_time: (bayObj.end_time as string) || (data.end_time as string) || (newStatus === 'AVAILABLE' ? null : bays[idx].end_time),
@@ -942,7 +1033,7 @@ class HybridAPIClient {
                     config_json: (bayObj.config_json as string) ?? (data.config_json as string) ?? bays[idx].config_json,
                     ball_box_detected: (bayObj.ball_box_detected as boolean) ?? (data.ball_box_detected as boolean) ?? bays[idx].ball_box_detected,
                     ball_box_status: (bayObj.ball_box_status as string) ?? (data.ball_box_status as string) ?? bays[idx].ball_box_status,
-                    error_code: (bayObj.error_code as any) ?? (data.error_code as any) ?? bays[idx].error_code,
+                    error_code: nextErrorCode,
                     error_msg: (bayObj.error_msg as string) ?? (data.error_msg as string) ?? bays[idx].error_msg,
                     error_short_label: (bayObj.error_short_label as string) ?? (data.error_short_label as string) ?? bays[idx].error_short_label,
                     error_action_hint: (bayObj.error_action_hint as string) ?? (data.error_action_hint as string) ?? bays[idx].error_action_hint,
@@ -1201,21 +1292,7 @@ class HybridAPIClient {
   }
 
   // 가맹점 상호명 및 동적 체크인 정책 종합 정보 조회 (Local Fallback 포함)
-  async getStoreInfo(): Promise<{
-    store_nm: string;
-    checkin_policy: string;
-    address: string;
-    tel: string;
-    tel_no?: string;
-    biz_no: string;
-    ceo_name: string;
-    owner_nm?: string;
-    ceo_nm?: string;
-    close_time: string;
-    logo_url?: string;
-    photo_url?: string;
-    meta_data?: any;
-  }> {
+  async getStoreInfo(): Promise<KioskStoreInfo> {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
@@ -1229,16 +1306,20 @@ class HybridAPIClient {
             this.resolveKioskFaceTerminalIp(data.meta_data);
           }
           const resolvedTel = data.phone_no || data.tel || data.tel_no || '02-450-4500';
-          const resolvedCeo = data.owner_nm || data.ceo_name || data.ceo_nm || '';
+          const resolvedCeo = data.owner_nm || data.owner_name || data.ceo_name || data.ceo_nm || '';
+          const resolvedBizNo = data.biz_no || data.biz_reg_no || data.business_no || '';
           return {
             store_nm: data.store_nm || 'SGM Golf Academy',
             checkin_policy: data.checkin_policy || 'CHECKIN_REQUIRED',
             address: data.address || '서울특별시 광진구 워커힐로 177',
             tel: resolvedTel,
             tel_no: resolvedTel,
-            biz_no: data.biz_no || data.business_no || '',
+            biz_no: resolvedBizNo,
+            biz_reg_no: data.biz_reg_no || resolvedBizNo || undefined,
+            business_no: data.business_no || resolvedBizNo || undefined,
             ceo_name: resolvedCeo,
             owner_nm: resolvedCeo,
+            owner_name: data.owner_name || resolvedCeo || undefined,
             ceo_nm: resolvedCeo,
             close_time: data.close_time || '23:00',
             logo_url: data.logo_url || undefined,
@@ -1253,16 +1334,20 @@ class HybridAPIClient {
     // Offline Fallback
     const cached = JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}');
     const fallbackTel = cached.phone_no || cached.tel || cached.tel_no || '1566-8705';
-    const fallbackCeo = cached.owner_nm || cached.ceo_name || cached.ceo_nm || '대표이사';
+    const fallbackCeo = cached.owner_nm || cached.owner_name || cached.ceo_name || cached.ceo_nm || '대표이사';
+    const fallbackBizNo = cached.biz_no || cached.biz_reg_no || cached.business_no || '721-81-04039';
     return {
       store_nm: cached.store_nm || '골포스 강남 1호점 (체험관)',
       checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED',
       address: cached.address || '서울특별시 강남구 테헤란로 123',
       tel: fallbackTel,
       tel_no: fallbackTel,
-      biz_no: cached.biz_no || cached.business_no || '721-81-04039',
+      biz_no: fallbackBizNo,
+      biz_reg_no: cached.biz_reg_no || fallbackBizNo,
+      business_no: cached.business_no || fallbackBizNo,
       ceo_name: fallbackCeo,
       owner_nm: fallbackCeo,
+      owner_name: cached.owner_name || fallbackCeo,
       ceo_nm: fallbackCeo,
       close_time: cached.close_time || '23:00',
       logo_url: cached.logo_url || undefined,
@@ -1393,7 +1478,7 @@ class HybridAPIClient {
     const isMemberActive = (m: Member): boolean =>
       (!m.status_cd || m.status_cd === '10' || m.status_cd === 'ACTIVE') &&
       m.use_yn !== 'N' &&
-      !(m as any).deleted_at;
+      !m.deleted_at;
 
     // 1순위: 회원번호 정확 일치 (영숫자/숫자 회원번호 최우선 — 활성 회원 우선, 비활성 회원만 매칭 시 403 차단)
     const activeExactNo = members.find(
@@ -1516,7 +1601,7 @@ class HybridAPIClient {
           headers: this.getSecureHeaders()
         });
         if (res.ok) {
-          const rawBays = (await res.json()) as any[];
+          const rawBays = (await res.json()) as Bay[];
           const bayList: Bay[] = rawBays.map(b => {
             const parsedFloor = b.floor_no ?? (b.floor ? parseInt(String(b.floor).replace(/[^0-9]/g, ''), 10) : 1);
             return {
@@ -1682,7 +1767,7 @@ class HybridAPIClient {
   }
 
   // 5. 키오스크 전용 예약 타석 체크인 API
-  async getMemberCheckinReservations(memberNo: string): Promise<any[]> {
+  async getMemberCheckinReservations(memberNo: string): Promise<KioskCheckinReservation[]> {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
@@ -1690,7 +1775,7 @@ class HybridAPIClient {
           headers: this.getSecureHeaders()
         });
         if (res.ok) {
-          return await res.json();
+          return (await res.json()) as KioskCheckinReservation[];
         }
       } catch (err) {
         console.warn('Backend getMemberCheckinReservations failed, fallback to local storage:', err);
@@ -1701,7 +1786,7 @@ class HybridAPIClient {
     const todayStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     const nowHhMm = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
     const allowedStatuses = ['RSV', 'CONFIRMED', 'WAIT', 'REQ', 'QUEUE', 'QUEUED', 'CHK', 'PREPARE', 'USE'];
-    const reservations = JSON.parse(localStorage.getItem('LM_RESERVATIONS') || '[]') as any[];
+    const reservations = JSON.parse(localStorage.getItem('LM_RESERVATIONS') || '[]') as KioskCheckinReservation[];
     return reservations.filter(r => {
       if (r.member_no !== memberNo) return false;
       if (!allowedStatuses.includes(r.status_cd)) return false;
@@ -1778,12 +1863,12 @@ class HybridAPIClient {
     }
 
     // Local Fallback (데모 환경 전용)
-    const reservations = JSON.parse(localStorage.getItem('LM_RESERVATIONS') || '[]') as any[];
+    const reservations = JSON.parse(localStorage.getItem('LM_RESERVATIONS') || '[]') as KioskCheckinReservation[];
     const target = reservations.find(r => r.member_no === memberNo && (!resId || r.res_id === resId) && r.status_cd !== 'HOLD');
     if (target) {
       target.status_cd = 'CHK';
       localStorage.setItem('LM_RESERVATIONS', JSON.stringify(reservations));
-      const bayNo = parseInt(target.resource_no || '1') || 1;
+      const bayNo = parseInt(String(target.resource_no || '1'), 10) || 1;
       return {
         success: true,
         checkin_mode: 'IMMEDIATE_START',
@@ -2018,7 +2103,9 @@ class HybridAPIClient {
     message: string; 
     hardware_success?: boolean; 
     start_time?: string; 
+    startTime?: string;
     end_time?: string; 
+    endTime?: string;
     start_date?: string;
     end_date?: string;
     is_chained?: boolean;
@@ -3073,10 +3160,17 @@ class HybridAPIClient {
       gradeDiscountAmount?: number;
       prodCd?: string;
       apprNo?: string;
+      memberNo?: string;
+      member_no?: string;
       cardApproval?: Partial<CardApprovalResult>;
     } | number,
     gradeDiscountAmount?: number,
-    cardApprovalArg?: Partial<CardApprovalResult> & { prodCd?: string; apprNo?: string }
+    cardApprovalArg?: Partial<CardApprovalResult> & {
+      prodCd?: string;
+      apprNo?: string;
+      memberNo?: string;
+      member_no?: string;
+    }
   ): Promise<{ success: boolean; message: string; start_date?: string; end_date?: string; locker_no?: string }> {
     if (!resId) {
       return { success: false, message: '라카 연장 예약 번호(resId)가 누락되었습니다.' };
@@ -3178,19 +3272,21 @@ class HybridAPIClient {
     }
 
     const memberNo =
-      (typeof extraOrUsedPoints === 'object' && extraOrUsedPoints !== null ? (extraOrUsedPoints as any).memberNo || (extraOrUsedPoints as any).member_no : undefined) ||
-      (cardApprovalArg as any)?.memberNo ||
-      (cardApprovalArg as any)?.member_no;
+      (typeof extraOrUsedPoints === 'object' && extraOrUsedPoints !== null
+        ? extraOrUsedPoints.memberNo || extraOrUsedPoints.member_no
+        : undefined) ||
+      cardApprovalArg?.memberNo ||
+      cardApprovalArg?.member_no;
 
     const lockers = JSON.parse(localStorage.getItem('LM_LOCKERS') || '[]') as Locker[];
     const lockerNoStr = String(lockerNo).trim();
     const lockerNoNum = Number(lockerNoStr);
     let lIdx = lockers.findIndex(l => {
-      if (String(l.locker_no).trim() === lockerNoStr || String((l as any).locker_id ?? '').trim() === lockerNoStr) {
+      if (String(l.locker_no).trim() === lockerNoStr || String(l.locker_id ?? '').trim() === lockerNoStr) {
         return true;
       }
       if (!Number.isNaN(lockerNoNum) && lockerNoNum > 0) {
-        return Number(l.locker_no) === lockerNoNum || Number((l as any).locker_id) === lockerNoNum;
+        return Number(l.locker_no) === lockerNoNum || Number(l.locker_id) === lockerNoNum;
       }
       return false;
     });
@@ -3215,7 +3311,7 @@ class HybridAPIClient {
         status: 'OCCUPIED',
         end_dt: '',
         member_no: memberNo || 'GUEST'
-      } as any);
+      });
       lIdx = lockers.length - 1;
     }
 
@@ -3508,7 +3604,7 @@ class HybridAPIClient {
       const cleanHp = hp.replace(/[^0-9]/g, '');
       const dup = members.find(m => m.hp && m.hp.replace(/[^0-9]/g, '') === cleanHp);
       if (dup) {
-        if ((dup.status_cd && dup.status_cd !== '10' && dup.status_cd !== 'ACTIVE') || dup.use_yn === 'N' || (dup as any).deleted_at) {
+        if ((dup.status_cd && dup.status_cd !== '10' && dup.status_cd !== 'ACTIVE') || dup.use_yn === 'N' || dup.deleted_at) {
           return { success: false, message: '이미 등록된 휴대폰 번호(휴면/탈퇴/이용제한 상태)입니다. 프런트 데스크에 문의해 주세요.' };
         }
         return { success: false, message: '이미 등록된 휴대폰 번호입니다.' };
@@ -3873,7 +3969,7 @@ class HybridAPIClient {
 
       const bookingId = `R-HOLD-P3-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
-      const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+      const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
       // 1. 대표자 Hold 추가
       holds.push({
         res_id: bookingId,
@@ -3921,16 +4017,22 @@ class HybridAPIClient {
       couponDiscount?: number;
       gradeDiscountAmount?: number;
       prodCd?: string;
+      authCode?: string;
+      vanTrNo?: string;
+      cardNoMasked?: string;
+      issuerName?: string;
+      acquirerName?: string;
+      terminalId?: string;
     }
   ): Promise<boolean> {
     const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
     const storeCd = this.getStoreCd();
-    const resolvedAuthCode = vanApproval?.auth_code || (vanApproval as any)?.authCode || null;
-    const resolvedVanTrNo = vanApproval?.van_tr_no || (vanApproval as any)?.vanTrNo || resolvedAuthCode;
-    const resolvedCardMasked = vanApproval?.card_no_masked || (vanApproval as any)?.cardNoMasked || null;
-    const resolvedIssuerName = vanApproval?.issuer_name || (vanApproval as any)?.issuerName || null;
-    const resolvedAcquirerName = vanApproval?.acquirer_name || (vanApproval as any)?.acquirerName || null;
-    const resolvedTerminalId = vanApproval?.terminal_id || (vanApproval as any)?.terminalId || this.getTerminalId();
+    const resolvedAuthCode = vanApproval?.auth_code || vanApproval?.authCode || null;
+    const resolvedVanTrNo = vanApproval?.van_tr_no || vanApproval?.vanTrNo || resolvedAuthCode;
+    const resolvedCardMasked = vanApproval?.card_no_masked || vanApproval?.cardNoMasked || null;
+    const resolvedIssuerName = vanApproval?.issuer_name || vanApproval?.issuerName || null;
+    const resolvedAcquirerName = vanApproval?.acquirer_name || vanApproval?.acquirerName || null;
+    const resolvedTerminalId = vanApproval?.terminal_id || vanApproval?.terminalId || this.getTerminalId();
     const isRealCardApproval =
       amount > 0 &&
       Boolean(resolvedAuthCode) &&
@@ -4007,7 +4109,7 @@ class HybridAPIClient {
     }
 
     // Offline / Fallback
-    const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+    const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
     const idx = holds.findIndex(r => r.res_id === resId);
     if (idx !== -1) {
       holds[idx].status_cd = 'RSV';
@@ -4054,7 +4156,7 @@ class HybridAPIClient {
         if (createRes.ok) {
           const createData = await createRes.json();
           // [Edge DB Mirroring] 온라인 HOLD 성공 시에도 Edge DB 캐시에 저장하여 백엔드 장애 폴백 보장
-          const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+          const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
           holds.push({
             res_id: createData.res_id,
             bay_no: bayNo,
@@ -4089,7 +4191,7 @@ class HybridAPIClient {
     if (targetIdx !== -1) {
       const resId = `R-HOLD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
       
-      const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
+      const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
       holds.push({
         res_id: resId,
         bay_no: bayNo,
@@ -4130,8 +4232,8 @@ class HybridAPIClient {
           { label: '보류 예약 취소' }
         );
         if (res.ok) {
-          const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
-          const filtered = holds.filter((h: any) => h.res_id !== resId);
+          const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
+          const filtered = holds.filter((h) => h.res_id !== resId);
           localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
           return { success: true, message: '보류 예약이 취소되었습니다.' };
         }
@@ -4141,8 +4243,8 @@ class HybridAPIClient {
     }
 
     // 로컬 보류 예약 미러 정리 (네트워크 순단 시에도 잔여 캐시 제거)
-    const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
-    const filtered = holds.filter((h: any) => h.res_id !== resId);
+    const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
+    const filtered = holds.filter((h) => h.res_id !== resId);
     localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
     return { success: true, message: '보류 예약 취소 완료 (Edge DB)' };
   }
@@ -4203,15 +4305,15 @@ class HybridAPIClient {
             PaymentOutboxManager.removeByAuthCode(options?.auth_code);
           }
           // 백엔드 처리 성공 시 Edge DB HOLD 캐시 정제
-          const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
-          const filtered = holds.filter((h: any) => h.res_id !== resId);
+          const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
+          const filtered = holds.filter((h) => h.res_id !== resId);
           localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
           return { success: data.success !== false, message: data.message || '결제 및 배정이 확정되었습니다.' };
         } else {
           const errData = await res.json().catch(() => ({ detail: `결제 확정 웹훅 처리 실패 (HTTP ${res.status})` }));
           const errMsg = typeof errData.detail === 'string'
             ? errData.detail
-            : (errData.detail?.message || errData.message || '결제 확정 처리에 실패했습니다.');
+            : (errData.detail?.message || errData.detail?.detail || errData.message || '결제 확정 처리에 실패했습니다.');
           if (!isDemoEnvironment()) {
             return { success: false, message: errMsg };
           }
@@ -4228,11 +4330,11 @@ class HybridAPIClient {
     }
 
     // Edge DB 모드: 결제 성공 시 실제 배정(allocateBay)으로 위임 처리 및 타석 가동
-    const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as any[];
-    const holdData = holds.find((h: any) => h.res_id === resId);
+    const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
+    const holdData = holds.find((h) => h.res_id === resId);
     
     if (holdData) {
-      const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as any[];
+      const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
       const targetIdx = bays.findIndex(b => b.bay_no === holdData.bay_no);
       if (targetIdx !== -1) {
         const endDt = new Date();
@@ -4250,7 +4352,7 @@ class HybridAPIClient {
       }
       
       // 매출 기록(LM_SALES) 추가
-      const sales = JSON.parse(localStorage.getItem('LM_SALES') || '[]') as any[];
+      const sales = JSON.parse(localStorage.getItem('LM_SALES') || '[]') as EdgeSaleRecord[];
       const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       sales.push({
         sale_id: `S-${Date.now()}`,
@@ -4264,7 +4366,7 @@ class HybridAPIClient {
       localStorage.setItem('LM_SALES', JSON.stringify(sales));
       
       // 로컬 보류 목록에서 클린업
-      const filtered = holds.filter((h: any) => h.res_id !== resId);
+      const filtered = holds.filter((h) => h.res_id !== resId);
       localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
       
       return { success: true, message: '결제 승인 및 오프라인 타석 배정 완료' };
@@ -4347,6 +4449,7 @@ class HybridAPIClient {
     backendErrorReason?: string;
     error_reason?: string;
     reversalErrorReason?: string;
+    reversal_error_reason?: string;
     rawApprovalData?: string;
     [key: string]: any;
   }): Promise<{ success: boolean; dlq_id?: string; message?: string }> {
@@ -4363,8 +4466,8 @@ class HybridAPIClient {
       card_no_masked: params.cardNoMasked || params.card_no_masked || '',
       van_tr_no: params.vanTrNo || params.van_tr_no,
       approved_at: params.approvedAt,
-      backend_error_reason: params.backendErrorReason || (params as any).error_reason || '미기재',
-      reversal_error_reason: params.reversalErrorReason || (params as any).reversal_error_reason || '미기재',
+      backend_error_reason: params.backendErrorReason || params.error_reason || '미기재',
+      reversal_error_reason: params.reversalErrorReason || params.reversal_error_reason || '미기재',
       raw_approval_data: params.rawApprovalData,
     };
     try {
