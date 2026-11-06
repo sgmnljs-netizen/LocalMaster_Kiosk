@@ -45,6 +45,7 @@ export interface CardPaymentRequestParams {
 export interface CardApprovalResult {
   success: boolean;
   auth_code: string; // 승인번호 (8자리)
+  apprNo?: string; // 레거시 어댑터 호환 승인번호 별칭
   approved_at: string; // 승인일시 (ISO 8601 or YYYYMMDDHHmmss)
   card_no_masked: string; // 마스킹 카드번호 (예: 9410-****-****-1234)
   issuer_code?: string; // 발급사 코드
@@ -58,6 +59,7 @@ export interface CardApprovalResult {
   van_tr_no?: string; // VAN사 고유 거래 일련번호
   raw_response?: Record<string, unknown>; // 원본 전문 (디버깅용)
   error_code?: VanErrorCode;
+  errorCode?: VanErrorCode | string; // 레거시/모의 어댑터 호환 에러코드 별칭
   error_message?: string;
 }
 
@@ -87,6 +89,23 @@ export interface CardCancelResult {
 
 /** VAN 통신사 종류 */
 export type VanProviderType = 'KCP' | 'KOCES' | 'NICE' | 'SMARTRO' | 'KIS' | 'MOCK';
+
+export const VALID_VAN_PROVIDERS: readonly VanProviderType[] = [
+  'KCP',
+  'KOCES',
+  'NICE',
+  'SMARTRO',
+  'KIS',
+  'MOCK',
+];
+
+/** 문자열 설정값을 엄격한 VanProviderType 유니온으로 정규화 */
+export function normalizeVanProvider(rawProvider?: string | null): VanProviderType {
+  const cleaned = String(rawProvider || 'KCP').toUpperCase().replace(/_VAN$/, '');
+  return (VALID_VAN_PROVIDERS as readonly string[]).includes(cleaned)
+    ? (cleaned as VanProviderType)
+    : 'KCP';
+}
 
 /** 현금영수증 발행 종류 */
 export type CashReceiptType = 'PERSONAL' | 'BUSINESS' | 'VOLUNTARY';
@@ -138,6 +157,7 @@ export interface TerminalHealthResult {
 /** 단말기 설정 */
 export interface VanConfig {
   provider: VanProviderType; // VAN 통신사
+  providerType?: string; // 원본 라우팅 VAN 식별자 보존용 (선택)
   vcatHost: string; // VCAT/데몬 로컬 주소 (기본: http://127.0.0.1)
   vcatPort: number; // VCAT/데몬 포트 (기본: 8090)
   terminalId: string; // 가맹점 단말기 TID

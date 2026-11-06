@@ -64,13 +64,19 @@ let currentRetryStatus: PaymentRetryStatus = {
   label: '',
 };
 
+interface GlobalProcessEnv {
+  process?: {
+    env?: Record<string, string | undefined>;
+  };
+}
+
 function isTestEnv(): boolean {
   try {
-    const g = globalThis as any;
-    if (g?.process?.env && (g.process.env.VITEST || g.process.env.NODE_ENV === 'test')) {
+    const procEnv = (globalThis as unknown as GlobalProcessEnv).process?.env;
+    if (procEnv && (procEnv.VITEST || procEnv.NODE_ENV === 'test')) {
       return true;
     }
-    if (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test') {
+    if (typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test') {
       return true;
     }
   } catch {

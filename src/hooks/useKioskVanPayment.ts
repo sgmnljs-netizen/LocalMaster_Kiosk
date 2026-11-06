@@ -6,10 +6,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { kioskVanClient } from '../services/van/van_client';
 import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC } from '../services/van/adapters/BaseVanAdapter';
-import type {
-  CardPaymentRequestParams,
-  CardApprovalResult,
-  VanPaymentState,
+import {
+  normalizeVanProvider,
+  type CardPaymentRequestParams,
+  type CardApprovalResult,
+  type VanPaymentState,
 } from '../services/van/van_types';
 import { useKioskSettings } from '../stores/kioskSettings';
 
@@ -42,12 +43,8 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
   // 키오스크 로컬 설정이 변경되면 vanClient 설정도 동기화
   useEffect(() => {
-    let rawProvider = (settings.providerType || 'KCP').toUpperCase();
-    if (rawProvider.endsWith('_VAN')) {
-      rawProvider = rawProvider.replace('_VAN', '');
-    }
     kioskVanClient.setConfig({
-      provider: rawProvider as any,
+      provider: normalizeVanProvider(settings.providerType),
       terminalId: settings.terminalId || '88010003',
       vcatPort: parseInt(settings.vcatPort, 10) || 9099,
     });
@@ -114,7 +111,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         clearTimer();
 
         if (!res.success) {
-          if (res.error_code === 'E_USER_CANCEL' || (res as any).errorCode === 'E_USER_CANCEL') {
+          if (res.error_code === 'E_USER_CANCEL' || res.errorCode === 'E_USER_CANCEL') {
             if (isTimeoutRef.current) {
               updateVanState('TIMEOUT');
               setError('결제 시간이 초과되어 취소되었습니다.');

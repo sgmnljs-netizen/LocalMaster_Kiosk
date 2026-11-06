@@ -5,7 +5,7 @@ import { useKioskSettings } from '../stores/kioskSettings';
 import { useKioskVanPayment } from '../hooks/useKioskVanPayment';
 import { kioskVanClient } from '../services/van/van_client';
 import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC, extractKstYyyyMmDd } from '../services/van/adapters/BaseVanAdapter';
-import type { CardApprovalResult } from '../services/van/van_types';
+import { normalizeVanProvider, type CardApprovalResult } from '../services/van/van_types';
 import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { Code128BarcodeSvg } from './common/Code128BarcodeSvg';
@@ -111,12 +111,8 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
   useEffect(() => {
     setActiveTerminalId(settings.terminalId || '88010003');
     return () => {
-      let rawProvider = (settings.providerType || 'KCP').toUpperCase();
-      if (rawProvider.endsWith('_VAN')) {
-        rawProvider = rawProvider.replace('_VAN', '');
-      }
       kioskVanClient.setConfig({
-        provider: rawProvider as any,
+        provider: normalizeVanProvider(settings.providerType),
         terminalId: settings.terminalId || '88010003',
         vcatPort: parseInt(settings.vcatPort, 10) || 9099,
       });
@@ -304,7 +300,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             const serialRes = await api.registerSerialCoupon(targetCode, memberNo);
             if (serialRes.success || serialRes.coupon_no) {
               coupon = serialRes;
-              if ((api as any).getMemberCoupons) {
+              if (typeof api.getMemberCoupons === 'function') {
                 api.getMemberCoupons(memberNo).then((list) => {
                   if (Array.isArray(list)) setMemberCoupons(list);
                 }).catch(() => {});
@@ -454,7 +450,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     // 🛡️ [Layer 1: Pre-Flight Gate]
     // 유료 카드 결제 시 VAN 단말기를 깨우기 직전 백엔드 생존 여부를 사전 검증합니다.
     // 서버가 완전히 죽어있는 상태에서 카드를 먼저 긁게 하여 사후 망취소/DLQ가 발생하는 사고를 사전 차단합니다.
-    if (typeof (api as any).verifyBackendReadyForPayment === 'function') {
+    if (typeof api.verifyBackendReadyForPayment === 'function') {
       try {
         const preflight = await api.verifyBackendReadyForPayment();
         if (preflight && preflight.ready === false) {
@@ -478,7 +474,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       (Boolean(businessMerchantId) && businessMerchantId !== 'MAIN') ||
       Boolean(proId);
     let effectiveTerminalId = activeTerminalId || settings.terminalId;
-    if ((api as any).resolveTerminalRoute) {
+    if (typeof api.resolveTerminalRoute === 'function') {
       try {
         const route = await api.resolveTerminalRoute(
           settings.deviceId,
@@ -495,9 +491,10 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
         if (route.terminal_id) {
           effectiveTerminalId = route.terminal_id;
           setActiveTerminalId(route.terminal_id);
+          const routeProviderRaw = String(route.van_provider || settings.providerType || 'KCP');
           kioskVanClient.setConfig({
-            provider: String(route.van_provider || settings.providerType || 'KCP').replace('_VAN', '') as any,
-            ...({ providerType: route.van_provider || settings.providerType } as any),
+            provider: normalizeVanProvider(routeProviderRaw),
+            providerType: String(route.van_provider || settings.providerType || ''),
             vcatPort: Number(route.vcat_port || settings.vcatPort) || 9099,
             terminalId: route.terminal_id,
           });
@@ -657,7 +654,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       }
     } else {
       setPayStep('INSERT_CARD');
-      const errCode = (res as any).errorCode || res.error_code;
+      const errCode = res.errorCode || res.error_code;
       if (errCode === 'E_USER_CANCEL' || isSilentCancelRef.current) {
         isSilentCancelRef.current = false;
         setErrorMsg('');

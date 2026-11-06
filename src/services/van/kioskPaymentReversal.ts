@@ -36,7 +36,7 @@ export async function executeKioskAutoReversal(
   params: ExecuteAutoReversalParams
 ): Promise<AutoReversalResult> {
   const { cardApproval, payAmount, reason, isTaxFree = false, vat, terminalId, storeCd, memberNo, prodCd } = params;
-  const apprStr = String((cardApproval as any)?.apprNo || cardApproval?.auth_code || '');
+  const apprStr = String(cardApproval?.apprNo || cardApproval?.auth_code || '');
 
   // 1. 0원 결제, 무료 쿠폰(FREE-), 전액 포인트(POINT-), 회원권(MEMBERSHIP) 등은 망취소 대상 아님
   if (
