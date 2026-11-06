@@ -70,7 +70,9 @@ export function encodeCode128B(
   rawValue: string,
   quietZoneModules: number = DEFAULT_QUIET_ZONE_MODULES
 ): EncodedCode128Result {
-  const safeQuiet = Math.max(10, Math.floor(quietZoneModules));
+  const safeQuiet = Number.isFinite(quietZoneModules)
+    ? Math.max(DEFAULT_QUIET_ZONE_MODULES, Math.floor(quietZoneModules))
+    : DEFAULT_QUIET_ZONE_MODULES;
   const normalizedText = normalizeCode128Text(rawValue);
 
   const dataValues: number[] = [];

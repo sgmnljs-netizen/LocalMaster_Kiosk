@@ -44,12 +44,11 @@ export function formatKioskHhMm(raw?: string | null): string {
   if (/^\d{2}:\d{2}/.test(trimmed)) {
     return trimmed.slice(0, 5);
   }
-  if (trimmed.includes('T')) {
-    const d = new Date(trimmed);
+  if (trimmed.includes('T') || /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(trimmed)) {
+    const d = TimeMaster.parseIsoAsKstDate(trimmed);
     if (!isNaN(d.getTime())) {
-      const hh = String(d.getHours()).padStart(2, '0');
-      const mm = String(d.getMinutes()).padStart(2, '0');
-      return `${hh}:${mm}`;
+      const { hours, minutes } = TimeMaster.getKstParts(d);
+      return `${hours}:${minutes}`;
     }
   }
   return trimmed;

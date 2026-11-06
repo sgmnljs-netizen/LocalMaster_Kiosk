@@ -54,16 +54,20 @@ export class TimeMaster {
     return `${hours}${minutes}`;
   }
 
-  /** Naive ISO 문자열(타임존 미포함)을 KST(+09:00)로 안전하게 정규화 파싱 */
-  private static parseIsoAsKstDate(isoLike: string): Date {
-    const hasExplicitTz = isoLike.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(isoLike);
-    if (!hasExplicitTz && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(isoLike)) {
-      return new Date(`${isoLike}+09:00`);
+  /** Naive ISO/SQLite 문자열(타임존 미포함)을 KST(+09:00)로 안전하게 정규화 파싱 */
+  static parseIsoAsKstDate(isoLike: string): Date {
+    const trimmed = String(isoLike || '').trim();
+    const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(trimmed)
+      ? trimmed.replace(/\s+/, 'T')
+      : trimmed;
+    const hasExplicitTz = normalized.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(normalized);
+    if (!hasExplicitTz && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(normalized)) {
+      return new Date(`${normalized}+09:00`);
     }
-    return new Date(isoLike);
+    return new Date(normalized);
   }
 
-  /** 타석 종료시간(ISO 8601 / HH:mm / HHmm) 안전 파싱 및 자정 경과(+24h) 보정 */
+  /** 타석 종료시간(ISO 8601 / HH:mm / HHmm) 안전 파싱 및 자정 경과(+24h) 보정 (KST 고정) */
   static parseSessionEnd(endTimeStr?: string | null, now: Date = new Date()): Date | null {
     if (!endTimeStr) return null;
     const trimmed = String(endTimeStr).trim();
@@ -77,18 +81,32 @@ export class TimeMaster {
       }
     }
 
-    // 2. 4자리 HHmm / HH:mm 전용 파서
+    // 2. 4자리 HHmm / HH:mm 전용 파서 (호스트 OS 타임존과 무관하게 KST 기준 파싱)
     const cleanTime = trimmed.replace(/[^0-9]/g, '');
     if (cleanTime.length !== 4) return null;
     const endHour = parseInt(cleanTime.substring(0, 2), 10);
     const endMin = parseInt(cleanTime.substring(2, 4), 10);
-    if (isNaN(endHour) || isNaN(endMin)) return null;
-    let endDt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), endHour, endMin, 0, 0);
-    // 자정 경과 세션 (예: 23:30 시작 ~ 00:30 종료 시 23시간 과거 산출 방지)
-    if (endDt.getTime() < now.getTime() - 12 * 3600 * 1000) {
-      endDt = new Date(endDt.getTime() + 24 * 3600 * 1000);
+    if (
+      isNaN(endHour) ||
+      isNaN(endMin) ||
+      endHour < 0 ||
+      endHour > 24 ||
+      endMin < 0 ||
+      endMin > 59 ||
+      (endHour === 24 && endMin > 0)
+    ) {
+      return null;
     }
-    return endDt;
+    const { year, month, day } = TimeMaster.getKstParts(now);
+    const hh = String(endHour === 24 ? 0 : endHour).padStart(2, '0');
+    const mm = String(endMin).padStart(2, '0');
+    const baseMs = Date.parse(`${year}-${month}-${day}T${hh}:${mm}:00+09:00`);
+    let endMs = endHour === 24 ? baseMs + 24 * 3600 * 1000 : baseMs;
+    // 자정 경과 세션 (예: 23:30 시작 ~ 00:30 종료 시 23시간 과거 산출 방지)
+    if (endMs < now.getTime() - 12 * 3600 * 1000) {
+      endMs += 24 * 3600 * 1000;
+    }
+    return new Date(endMs);
   }
 
   /** 서버 보정 현재 Date 객체 */
@@ -299,19 +317,34 @@ export class TimeMaster {
     return `${ymd} ${hours}:${minutes}:${seconds}`;
   }
 
-  /** 매장 마감시각까지 남은 분(minute) 산출 (심야 익일 마감 06:00~05:00 및 자정 00:00 마감 정밀 구분) */
+  /** 매장 마감시각까지 남은 분(minute) 산출 (심야 익일 마감 06:00~05:00 및 자정 00:00 마감 정밀 구분 — KST 고정) */
   static getMinutesUntilClose(storeCloseTime?: string | null, now: Date = TimeMaster.getSyncedDate()): number {
-    const rawClean = (storeCloseTime || '24:00').replace(':', '').padStart(4, '0');
+    const digitsOnly = String(storeCloseTime || '24:00').replace(/[^0-9]/g, '');
+    const rawClean = digitsOnly.length === 4 ? digitsOnly : '2400';
     const cleanClose = rawClean === '0000' ? '2400' : rawClean;
-    const closeH = parseInt(cleanClose.slice(0, 2), 10);
-    const closeM = parseInt(cleanClose.slice(2, 4), 10);
+    const parsedH = parseInt(cleanClose.slice(0, 2), 10);
+    const parsedM = parseInt(cleanClose.slice(2, 4), 10);
+    const isValidClose =
+      !isNaN(parsedH) &&
+      !isNaN(parsedM) &&
+      parsedH >= 0 &&
+      parsedH <= 24 &&
+      parsedM >= 0 &&
+      parsedM <= 59 &&
+      !(parsedH === 24 && parsedM > 0);
+    const closeH = isValidClose ? parsedH : 24;
+    const closeM = isValidClose ? parsedM : 0;
+
+    const { year, month, day, hours } = TimeMaster.getKstParts(now);
+    const nowKstHour = parseInt(hours, 10);
     const isOvernightClose = closeH === 24 || closeH < 6 || (closeH === 6 && closeM === 0);
-    const closeDt = new Date(now);
-    closeDt.setHours(closeH === 24 ? 0 : closeH, closeM, 0, 0);
-    if (closeH === 24 || (isOvernightClose && now.getHours() >= 6 && closeDt <= now)) {
-      closeDt.setDate(closeDt.getDate() + 1);
+    const hh = String(closeH === 24 ? 0 : closeH).padStart(2, '0');
+    const mm = String(closeM).padStart(2, '0');
+    let closeEpochMs = Date.parse(`${year}-${month}-${day}T${hh}:${mm}:00+09:00`);
+    if (closeH === 24 || (isOvernightClose && nowKstHour >= 6 && closeEpochMs <= now.getTime())) {
+      closeEpochMs += 24 * 3600 * 1000;
     }
-    return Math.floor((closeDt.getTime() - now.getTime()) / 60000);
+    return Math.floor((closeEpochMs - now.getTime()) / 60000);
   }
 }
 

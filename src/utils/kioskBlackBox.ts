@@ -7,6 +7,8 @@
  *   백엔드 `system_logs`로 비동기(Fire-and-Forget) 전송합니다.
  */
 
+import { TimeMaster } from './timeMaster';
+
 export const ENABLE_KIOSK_BLACKBOX = true;
 
 export type KioskBlackBoxCategory =
@@ -69,7 +71,7 @@ export function clearKioskBlackBox(): void {
 const SENSITIVE_SECRET_KEY_RE = /(password|passwd|pwd|pin|device_?key|secret|token|authorization|api_?key)/i;
 const SENSITIVE_CVC_KEY_RE = /^(cvc|cvv|cvv2|card_cvc|security_code)$/i;
 const SENSITIVE_CARD_KEY_RE = /^(card_no|cardno|cardnumber|card_number|card_num|pan)$/i;
-const RAW_PAN_DIGIT_RE = /\b(\d{6})[-\s]?(\d{2})\d{2}[-\s]?\d{4}[-\s]?(\d{3,4})\b/g;
+const RAW_PAN_DIGIT_RE = /\b(\d{4})[-\s]?(\d{2})[-\s]?\d{2}[-\s]?\d{4}[-\s]?(\d{3,4})\b/g;
 const RAW_PHONE_RE = /\b(01[016789])[-\s]?(\d{3,4})[-\s]?(\d{4})\b/g;
 
 export function maskKioskSensitiveData(value: unknown, depth = 0): unknown {
@@ -89,7 +91,7 @@ export function maskKioskSensitiveData(value: unknown, depth = 0): unknown {
       }
     }
     return value
-      .replace(RAW_PAN_DIGIT_RE, '$1-$2**-****-$3')
+      .replace(RAW_PAN_DIGIT_RE, '$1$2-**-****-$3')
       .replace(RAW_PHONE_RE, '$1-****-$3');
   }
 
@@ -133,7 +135,8 @@ export function recordKioskBlackBox(
   if (!ENABLE_KIOSK_BLACKBOX) return;
 
   const now = new Date();
-  const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}.${now.getMilliseconds().toString().padStart(3, '0')}`;
+  const { hours, minutes, seconds } = TimeMaster.getKstParts(now);
+  const timeStr = `${hours}:${minutes}:${seconds}.${now.getMilliseconds().toString().padStart(3, '0')}`;
 
   const safePayload = (payload !== undefined && payload !== null
     ? maskKioskSensitiveData(payload)
@@ -175,7 +178,7 @@ export function getFormattedKioskBlackBoxText(count = 15): string {
   const recentLogs = source.slice(0, count);
   const lines: string[] = [
     `### 📼 [키오스크 블랙박스] 직전 ${recentLogs.length}개 화면/터치/통신 이력`,
-    `*수집 시각: ${new Date().toLocaleString('ko-KR')}*`,
+    `*수집 시각: ${TimeMaster.formatKstDateTime(new Date())}*`,
     '```json',
   ];
 
