@@ -50,7 +50,7 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
 
     try {
       const storeInfo = await api.getStoreInfo().catch(() => null);
-      const resolvedOwner = receiptData.ownerNm || storeInfo?.owner_nm || storeInfo?.ceo_nm || (storeInfo as any)?.ceo_name || '';
+      const resolvedOwner = receiptData.ownerNm || storeInfo?.owner_nm || storeInfo?.ceo_nm || storeInfo?.ceo_name || '';
       if (resolvedOwner) {
         setOwnerNm(resolvedOwner);
       }
@@ -61,7 +61,7 @@ export const ReceiptPrinter: React.FC<ReceiptPrinterProps> = ({ receiptData, onC
 
       const resolvedStoreInfo = {
         store_name: receiptData.branchNm || storeInfo?.store_nm || 'GOLFOS',
-        biz_no: receiptData.bizNo || storeInfo?.biz_no || (storeInfo as any)?.biz_reg_no || '',
+        biz_no: receiptData.bizNo || storeInfo?.biz_no || storeInfo?.biz_reg_no || '',
         ceo_name: resolvedOwner,
         tel: receiptData.tel || storeInfo?.tel || storeInfo?.tel_no || '',
         address: receiptData.address || storeInfo?.address || '',

@@ -289,7 +289,7 @@ export const MemberRegister: React.FC<MemberRegisterProps> = ({
             console.warn('[Kiosk] 안면 단말기 동기화 실패 (가입은 정상 완료):', enrollResult?.message);
             res.member.face_registered = false;
             res.member.face_vector_id = null;
-            (res.member as any).face_enroll_warning = enrollResult?.message || '안면 단말기 동기화에 실패했습니다. 데스크에서 안면 재등록이 필요합니다.';
+            res.member.face_enroll_warning = enrollResult?.message || '안면 단말기 동기화에 실패했습니다. 데스크에서 안면 재등록이 필요합니다.';
             setErrorMsg(
               lang === 'EN'
                 ? 'Registration completed, but face terminal sync failed. Please re-register your face at the front desk.'

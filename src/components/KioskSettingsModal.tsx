@@ -19,6 +19,7 @@ import {
 } from '../stores/kioskSettings';
 import { api } from '../services/api';
 import { kioskVanClient } from '../services/van/van_client';
+import { normalizeVanProvider } from '../services/van/van_types';
 import { VirtualKeyboard, type VirtualKeyboardMode } from './VirtualKeyboard';
 
 interface KioskSettingsModalProps {
@@ -179,9 +180,15 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       // 백엔드 실시간 단말기 마스터 조회
       const fetchTerminals = async () => {
         try {
-          const res = (api as any).getKioskTerminals
-            ? await (api as any).getKioskTerminals().catch(() => null)
-            : await api.get('/v1/terminals').catch(() => null);
+          const terminalClient: {
+            getKioskTerminals?: () => Promise<TerminalDeviceItem[] | { data?: TerminalDeviceItem[] }>;
+            get?: <T = TerminalDeviceItem[]>(endpoint: string) => Promise<{ data: T }>;
+          } = api;
+          const res = typeof terminalClient.getKioskTerminals === 'function'
+            ? await terminalClient.getKioskTerminals().catch(() => null)
+            : typeof terminalClient.get === 'function'
+              ? await terminalClient.get<TerminalDeviceItem[]>('/v1/terminals').catch(() => null)
+              : null;
           const list = Array.isArray(res) ? res : (res?.data && Array.isArray(res.data) ? res.data : null);
           if (list && list.length > 0) {
             const customOpt: TerminalDeviceItem = {
@@ -366,8 +373,8 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
     }
 
     kioskVanClient.setConfig({
-      provider: normalizedProvider.replace('_VAN', '') as any,
-      ...({ providerType: normalizedProvider } as any),
+      provider: normalizeVanProvider(normalizedProvider),
+      providerType: normalizedProvider,
       vcatPort: Number(cleanVcatPort) || 9099,
       terminalId: cleanTerminalId,
     });
@@ -495,12 +502,12 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
             gap: '8px',
           }}
         >
-          {[
+          {([
             { key: 'device', label: '기기 식별 & 단말기', icon: <Monitor size={15} /> },
             { key: 'menus', label: '메뉴 & 인증 설정', icon: <LayoutGrid size={15} /> },
             { key: 'connection', label: '서버 / 연결 설정', icon: <Wifi size={15} /> },
             { key: 'maintenance', label: '운영 모드 & PIN', icon: <Shield size={15} /> },
-          ].map((tab) => {
+          ] as const).map((tab) => {
             const isTabActive = activeTab === tab.key;
             return (
               <button
@@ -509,7 +516,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                 data-testid={`settings-tab-${tab.key}`}
                 onClick={() => {
                   setActiveKeyboardField(null);
-                  setActiveTab(tab.key as any);
+                  setActiveTab(tab.key);
                 }}
                 style={{
                   padding: '11px 8px',

@@ -4,7 +4,7 @@ import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridg
 import { printKioskBayAllocationSlip } from '../utils/kioskSlipPrinter';
 import { useKioskSettings } from '../stores/kioskSettings';
 import { TimeMaster } from '../utils/timeMaster';
-import { api } from '../services/api';
+import { api, type KioskStoreInfo } from '../services/api';
 import { Code128BarcodeSvg } from './common/Code128BarcodeSvg';
 
 interface AllocationCompleteModalProps {
@@ -73,7 +73,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   const [isPrinting, setIsPrinting] = useState<boolean>(autoPrintReceipt);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
   const [hasPrintError, setHasPrintError] = useState<boolean>(false);
-  const [storeInfo, setStoreInfo] = useState<{ store_nm: string; address: string; tel: string; biz_no?: string; ceo_name?: string } | null>(null);
+  const [storeInfo, setStoreInfo] = useState<KioskStoreInfo | null>(null);
   const hasAutoPrintedRef = useRef(false);
   const isPrintingRef = useRef(false);
   const cardReceiptDoneRef = useRef(false);
@@ -106,8 +106,8 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
 
       const resolvedStoreInfo = {
         store_name: info?.store_nm || storeName,
-        biz_no: (info as any)?.biz_no || (info as any)?.biz_reg_no || '',
-        ceo_name: (info as any)?.ceo_name || (info as any)?.owner_name || '',
+        biz_no: info?.biz_no || info?.biz_reg_no || '',
+        ceo_name: info?.ceo_name || info?.owner_name || '',
         tel: info?.tel || '',
         address: info?.address || '',
       };

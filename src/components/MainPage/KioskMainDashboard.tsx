@@ -445,7 +445,7 @@ export default function KioskMainDashboard({
                           padding: '6px 14px', 
                           borderRadius: '999px', 
                           letterSpacing: '-0.2px',
-                          border: (theme as any).badgeBorder || (isPar3 ? '1px solid rgba(255, 255, 255, 0.35)' : theme.border)
+                          border: theme.badgeBorder || (isPar3 ? '1px solid rgba(255, 255, 255, 0.35)' : theme.border)
                         }}
                       >
                         {theme.badgeText}
