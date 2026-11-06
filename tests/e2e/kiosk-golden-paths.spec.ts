@@ -31,13 +31,14 @@ function resetDatabaseForTests() {
   try {
     const sql = `
       PRAGMA busy_timeout = 5000;
-      DELETE FROM reservation_master WHERE res_id LIKE 'KSK_%' OR (resource_type = 'BAY' AND resource_no IN ('11', '14', '18'));
-      DELETE FROM checkin_master WHERE res_id LIKE 'KSK_%' OR resource_no IN ('11', '14', '18');
+      DELETE FROM reservation_master WHERE res_id LIKE 'KSK_%' OR member_no = 'M260501' OR (resource_type = 'BAY' AND resource_no IN ('11', '14', '18'));
+      DELETE FROM checkin_master WHERE res_id LIKE 'KSK_%' OR member_no = 'M260501' OR resource_no IN ('11', '14', '18');
       UPDATE usage_master SET status_cd = 'FINISHED' WHERE facility_type = 'BAY' AND facility_no IN (11, 14, 18) AND status_cd IN ('RUN', 'ACTIVE', 'IN_USE');
       UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no IN (11, 14, 18);
       UPDATE member_items SET status = 'ACTIVE', rem_count = 99, end_dt = '2029-12-31' WHERE item_id = 1;
       INSERT OR REPLACE INTO members (id, member_no, store_cd, member_name, hp, grade_id, status_cd, total_point, unpaid_amt, is_group_leader, privacy_agree_yn, marketing_agree_yn, face_auth_yn, finger_auth_yn, use_yn) VALUES ('MEM-M260501', 'M260501', 'H01-SE-001', '김골프', '010-1234-5678', 'MANAGER', '10', 0, 0, 0, 'Y', 'Y', 'N', 'N', 'Y');
-      INSERT OR REPLACE INTO member_items (item_id, member_id, store_cd, product_id, product_nm, sub_type, start_dt, end_dt, total_count, rem_count, purchase_dt, status, deleted_at) VALUES (99901, 'MEM-M260501', 'H01-SE-001', 'PER-002', '타석이용권 1개월', 'PERIOD', '2026-01-01', '2029-12-31', 0, 0, '20260101', 'ACTIVE', 0);
+      INSERT OR REPLACE INTO member_items (item_id, member_id, store_cd, product_id, product_nm, sub_type, start_dt, end_dt, total_count, rem_count, purchase_dt, status, deleted_at) VALUES (99901, 'MEM-M260501', 'H01-SE-001', 'M002', '프리미엄 6개월', 'PERIOD', '2026-01-01', '2029-12-31', 0, 0, '20260101', 'ACTIVE', 0);
+      UPDATE products SET access_rules = json_set(COALESCE(access_rules, '{}'), '$.display_channel', json_array('POS', 'KIOSK', 'MOBILE')), meta_data = json_set(COALESCE(meta_data, '{}'), '$.sales_channels', json_array('POS', 'KIOSK', 'MOBILE')) WHERE store_cd = 'H01-SE-001' AND logic_type = 'DAILY' AND duration_min >= 30 AND deleted_at = 0;
       UPDATE lockers SET member_no = 'M260501', status = 'OCCUPIED', start_dt = '2026-01-01', end_dt = '2026-12-31' WHERE locker_no = 3;
       UPDATE store_info SET close_time = '05:00', meta_data = json_set(meta_data, '$.break_start', '', '$.break_end', '', '$.operation.break_start', '', '$.operation.break_end', '') WHERE store_cd = 'H01-SE-001';
     `.replace(/\n/g, ' ').trim();
@@ -112,8 +113,8 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(firstAssetItem).toBeVisible({ timeout: 5000 });
     await firstAssetItem.click();
 
-    // [선택한 이용권으로 배정] 버튼 클릭
-    const assignBtn = page.locator('button:has-text("선택한 이용권으로 배정")');
+    // [선택한 이용권으로 배정 / 선택 완료 — 배정하기] 버튼 클릭
+    const assignBtn = page.locator('button').filter({ hasText: /선택한 이용권으로 배정|선택 완료 — 배정하기/ }).first();
     await expect(assignBtn).toBeEnabled({ timeout: 5000 });
     await assignBtn.click();
 
@@ -207,7 +208,7 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await authenticateWithKeypad(page, '01012345678');
 
     // 4. 이동하실 타석 선택 화면 표출 확인
-    await expect(page.locator('text=이동하실 타석 선택')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=/이동하실 타석 선택|이동을 원하시는 빈 타석|이동하실 목적지 빈 타석/').first()).toBeVisible({ timeout: 10000 });
 
     // 5. 이동 목적지 빈 타석(18번) 카드 터치
     const targetBay = page.locator('span:text-is("18")').first();
@@ -283,9 +284,7 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
 
     // 2. 메인 대시보드에서 [회원권/상품 구매] 클릭
     await expect(page.locator('text=원하시는 서비스를 선택해 주세요')).toBeVisible({ timeout: 5000 });
-    const shopMenuCard = page.locator('div.apple-card-hover:has-text("회원권")')
-      .or(page.locator('text=회원권/상품 구매'))
-      .first();
+    const shopMenuCard = page.locator('text=회원권/상품 구매').first();
     await expect(shopMenuCard).toBeVisible({ timeout: 5000 });
     await shopMenuCard.click();
 
@@ -463,7 +462,7 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
     await expect(submitBtn).toBeEnabled({ timeout: 3000 });
     await submitBtn.click();
 
-    await expect(page.locator('text=등록되지 않은 모바일 회원 또는 NFC 카드입니다.')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=/등록되지 않은 모바일 회원/')).toBeVisible({ timeout: 5000 });
 
     // 6. [돌아가기] 클릭 시 크래시 없이 타석 맵 또는 배정 선택 모달로 안전 복귀
     const backBtn = page.locator('button:has-text("돌아가기")').first();

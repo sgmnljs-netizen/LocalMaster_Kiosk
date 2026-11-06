@@ -75,7 +75,7 @@ test.describe('Layer 1: 키오스크 스모크 크롤러 (Smoke Crawler)', () =>
     // 2) 회원권/상품 구매 메뉴 진입 -> 비로그인 시 회원 인증(스마트폰 태그/안면 인식) 진입 확인
     await expect(page.locator('text=회원권/상품 구매').first()).toBeVisible({ timeout: 5000 });
     await page.locator('text=회원권/상품 구매').first().click();
-    await expect(page.getByRole('heading', { name: /회원 인증/ })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('heading', { name: /회원\s*(본인\s*)?인증/ })).toBeVisible({ timeout: 5000 });
 
     // 돌아가기
     const backBtnAuth = page.locator('button:has-text("돌아가기")').first();
