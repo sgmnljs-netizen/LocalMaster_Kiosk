@@ -28,6 +28,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const failDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resetIdleTimer = useCallback(() => {
     if (idleTimerRef.current) {
@@ -50,14 +51,24 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
       setLockoutUntil(null);
       setIsVerifying(false);
       resetIdleTimer();
-    } else if (idleTimerRef.current) {
-      clearTimeout(idleTimerRef.current);
-      idleTimerRef.current = null;
+    } else {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      if (failDelayTimerRef.current) {
+        clearTimeout(failDelayTimerRef.current);
+        failDelayTimerRef.current = null;
+      }
     }
     return () => {
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
         idleTimerRef.current = null;
+      }
+      if (failDelayTimerRef.current) {
+        clearTimeout(failDelayTimerRef.current);
+        failDelayTimerRef.current = null;
       }
     };
   }, [isOpen, resetIdleTimer]);
@@ -102,7 +113,11 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   const applyPinFailure = () => {
     const nextFail = failCount + 1;
     setFailCount(nextFail);
-    setTimeout(() => {
+    if (failDelayTimerRef.current) {
+      clearTimeout(failDelayTimerRef.current);
+    }
+    failDelayTimerRef.current = setTimeout(() => {
+      failDelayTimerRef.current = null;
       if (nextFail >= 5) {
         const until = Date.now() + 30000;
         setLockoutUntil(until);

@@ -396,10 +396,10 @@ export const generateDefault50Bays = (): Bay[] => {
 };
 
 export const DEFAULT_50_ZONES = [
-  { zone_cd: 'BAY', zone_name: '1F 메인 아카데미 (1~20번)', floor_no: 1 },
-  { zone_cd: 'BAY_2F', zone_name: '2F 프리미엄 스튜디오 (21~40번)', floor_no: 2 },
-  { zone_cd: 'BAY_3F', zone_name: '3F 루프탑 VIP 타석 (41~50번)', floor_no: 3 },
-  { zone_cd: 'PAR3', zone_name: '천연잔디 PAR3 코스', floor_no: 1 },
+  { zone_cd: 'BAY', zone_code: 'BAY', zone_name: '1F 메인 아카데미 (1~20번)', floor_no: 1 },
+  { zone_cd: 'BAY_2F', zone_code: 'BAY_2F', zone_name: '2F 프리미엄 스튜디오 (21~40번)', floor_no: 2 },
+  { zone_cd: 'BAY_3F', zone_code: 'BAY_3F', zone_name: '3F 루프탑 VIP 타석 (41~50번)', floor_no: 3 },
+  { zone_cd: 'PAR3', zone_code: 'PAR3', zone_name: '천연잔디 PAR3 코스', floor_no: 1 },
 ];
 
 export const LM_SCHEMA_VERSION = 'v20261030_prod_clean_v5';
@@ -429,11 +429,37 @@ export const isStrictOnlineStoreRuntime = (forceProdCheck?: boolean): boolean =>
 // 💾 Edge DB Initializer (LocalStorage 기반 가상 DB — 데모 시드는 명시적 데모 모드에서만 적재)
 // --------------------------------------------------------------------------
 
+export function safeParseStorageArray<T = unknown>(key: string): T[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function safeParseStorageObject<T extends object = Record<string, unknown>>(key: string): T {
+  if (typeof localStorage === 'undefined') return {} as T;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return {} as T;
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as T)
+      : ({} as T);
+  } catch {
+    return {} as T;
+  }
+}
+
 const initializeEdgeDB = () => {
   if (typeof localStorage === 'undefined') return;
   // [P0-02] 구버전 스키마 감지 시 설정값(lm-kiosk-settings, LM_KIOSK_TERMINAL_ID, kiosk_zoom_scale, LM_KIOSK_AUDIT_LOGS)은 보존하고 캐시 키만 제거
   const currentVersion = localStorage.getItem('LM_SCHEMA_VERSION');
-  const existingBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
+  const existingBays = safeParseStorageArray<Bay>('LM_BAYS');
   
   if (currentVersion !== LM_SCHEMA_VERSION) {
     console.warn(`[Auto-Heal] 구버전 캐시 감지 (${currentVersion} -> ${LM_SCHEMA_VERSION}). 캐시 데이터 키 선택 초기화를 실행합니다.`);
@@ -470,8 +496,8 @@ const initializeEdgeDB = () => {
     }
 
     // 4. 데모 전용 상품 목록 (PRODUCTS)
-    const existingProducts = JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]');
-    if (!existingProducts || existingProducts.length === 0) {
+    const existingProducts = safeParseStorageArray<Product>('LM_PRODUCTS');
+    if (existingProducts.length === 0) {
       localStorage.setItem('LM_PRODUCTS', JSON.stringify([
         { prod_cd: 'D01', prod_nm: '일일 타석 60분', standard_price: 20000, sale_price: 20000, logic_type: 'DAILY', duration_min: 60 },
         { prod_cd: 'D02', prod_nm: '일일 타석 90분', standard_price: 28000, sale_price: 28000, logic_type: 'DAILY', duration_min: 90 },
@@ -482,8 +508,8 @@ const initializeEdgeDB = () => {
     }
 
     // 5. 데모 전용 회원 목록 (MEMBERS)
-    const existingMembers = JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]');
-    if (!existingMembers || existingMembers.length === 0) {
+    const existingMembers = safeParseStorageArray<Member>('LM_MEMBERS');
+    if (existingMembers.length === 0) {
       localStorage.setItem('LM_MEMBERS', JSON.stringify([
         { member_no: 'M001', member_name: '홍길동', hp: '010-1234-5678', member_grade: '일반', grade_cd: 'GENERAL', status_cd: 'ACTIVE', total_point: 5000, discount_rate: 0.0 },
         { member_no: 'M002', member_name: '이골프', hp: '010-9988-7766', member_grade: '우수', grade_cd: 'GOLD', status_cd: 'ACTIVE', total_point: 12000, discount_rate: 5.0 },
@@ -863,24 +889,24 @@ class HybridAPIClient {
       }
     }
 
-    const cachedBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]');
-    const baysToReturn = (Array.isArray(cachedBays) && cachedBays.length > 0)
+    const cachedBays = safeParseStorageArray<Bay>('LM_BAYS');
+    const baysToReturn = cachedBays.length > 0
       ? cachedBays
       : (isDemoEnvironment() ? generateDefault50Bays() : []);
 
-    const cachedZones = JSON.parse(localStorage.getItem('LM_ZONES') || '[]');
-    const zonesToReturn = (cachedZones && cachedZones.length > 0)
+    const cachedZones = safeParseStorageArray<KioskZone>('LM_ZONES');
+    const zonesToReturn = cachedZones.length > 0
       ? cachedZones
       : (isDemoEnvironment() ? DEFAULT_50_ZONES : []);
 
     return {
-      store_info: JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}'),
+      store_info: safeParseStorageObject<NonNullable<KioskMasterResponse['store_info']>>('LM_STORE_INFO'),
       zones: zonesToReturn,
       bays: baysToReturn,
-      lockers: JSON.parse(localStorage.getItem('LM_LOCKERS') || '[]'),
-      products: JSON.parse(localStorage.getItem('LM_PRODUCTS') || '[]'),
-      members: JSON.parse(localStorage.getItem('LM_MEMBERS') || '[]'),
-      par3_slots: JSON.parse(localStorage.getItem('LM_PAR3_SLOTS') || '[]')
+      lockers: safeParseStorageArray<Locker>('LM_LOCKERS'),
+      products: safeParseStorageArray<Product>('LM_PRODUCTS'),
+      members: safeParseStorageArray<Member>('LM_MEMBERS'),
+      par3_slots: safeParseStorageArray<Par3Slot>('LM_PAR3_SLOTS')
     };
   }
 
@@ -1332,7 +1358,25 @@ class HybridAPIClient {
       }
     }
     // Offline Fallback
-    const cached = JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}');
+    const cached = safeParseStorageObject('LM_STORE_INFO') as {
+      phone_no?: string;
+      tel?: string;
+      tel_no?: string;
+      owner_nm?: string;
+      owner_name?: string;
+      ceo_name?: string;
+      ceo_nm?: string;
+      biz_no?: string;
+      biz_reg_no?: string;
+      business_no?: string;
+      store_nm?: string;
+      checkin_policy?: string;
+      address?: string;
+      close_time?: string;
+      logo_url?: string;
+      photo_url?: string;
+      meta_data?: Record<string, unknown>;
+    };
     const fallbackTel = cached.phone_no || cached.tel || cached.tel_no || '1566-8705';
     const fallbackCeo = cached.owner_nm || cached.owner_name || cached.ceo_name || cached.ceo_nm || '대표이사';
     const fallbackBizNo = cached.biz_no || cached.biz_reg_no || cached.business_no || '721-81-04039';

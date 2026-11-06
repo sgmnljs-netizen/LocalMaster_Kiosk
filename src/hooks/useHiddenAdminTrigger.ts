@@ -1,8 +1,17 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 export function useHiddenAdminTrigger(requiredTaps: number = 5, timeoutMs: number = 3000) {
   const tapCountRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleTap = useCallback((onTrigger: () => void) => {
     tapCountRef.current += 1;

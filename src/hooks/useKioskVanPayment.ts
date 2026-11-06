@@ -110,7 +110,10 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
         clearTimer();
 
-        if (!res.success) {
+        if (res.success) {
+          updateVanState('APPROVED');
+          setError(null);
+        } else {
           if (res.error_code === 'E_USER_CANCEL' || res.errorCode === 'E_USER_CANCEL') {
             if (isTimeoutRef.current) {
               updateVanState('TIMEOUT');
@@ -121,6 +124,13 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
               setError(res.error_message || '결제가 취소되었습니다.');
             }
           } else {
+            if (
+              stateRef.current === 'READY' ||
+              stateRef.current === 'WAITING_CARD' ||
+              stateRef.current === 'REQUESTING'
+            ) {
+              updateVanState(res.error_code === 'E_TIMEOUT' ? 'TIMEOUT' : 'REJECTED');
+            }
             setError(res.error_message || '결제가 승인되지 않았습니다.');
           }
         }
@@ -156,12 +166,13 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
   useEffect(() => {
     return () => {
-      if (isProcessing) {
+      const current = stateRef.current;
+      if (current === 'READY' || current === 'WAITING_CARD' || current === 'REQUESTING') {
         kioskVanClient.cancelCurrentRequest();
       }
       clearTimer();
     };
-  }, [isProcessing, clearTimer]);
+  }, [clearTimer]);
 
   return {
     state,
