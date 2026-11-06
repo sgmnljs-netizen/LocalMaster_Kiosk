@@ -12,7 +12,7 @@ interface UseHardwareScannerOptions {
   maxKeystrokeIntervalMs?: number;
 }
 
-function resolveScannerChar(e: KeyboardEvent, isInputFocused: boolean): string | null {
+export function resolveScannerChar(e: KeyboardEvent, isInputFocused: boolean): string | null {
   if (e.ctrlKey || e.altKey || e.metaKey) return null;
 
   // 일반 ASCII 단일 문자 (영문/숫자/기호)
