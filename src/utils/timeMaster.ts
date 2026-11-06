@@ -224,7 +224,7 @@ export class TimeMaster {
       end_epoch_ms?: number | null;
       is_paused?: boolean;
       duration_min?: number | null;
-      status_info?: Record<string, any> | null;
+      status_info?: Record<string, unknown> | null;
     } | null,
     now?: Date | number
   ): number {
@@ -315,13 +315,18 @@ export class TimeMaster {
   }
 }
 
-export const isBayAvailable = (bay: any): boolean =>
+export interface BayStatusProbe {
+  status?: string | null;
+  is_active?: boolean | null;
+}
+
+export const isBayAvailable = (bay?: BayStatusProbe | null): boolean =>
   Boolean(bay && bay.is_active !== false && (bay.status === 'AVAILABLE' || bay.status === 'OPEN'));
 
-export const isBayOccupied = (bay: any): boolean =>
+export const isBayOccupied = (bay?: BayStatusProbe | null): boolean =>
   Boolean(bay && ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(String(bay.status || '').toUpperCase()));
 
-export const isBayBlocked = (bay: any): boolean =>
+export const isBayBlocked = (bay?: BayStatusProbe | null): boolean =>
   Boolean(
     !bay ||
       bay.is_active === false ||

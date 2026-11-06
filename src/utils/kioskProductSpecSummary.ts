@@ -136,16 +136,16 @@ export interface DailyPassEligibilityResult {
   modalMessage: string | null;
 }
 
-function parseRecord(raw: unknown): Record<string, any> {
+function parseRecord(raw: unknown): Record<string, unknown> {
   if (!raw) return {};
   if (typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, any>;
+    return raw as Record<string, unknown>;
   }
   if (typeof raw === 'string' && raw.trim().startsWith('{')) {
     try {
-      const parsed = JSON.parse(raw);
+      const parsed: unknown = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, any>;
+        return parsed as Record<string, unknown>;
       }
     } catch {
       return {};
@@ -296,7 +296,7 @@ function isHolidayClosedSetting(holidaySchedule: unknown): boolean {
   return false;
 }
 
-function summarizeDayRestriction(rules: Record<string, any>): {
+function summarizeDayRestriction(rules: Record<string, unknown>): {
   chipLabel: string | null;
   summaryLabel: string | null;
 } {
@@ -438,14 +438,15 @@ function summarizeDayRestriction(rules: Record<string, any>): {
 }
 
 function summarizeTimeRestriction(
-  rules: Record<string, any>,
-  metaObj: Record<string, any>,
+  rules: Record<string, unknown>,
+  metaObj: Record<string, unknown>,
   scheduleNotice?: string | null
 ): string | null {
   const timeObj = rules.time;
   if (timeObj && typeof timeObj === 'object' && !Array.isArray(timeObj)) {
-    const s = timeObj.start ?? timeObj.start_time;
-    const e = timeObj.end ?? timeObj.end_time;
+    const timeRec = timeObj as Record<string, unknown>;
+    const s = timeRec.start ?? timeRec.start_time;
+    const e = timeRec.end ?? timeRec.end_time;
     if (s && e) {
       const norm = normalizeTimeRangeLabel(`${String(s)}~${String(e)}`);
       if (norm) return norm;
@@ -464,8 +465,9 @@ function summarizeTimeRestriction(
       return Array.from(new Set(slotLabels)).join(', ');
     }
   } else if (timeSlots && typeof timeSlots === 'object' && !Array.isArray(timeSlots)) {
-    const wk = normalizeTimeRangeLabel(extractSlotRangeString(timeSlots.weekday));
-    const we = normalizeTimeRangeLabel(extractSlotRangeString(timeSlots.weekend));
+    const slotRec = parseRecord(timeSlots);
+    const wk = normalizeTimeRangeLabel(extractSlotRangeString(slotRec.weekday));
+    const we = normalizeTimeRangeLabel(extractSlotRangeString(slotRec.weekend));
     if (wk && we) {
       return wk === we ? wk : `평일 ${wk} · 주말 ${we}`;
     }
@@ -528,14 +530,23 @@ function mergeProductZoneLabelMap(
   return merged;
 }
 
+interface ExceptionScheduleEntry {
+  duration_min?: number | string | null;
+  days?: unknown[];
+  start_time?: string | null;
+  end_time?: string | null;
+}
+
 function summarizeExceptionScheduleBonus(
-  rules: Record<string, any>,
+  rules: Record<string, unknown>,
   baseDurationMin: number
 ): string | null {
-  const exList = Array.isArray(rules.exception_schedule) ? rules.exception_schedule : [];
+  const exList = Array.isArray(rules.exception_schedule)
+    ? (rules.exception_schedule as ExceptionScheduleEntry[])
+    : [];
   if (exList.length === 0) return null;
 
-  const diffRules = exList.filter((ex: any) => {
+  const diffRules = exList.filter((ex) => {
     const dur = Number(ex?.duration_min ?? 0);
     return dur > 0 && dur !== baseDurationMin;
   });
@@ -567,7 +578,7 @@ function summarizeExceptionScheduleBonus(
 
 function summarizeZoneRestriction(
   prod: Product,
-  rules: Record<string, any>,
+  rules: Record<string, unknown>,
   skipZoneSummary: boolean,
   context?: KioskProductSpecContext
 ): { chipLabel: string | null; summaryLabel: string | null } {
@@ -1148,7 +1159,7 @@ export function evaluateDailyPassEligibility(
   const allowedDays = rules.allowed_days ?? rules.days ?? rules.available_days;
   const holidaySchedule = rules.holiday_schedule;
   const timeSlots = rules.time_slots ?? rules.allowed_time_slots;
-  const timeObj = rules.time && typeof rules.time === 'object' && !Array.isArray(rules.time) ? rules.time : {};
+  const timeObj = parseRecord(rules.time);
   const availStart = rules.available_start_time ?? rules.start_time ?? timeObj.start ?? timeObj.start_time;
   const availEnd = rules.available_end_time ?? rules.end_time ?? timeObj.end ?? timeObj.end_time;
 

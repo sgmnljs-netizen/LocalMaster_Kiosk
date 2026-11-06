@@ -46,8 +46,8 @@ export function normalizeYmdDigits(raw?: string | null): string {
 export function extractProductAllowedCategories(product?: {
   prod_nm?: string | null;
   logic_type?: string | null;
-  access_rules?: Record<string, any> | null;
-  rules_detail?: Record<string, any> | null;
+  access_rules?: Record<string, unknown> | null;
+  rules_detail?: Record<string, unknown> | null;
 } | null): string[] {
   if (!product) return [];
   const rules = product.access_rules || product.rules_detail || {};
@@ -127,16 +127,16 @@ export function canAllocatePracticeBayImmediately(
   return true;
 }
 
-function parseJsonObjectSafe(raw: unknown): Record<string, any> {
+function parseJsonObjectSafe(raw: unknown): Record<string, unknown> {
   if (!raw) return {};
   if (typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, any>;
+    return raw as Record<string, unknown>;
   }
   if (typeof raw === 'string' && raw.trim()) {
     try {
-      const parsed = JSON.parse(raw);
+      const parsed: unknown = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, any>;
+        return parsed as Record<string, unknown>;
       }
     } catch {
       return {};
@@ -192,9 +192,9 @@ export function isKioskChannelProduct(
     is_stock_managed?: boolean | null;
     is_bundle?: boolean | null;
     current_stock?: number | null;
-    meta_data?: Record<string, any> | string | null;
-    access_rules?: Record<string, any> | string | null;
-    rules_detail?: Record<string, any> | string | null;
+    meta_data?: Record<string, unknown> | string | null;
+    access_rules?: Record<string, unknown> | string | null;
+    rules_detail?: Record<string, unknown> | string | null;
   } | null
 ): boolean {
   if (!prod) return false;
@@ -274,9 +274,9 @@ export function isKioskLockerExtensionProduct(
     sale_price?: number | null;
     standard_price?: number | null;
     total_count?: number | null;
-    meta_data?: Record<string, any> | string | null;
-    access_rules?: Record<string, any> | string | null;
-    rules_detail?: Record<string, any> | string | null;
+    meta_data?: Record<string, unknown> | string | null;
+    access_rules?: Record<string, unknown> | string | null;
+    rules_detail?: Record<string, unknown> | string | null;
   } | null
 ): boolean {
   if (!prod || !isKioskChannelProduct(prod)) return false;
@@ -347,8 +347,8 @@ export function isKioskLockerExtensionProduct(
 export function resolveLockerExtendDays(
   prod?: {
     days?: number | null;
-    access_rules?: Record<string, any> | string | null;
-    rules_detail?: Record<string, any> | string | null;
+    access_rules?: Record<string, unknown> | string | null;
+    rules_detail?: Record<string, unknown> | string | null;
   } | null
 ): number {
   const directDays = Number(prod?.days ?? 0);
@@ -382,8 +382,8 @@ export interface LockerRenewalWindowEvaluation {
  */
 export function evaluateLockerRenewalWindow(
   prod?: {
-    access_rules?: Record<string, any> | string | null;
-    rules_detail?: Record<string, any> | string | null;
+    access_rules?: Record<string, unknown> | string | null;
+    rules_detail?: Record<string, unknown> | string | null;
   } | null,
   lockerRemainDays?: number | null,
   lang: 'KO' | 'EN' | string = 'KO'
