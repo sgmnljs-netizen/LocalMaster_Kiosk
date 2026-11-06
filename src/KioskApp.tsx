@@ -387,11 +387,12 @@ export default function KioskApp() {
         void hydrateKioskDeviceSettingsFromServer();
         const kioskConfig = await api.getKioskSystemSettings();
         if (kioskConfig) {
-          if (kioskConfig.menu_zone_mappings) {
+          if (Array.isArray(kioskConfig.menu_zone_mappings)) {
+            const nextMappings = kioskConfig.menu_zone_mappings;
             setKioskMenuConfigs(prev => {
-              const nextStr = JSON.stringify(kioskConfig.menu_zone_mappings);
+              const nextStr = JSON.stringify(nextMappings);
               const prevStr = JSON.stringify(prev);
-              return nextStr !== prevStr ? kioskConfig.menu_zone_mappings : prev;
+              return nextStr !== prevStr ? nextMappings : prev;
             });
           }
           setIsKioskActive(kioskConfig.is_active ?? true);

@@ -94,7 +94,7 @@ export interface Member {
     end_dt?: string | null;
     expiry_date?: string | null;
     status?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   } | null;
   assets?: MemberAsset[];
   face_registered?: boolean;
@@ -125,7 +125,7 @@ export interface Par3Slot {
 export interface BayStatusInfo {
   code?: string;
   is_transferable?: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface Bay {
@@ -227,6 +227,28 @@ export interface Locker {
   end_dt?: string | null; // YYYY-MM-DD or YYYYMMDD
 }
 
+export interface ProductRulesSpec {
+  duration_min?: number;
+  days?: number;
+  total_count?: number;
+  restricted_gender?: string;
+  [key: string]: unknown;
+}
+
+export interface GroupAllocationItemResult {
+  bay_no?: number;
+  duration_min?: number;
+  start_time?: string;
+  startTime?: string;
+  end_time?: string;
+  endTime?: string;
+  res_id?: string;
+  hardware_success?: boolean;
+  success?: boolean;
+  message?: string;
+  [key: string]: unknown;
+}
+
 export interface Product {
   prod_cd: string;
   prod_nm: string;
@@ -246,8 +268,8 @@ export interface Product {
   business_merchant_id?: string;
   pro_id?: string | number;
   target_gender?: string | null;
-  access_rules?: Record<string, any> | null;
-  rules_detail?: Record<string, any> | null;
+  access_rules?: ProductRulesSpec | null;
+  rules_detail?: ProductRulesSpec | null;
   badge?: string | null;
   display_nm?: string | null;
   schedule_notice?: string | null;
@@ -259,13 +281,100 @@ export interface Product {
   unusable_now_reason?: string | null;
   meta_data?: {
     display_nm?: string;
+    badge?: string;
     badges?: string[];
     pos_button?: {
       badge?: string;
       color?: string;
     };
-    [key: string]: any;
+    [key: string]: unknown;
   } | null;
+}
+
+export interface KioskStoreMetaData {
+  integration?: {
+    face_terminal_yn?: boolean;
+    face_terminals?: Array<{
+      id?: string;
+      name?: string;
+      ip?: string;
+      role?: string;
+      device_type?: string;
+      is_active?: boolean;
+      [key: string]: unknown;
+    }>;
+    active_ips?: string[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export interface KioskMenuConfig {
+  menu_id: string;
+  menu_name?: string;
+  description?: string;
+  zone_ids?: (string | number)[];
+  is_active?: boolean;
+  sort_order?: number;
+  icon_type?: string;
+}
+
+export interface KioskSystemSettingsResponse {
+  is_active?: boolean;
+  inactive_notice?: string;
+  menu_zone_mappings?: KioskMenuConfig[];
+  [key: string]: unknown;
+}
+
+export interface KioskDisplayCategory {
+  category_id: number;
+  name: string;
+  sort_order: number;
+  products?: Product[];
+  items: Product[];
+  [key: string]: unknown;
+}
+
+export interface KioskCouponItem {
+  coupon_no: string;
+  policy_id?: string;
+  coupon_name?: string;
+  coupon_nm?: string;
+  coupon_type?: 'PERCENT' | 'FIXED' | string;
+  benefit_type?: 'RATE' | 'FIX' | string;
+  benefit_val?: number;
+  discount_rate?: number;
+  discount_amount?: number;
+  min_order_amt?: number;
+  max_discount_amt?: number;
+  target_categories?: string[];
+  status?: string;
+  status_cd?: string;
+  valid_until?: string;
+  valid_to?: string;
+  valid_from?: string;
+  success?: boolean;
+  message?: string;
+}
+
+export interface KioskTerminalInfo {
+  device_id: string;
+  device_name: string;
+  device_type: string;
+  van_provider: string;
+  terminal_id: string;
+  vcat_port: number;
+  [key: string]: unknown;
+}
+
+export interface KioskAuditLogItem {
+  timestamp?: string;
+  action?: string;
+  detail?: string;
+  memberNo?: string;
+  traceId?: string;
+  errorType?: string;
+  [key: string]: unknown;
 }
 
 export interface KioskStoreInfo {
@@ -284,7 +393,7 @@ export interface KioskStoreInfo {
   close_time: string;
   logo_url?: string;
   photo_url?: string;
-  meta_data?: any;
+  meta_data?: KioskStoreMetaData | string | null;
 }
 
 export interface KioskCheckinReservation {
@@ -337,7 +446,7 @@ export interface KioskMasterResponse {
     ceo_name?: string;
     owner_nm?: string;
     close_time?: string;
-    meta_data?: any;
+    meta_data?: KioskStoreMetaData | string | null;
   };
   zones?: KioskZone[];
   bays?: Bay[];
@@ -345,8 +454,8 @@ export interface KioskMasterResponse {
   products?: Product[];
   par3_slots?: Par3Slot[];
   members?: Member[];
-  display_categories?: any[];
-  config?: any;
+  display_categories?: KioskDisplayCategory[];
+  config?: KioskSystemSettingsResponse | Record<string, unknown> | null;
 }
 
 // --------------------------------------------------------------------------
@@ -608,7 +717,7 @@ class HybridAPIClient {
   /**
    * 🔌 키오스크 단말기 목록 조회 (/v1/kiosk/terminals)
    */
-  async getKioskTerminals(): Promise<any[]> {
+  async getKioskTerminals(): Promise<KioskTerminalInfo[]> {
     try {
       const storeCd = this.getStoreCd();
       const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/terminals?store_cd=${encodeURIComponent(storeCd)}`, {
@@ -616,7 +725,7 @@ class HybridAPIClient {
       });
       if (res.ok) {
         const data = await res.json();
-        return Array.isArray(data) ? data : data?.items || [];
+        return (Array.isArray(data) ? data : data?.items || []) as KioskTerminalInfo[];
       }
     } catch (err) {
       console.warn('[Kiosk Terminals] Failed to load terminal list:', err);
@@ -642,7 +751,7 @@ class HybridAPIClient {
     error?: boolean;
     status?: number;
     message?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   }> {
     const settings = getKioskSettings();
     const isSubUnit =
@@ -763,7 +872,7 @@ class HybridAPIClient {
           : upper.startsWith('GOLFOS_MEMBER')
             ? 'BLE'
             : 'NFC');
-      const payload: Record<string, any> = {
+      const payload: Record<string, unknown> = {
         store_cd: this.getStoreCd(),
         auth_type: resolvedAuthType,
         token_or_uid: tagUid,
@@ -786,7 +895,7 @@ class HybridAPIClient {
         if (data.member_no || data.member) {
           const resolved = (data.member || data) as Member;
           if (Array.isArray(resolved.assets)) {
-            resolved.assets = resolved.assets.map((a: any) => ({
+            resolved.assets = resolved.assets.map((a: MemberAsset) => ({
               ...a,
               rem_count: a.rem_count ?? a.remain_cnt,
               remain_cnt: a.remain_cnt ?? a.rem_count,
@@ -1424,14 +1533,14 @@ class HybridAPIClient {
   }
 
   // 동적 키오스크 시스템 설정 (메뉴 On/Off 및 구역 매칭) 조회
-  async getKioskSystemSettings(): Promise<any> {
+  async getKioskSystemSettings(): Promise<KioskSystemSettingsResponse | null> {
     if (isDemoEnvironment()) return null;
     try {
       const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/config?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
         headers: this.getSecureHeaders()
       });
       if (res.ok) {
-        const data = await res.json();
+        const data = (await res.json()) as KioskSystemSettingsResponse | null;
         return data || null;
       }
     } catch (err) {
@@ -2040,24 +2149,7 @@ class HybridAPIClient {
   }
 
   // 쿠폰 실시간 검증 API
-  async verifyCoupon(couponNo: string): Promise<{
-    coupon_no: string;
-    coupon_name?: string;
-    coupon_nm?: string;
-    coupon_type?: 'PERCENT' | 'FIXED' | string;
-    benefit_type?: 'RATE' | 'FIX' | string;
-    benefit_val?: number;
-    discount_rate?: number;
-    discount_amount?: number;
-    min_order_amt?: number;
-    max_discount_amt?: number;
-    target_categories?: string[];
-    status?: string;
-    status_cd?: string;
-    valid_until?: string;
-    valid_to?: string;
-    valid_from?: string;
-  }> {
+  async verifyCoupon(couponNo: string): Promise<KioskCouponItem> {
     const cleanBase = this.getBaseUrl().replace(/\/api$/, '');
     const res = await fetch(`${cleanBase}/api/marketing/coupons/verify/${encodeURIComponent(couponNo)}`, {
       headers: this.getSecureHeaders({ 'Content-Type': 'application/json' })
@@ -2070,22 +2162,7 @@ class HybridAPIClient {
   }
 
   // 시리얼 쿠폰 등록 및 지갑 적재 API
-  async registerSerialCoupon(serialCode: string, memberNo: string): Promise<{
-    coupon_no: string;
-    coupon_name?: string;
-    coupon_nm?: string;
-    benefit_type?: 'RATE' | 'FIX' | string;
-    benefit_val?: number;
-    discount_rate?: number;
-    discount_amount?: number;
-    min_order_amt?: number;
-    max_discount_amt?: number;
-    target_categories?: string[];
-    valid_to?: string;
-    valid_from?: string;
-    success?: boolean;
-    message?: string;
-  }> {
+  async registerSerialCoupon(serialCode: string, memberNo: string): Promise<KioskCouponItem> {
     const cleanBase = this.getBaseUrl().replace(/\/api$/, '');
     const res = await fetch(`${cleanBase}/api/marketing/coupons/register-serial`, {
       method: 'POST',
@@ -2103,22 +2180,7 @@ class HybridAPIClient {
   }
 
   // 회원 보유 유효 할인쿠폰 목록 조회 API
-  async getMemberCoupons(memberNo: string): Promise<Array<{
-    coupon_no: string;
-    policy_id?: string;
-    coupon_name?: string;
-    coupon_nm?: string;
-    benefit_type?: 'RATE' | 'FIX' | string;
-    benefit_val?: number;
-    discount_rate?: number;
-    discount_amount?: number;
-    min_order_amt?: number;
-    max_discount_amt?: number;
-    target_categories?: string[];
-    status_cd?: string;
-    valid_from?: string;
-    valid_to?: string;
-  }>> {
+  async getMemberCoupons(memberNo: string): Promise<KioskCouponItem[]> {
     if (!memberNo || !memberNo.trim()) return [];
     try {
       const cleanBase = this.getBaseUrl().replace(/\/api$/, '');
@@ -2132,11 +2194,16 @@ class HybridAPIClient {
       if (!res.ok) return [];
       const data = await res.json();
       if (!Array.isArray(data)) return [];
-      return data.filter((c: any) => {
+      return (data as KioskCouponItem[]).filter((c) => {
         const st = String(c.status_cd || '').toUpperCase();
         return !st || st === 'UNUSED' || st === 'ACTIVE' || st === '10';
       });
-    } catch {
+    } catch (err) {
+      recordKioskBlackBox(
+        'API_ERROR',
+        '[COUPON_LIST_WARN] 회원 보유 쿠폰 목록 조회 실패',
+        err instanceof Error ? err.message : String(err)
+      );
       return [];
     }
   }
@@ -2452,7 +2519,7 @@ class HybridAPIClient {
   ): Promise<{
     success: boolean;
     message: string;
-    results?: any[];
+    results?: GroupAllocationItemResult[];
     allocatedBayNos?: number[];
     closingPrompt?: {
       code: string;
@@ -2606,7 +2673,15 @@ class HybridAPIClient {
         } else {
           const errData = await res.json().catch(() => ({}));
           const detailObj = errData?.detail;
-          let parsedClosingPrompt: any = undefined;
+          let parsedClosingPrompt: {
+            code: string;
+            reason?: string;
+            max_available_min: number;
+            total_gap_min?: number;
+            prepare_min?: number;
+            close_time: string;
+            message: string;
+          } | undefined = undefined;
           if (res.status === 409 && detailObj) {
             if (typeof detailObj === 'string') {
               try {
@@ -2661,7 +2736,7 @@ class HybridAPIClient {
       };
     }
 
-    const results: any[] = [];
+    const results: GroupAllocationItemResult[] = [];
     const allocatedBayNos: number[] = [];
     let firstPaidAssigned = false;
 
@@ -2885,19 +2960,25 @@ class HybridAPIClient {
         if (res.ok) {
           const prods = await res.json();
           if (Array.isArray(prods)) {
-            const normalizedProds: Product[] = prods
-              .filter((p: any) => isKioskChannelProduct(p))
-              .map((p: any) => ({
-                ...p,
-                vat_yn: p.vat_yn,
-                tax_rate: p.tax_rate,
-                business_unit_type: p.business_unit_type,
-                business_merchant_id: p.business_merchant_id,
-                pro_id: p.pro_id,
-                total_count: p.total_count,
-                target_gender: p.target_gender || p.access_rules?.restricted_gender || 'ALL',
-                access_rules: p.access_rules,
-              }));
+            const normalizedProds: Product[] = (prods as Array<Product & Record<string, unknown>>)
+              .filter((p) => isKioskChannelProduct(p))
+              .map((p) => {
+                const restrictedGender =
+                  p.access_rules && typeof p.access_rules.restricted_gender === 'string'
+                    ? p.access_rules.restricted_gender
+                    : undefined;
+                return {
+                  ...p,
+                  vat_yn: p.vat_yn,
+                  tax_rate: p.tax_rate,
+                  business_unit_type: p.business_unit_type,
+                  business_merchant_id: p.business_merchant_id,
+                  pro_id: p.pro_id,
+                  total_count: p.total_count,
+                  target_gender: p.target_gender || restrictedGender || 'ALL',
+                  access_rules: p.access_rules,
+                };
+              });
             localStorage.setItem('LM_PRODUCTS', JSON.stringify(normalizedProds));
             return normalizedProds;
           }
@@ -3152,7 +3233,7 @@ class HybridAPIClient {
     const payloadLockerId = !Number.isNaN(numericLockerId) && numericLockerId > 0 ? numericLockerId : 0;
     if (isConnected || !isDemoEnvironment()) {
       try {
-        const payloadBody: any = {
+        const payloadBody: Record<string, unknown> = {
           locker_id: payloadLockerId,
           locker_no: lockerNo ?? lockerId,
           member_no: memberNo || undefined,
@@ -3591,8 +3672,8 @@ class HybridAPIClient {
   }
 
   // 감사 로그 전체 조회
-  async getKioskLogs(): Promise<any[]> {
-    return JSON.parse(localStorage.getItem('LM_KIOSK_AUDIT_LOGS') || '[]') as unknown[];
+  async getKioskLogs(): Promise<KioskAuditLogItem[]> {
+    return JSON.parse(localStorage.getItem('LM_KIOSK_AUDIT_LOGS') || '[]') as KioskAuditLogItem[];
   }
 
   // 12. 키오스크 신규 회원 가입 (30초 즉석 회원가입)
@@ -3703,20 +3784,20 @@ class HybridAPIClient {
    * 매장 메타데이터(integration.face_terminals)에서 무인키오스크 전용 안면인식 단말기 IP를 우선 해석합니다.
    * 멀티 단말기 환경(포스용 + 키오스크용)에서 포스 단말기(active_ips[0])로 잘못 라우팅되는 문제를 원천 차단합니다.
    */
-  resolveKioskFaceTerminalIp(metaData?: any): string {
+  resolveKioskFaceTerminalIp(metaData?: unknown): string {
     try {
       let rawMeta = metaData;
       if (!rawMeta) {
-        const cachedStore = JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}');
+        const cachedStore = JSON.parse(localStorage.getItem('LM_STORE_INFO') || '{}') as { meta_data?: unknown };
         rawMeta = cachedStore?.meta_data;
       }
-      const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : rawMeta;
+      const meta = (typeof rawMeta === 'string' ? JSON.parse(rawMeta) : rawMeta) as KioskStoreMetaData | null | undefined;
       const integration = meta?.integration;
       if (integration && Array.isArray(integration.face_terminals)) {
         const activeTerminals = integration.face_terminals.filter(
-          (t: any) => t && t.is_active !== false && typeof t.ip === 'string' && t.ip.trim().length > 0
+          (t) => Boolean(t && t.is_active !== false && typeof t.ip === 'string' && t.ip.trim().length > 0)
         );
-        const kioskTerminal = activeTerminals.find((t: any) => {
+        const kioskTerminal = activeTerminals.find((t) => {
           const role = String(t.role || t.device_type || '').toUpperCase();
           const name = String(t.name || '').toLowerCase();
           const id = String(t.id || '').toLowerCase();
@@ -4475,7 +4556,7 @@ class HybridAPIClient {
   }
 
   // 18. 키오스크 전용 전시 카테고리 로드 API
-  async getKioskDisplayCategories(): Promise<any[]> {
+  async getKioskDisplayCategories(): Promise<KioskDisplayCategory[]> {
     const isConnected = await this.checkConnection();
     const storeCd = this.getStoreCd();
     if (isConnected) {
@@ -4486,25 +4567,34 @@ class HybridAPIClient {
         if (res.ok) {
           const categories = await res.json();
           if (Array.isArray(categories)) {
-            return categories.map((cat: any) => {
-              const rawItems = Array.isArray(cat.products)
-                ? cat.products
-                : Array.isArray(cat.items)
-                  ? cat.items
-                  : [];
-              const normalized = rawItems
-                .filter((p: any) => isKioskChannelProduct(p))
-                .map((p: any) => ({
-                  ...p,
-                  vat_yn: p.vat_yn || 'Y',
-                  tax_rate: p.tax_rate ?? 0.1,
-                  business_unit_type: p.business_unit_type || 'STORE',
-                  business_merchant_id: p.business_merchant_id || null,
-                  pro_id: p.pro_id || null,
-                  total_count: p.total_count ?? p.count_val ?? 0,
-                  target_gender: p.target_gender || p.access_rules?.restricted_gender || 'ALL',
-                  access_rules: p.access_rules || null,
-                }));
+            return (categories as Array<KioskDisplayCategory & Record<string, unknown>>).map((cat) => {
+              const rawItems = (
+                Array.isArray(cat.products)
+                  ? cat.products
+                  : Array.isArray(cat.items)
+                    ? cat.items
+                    : []
+              ) as Array<Product & Record<string, unknown>>;
+              const normalized: Product[] = rawItems
+                .filter((p) => isKioskChannelProduct(p))
+                .map((p) => {
+                  const restrictedGender =
+                    p.access_rules && typeof p.access_rules.restricted_gender === 'string'
+                      ? p.access_rules.restricted_gender
+                      : undefined;
+                  const countVal = typeof p.count_val === 'number' ? p.count_val : 0;
+                  return {
+                    ...p,
+                    vat_yn: p.vat_yn || 'Y',
+                    tax_rate: p.tax_rate ?? 0.1,
+                    business_unit_type: p.business_unit_type || 'STORE',
+                    business_merchant_id: p.business_merchant_id || undefined,
+                    pro_id: p.pro_id || undefined,
+                    total_count: p.total_count ?? countVal,
+                    target_gender: p.target_gender || restrictedGender || 'ALL',
+                    access_rules: p.access_rules || null,
+                  };
+                });
               return {
                 ...cat,
                 products: normalized,
@@ -4512,7 +4602,7 @@ class HybridAPIClient {
               };
             });
           }
-          return categories;
+          return [];
         }
       } catch (err) {
         console.error('Failed to fetch kiosk display categories:', err);
@@ -4521,7 +4611,7 @@ class HybridAPIClient {
     return []; // EdgeDB Fallback 시 빈 리스트
   }
 
-  async getDisplayCategories(): Promise<any[]> {
+  async getDisplayCategories(): Promise<KioskDisplayCategory[]> {
     return this.getKioskDisplayCategories();
   }
 
@@ -4531,6 +4621,8 @@ class HybridAPIClient {
     storeCd?: string;
     member_no?: string;
     memberNo?: string;
+    prod_cd?: string;
+    prodCd?: string;
     terminalId?: string;
     terminal_id?: string;
     deviceType?: string;
@@ -4550,12 +4642,21 @@ class HybridAPIClient {
     reversalErrorReason?: string;
     reversal_error_reason?: string;
     rawApprovalData?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   }): Promise<{ success: boolean; dlq_id?: string; message?: string }> {
     const storeCd = params.store_cd || params.storeCd || this.getStoreCd();
     const terminalId = params.terminalId || params.terminal_id || this.getTerminalId() || 'KIOSK-01';
     const authNo = params.authNo || params.auth_no || params.auth_code || '';
-    const dlqPayload = {
+    const resolvedMemberNo = params.member_no || params.memberNo;
+    const resolvedProdCd = params.prod_cd || params.prodCd;
+    const fallbackRawContext =
+      !params.rawApprovalData && (resolvedMemberNo || resolvedProdCd)
+        ? JSON.stringify({
+            ...(resolvedMemberNo ? { member_no: resolvedMemberNo } : {}),
+            ...(resolvedProdCd ? { prod_cd: resolvedProdCd } : {}),
+          })
+        : undefined;
+    const dlqPayload: Record<string, unknown> = {
       store_cd: storeCd,
       terminal_id: terminalId,
       device_type: params.deviceType || 'KIOSK',
@@ -4567,7 +4668,7 @@ class HybridAPIClient {
       approved_at: params.approvedAt,
       backend_error_reason: params.backendErrorReason || params.error_reason || '미기재',
       reversal_error_reason: params.reversalErrorReason || params.reversal_error_reason || '미기재',
-      raw_approval_data: params.rawApprovalData,
+      raw_approval_data: params.rawApprovalData ?? fallbackRawContext,
     };
     try {
       const res = await fetchWithPaymentRetry(
@@ -4583,7 +4684,7 @@ class HybridAPIClient {
         {
           label: '유령 결제(DLQ) 비상 보고',
           retryDelaysMs: getDlqRetryDelaysMs(),
-          idempotencyKey: dlqPayload.van_tr_no || authNo || undefined,
+          idempotencyKey: (typeof dlqPayload.van_tr_no === 'string' ? dlqPayload.van_tr_no : '') || authNo || undefined,
         }
       );
       if (res.ok) {
@@ -4600,7 +4701,7 @@ class HybridAPIClient {
       storeCd,
       terminalId,
       authCode: authNo,
-      vanTrNo: dlqPayload.van_tr_no,
+      vanTrNo: typeof dlqPayload.van_tr_no === 'string' ? dlqPayload.van_tr_no : undefined,
       amount: params.amount,
       payload: dlqPayload,
     });
@@ -4612,7 +4713,8 @@ class HybridAPIClient {
    */
   async flushPendingPaymentOutbox(): Promise<{ flushed: number; remaining: number }> {
     return PaymentOutboxManager.flushPendingDlq(async (dlqPayload) => {
-      const storeCd = dlqPayload.store_cd || this.getStoreCd();
+      const rawStoreCd = typeof dlqPayload.store_cd === 'string' ? dlqPayload.store_cd : '';
+      const storeCd = rawStoreCd || this.getStoreCd();
       const res = await fetch(`${this.getBaseUrl()}/sales/dlq/report-ghost-charge`, {
         method: 'POST',
         headers: this.getSecureHeaders({

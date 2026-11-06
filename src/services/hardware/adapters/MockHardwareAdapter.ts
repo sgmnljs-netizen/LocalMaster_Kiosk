@@ -37,9 +37,9 @@ export class MockScannerAdapter implements IScannerAdapter {
 
   constructor() {
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-      window.addEventListener('lm-kiosk-mock-barcode-scan', ((e: any) => {
+      window.addEventListener('lm-kiosk-mock-barcode-scan', ((e: CustomEvent<{ barcode?: string }>) => {
         if (e.detail?.barcode) {
-          this.handlers.forEach((h) => h(e.detail.barcode));
+          this.handlers.forEach((h) => h(e.detail.barcode as string));
         }
       }) as EventListener);
     }

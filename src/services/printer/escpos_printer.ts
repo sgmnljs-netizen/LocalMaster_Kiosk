@@ -302,8 +302,9 @@ export class KioskEscPosPrinterService {
           return { success: false, message: errJson.message };
         }
         return { success: false, message: `프린터 출력 실패 (HTTP ${res.status})` };
-      } catch (err: any) {
-        if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      } catch (err: unknown) {
+        const errName = err instanceof Error ? err.name : '';
+        if (errName === 'TimeoutError' || errName === 'AbortError') {
           return { success: false, message: '프린터 출력 응답 대기 시간 초과' };
         }
         // 연결 거부(데몬 미구동 포트)인 경우에만 다음 포트 시도
@@ -317,14 +318,19 @@ export class KioskEscPosPrinterService {
         const ports = await navigator.serial.getPorts();
         if (ports.length > 0) {
           const port = ports[0];
-          let writer: any = null;
+          interface SerialPortWriter {
+            write: (chunk: Uint8Array) => Promise<void>;
+            releaseLock: () => void;
+          }
+          let writer = null as SerialPortWriter | null;
           let timeoutId: ReturnType<typeof setTimeout> | null = null;
           try {
             await Promise.race([
               (async () => {
                 await port.open({ baudRate: 9600 });
-                writer = port.writable.getWriter();
-                await writer.write(buffer);
+                const serialWriter = port.writable.getWriter() as SerialPortWriter;
+                writer = serialWriter;
+                await serialWriter.write(buffer);
               })(),
               new Promise<never>((_, reject) => {
                 timeoutId = setTimeout(() => reject(new Error('WebSerial print timeout (3000ms)')), 3000);

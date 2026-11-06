@@ -30,7 +30,7 @@ export interface PaymentOutboxEntry {
   amount: number;
   purpose?: string;
   endpoint?: string;
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
 }
 
 export const PAYMENT_RESILIENCE_CONFIG = {
@@ -297,7 +297,7 @@ export class PaymentOutboxManager {
     amount: number;
     purpose?: string;
     endpoint?: string;
-    payload: Record<string, any>;
+    payload: Record<string, unknown>;
   }): string {
     const cleanAuth = String(params.authCode || '').trim();
     const id = cleanAuth
@@ -332,7 +332,7 @@ export class PaymentOutboxManager {
     authCode: string;
     vanTrNo?: string;
     amount: number;
-    payload: Record<string, any>;
+    payload: Record<string, unknown>;
   }): string {
     const cleanAuth = String(params.authCode || '').trim();
     const dedupKey = `DLQ_${params.storeCd}_${cleanAuth}_${params.amount}`;
@@ -382,7 +382,7 @@ export class PaymentOutboxManager {
    * 정전/강제종료로 미확정 방치된 Stale WAL(60초 경과) 건들을 백엔드로 자동 재전송(Auto-Flush)합니다.
    */
   static async flushPendingDlq(
-    sendDlqFn: (payload: Record<string, any>) => Promise<boolean>
+    sendDlqFn: (payload: Record<string, unknown>) => Promise<boolean>
   ): Promise<{ flushed: number; remaining: number }> {
     const entries = this.getEntries();
     if (entries.length === 0) {
