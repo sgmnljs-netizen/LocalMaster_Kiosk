@@ -12,6 +12,32 @@ import {
 
 export type AuthMode = 'SMART_TAG' | 'PHONE_KEYPAD' | 'QR_SCAN' | 'FACE';
 
+type MemberLookupEnvelope = Partial<Member> & {
+  candidates?: Member[];
+  duplicate?: boolean;
+  error?: string;
+};
+
+interface LmNfcTagEventDetail {
+  member_no?: string;
+  token_or_uid?: string;
+  tag_uid?: string;
+  query?: string;
+  hp?: string;
+  rssi?: number;
+  auth_type?: 'BLE' | 'NFC' | 'QR';
+}
+
+declare global {
+  interface Window {
+    __LM_TRIGGER_SMART_AUTH__?: (
+      tokenOrUid: string,
+      rssi?: number,
+      authType?: 'BLE' | 'NFC' | 'QR'
+    ) => Promise<void>;
+  }
+}
+
 // [H-4] MemberAuth 언마운트 후 즉시 재진입 시에도 앞사람 BLE 시퀀스를 재소비하지 않도록 모듈 레벨 기억
 let _lastGlobalHandledBleSeq = 0;
 
@@ -139,18 +165,20 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       const cleanToken = tokenOrUid.trim();
       const normalizedQuery = /^[0-9]{8}$/.test(cleanToken) ? `010${cleanToken}` : cleanToken;
       const isDirectKeypadPhone = /^[0-9]{8,11}$/.test(cleanToken) && !authType;
-      const member = !isDirectKeypadPhone && (api as any).authenticateSmartTag
-        ? await (api as any).authenticateSmartTag(normalizedQuery, rssi, authType)
-        : await api.getMember(normalizedQuery);
-      if (Array.isArray(member) && member.length > 1) {
-        setDuplicateCandidates(member);
-      } else if ((member as any)?.candidates && Array.isArray((member as any).candidates) && (member as any).candidates.length > 0) {
-        setDuplicateCandidates((member as any).candidates);
-      } else if ((member as any)?.duplicate || (member as any)?.error === 'DUPLICATE_PHONE') {
+      const rawMember: Member | Member[] | MemberLookupEnvelope | null =
+        !isDirectKeypadPhone && typeof api.authenticateSmartTag === 'function'
+          ? await api.authenticateSmartTag(normalizedQuery, rssi, authType)
+          : await api.getMember(normalizedQuery);
+      const lookupObj = (!Array.isArray(rawMember) ? rawMember : null) as MemberLookupEnvelope | null;
+      if (Array.isArray(rawMember) && rawMember.length > 1) {
+        setDuplicateCandidates(rawMember);
+      } else if (lookupObj?.candidates && Array.isArray(lookupObj.candidates) && lookupObj.candidates.length > 0) {
+        setDuplicateCandidates(lookupObj.candidates);
+      } else if (lookupObj?.duplicate || lookupObj?.error === 'DUPLICATE_PHONE') {
         setPhoneDigits('');
         setErrorMsg('동일한 번호를 사용하는 회원이 여러 명 있습니다. 프런트 데스크에 문의해 주세요.');
-      } else if (member) {
-        const resolved = Array.isArray(member) ? member[0] : member;
+      } else if (rawMember) {
+        const resolved = (Array.isArray(rawMember) ? rawMember[0] : rawMember) as Member;
         if (!resolved.masked_name && resolved.member_name) {
           resolved.masked_name = buildMaskedName(resolved.member_name);
         }
@@ -189,28 +217,29 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
 
   // 🛡️ E2E 테스트 및 외부 하드웨어 브릿지용 전역 헬퍼 및 이벤트 리스너 (BUG-M05)
   useEffect(() => {
-    (window as any).__LM_TRIGGER_SMART_AUTH__ = (
+    window.__LM_TRIGGER_SMART_AUTH__ = (
       tokenOrUid: string,
       rssi?: number,
       authType?: 'BLE' | 'NFC' | 'QR'
     ) => handleSmartTagDetected(tokenOrUid, undefined, rssi, authType);
-    const handleCustomTagEvent = (e: any) => {
+    const handleCustomTagEvent = (e: Event) => {
       if (!isSmartTagEnabled) return;
+      const detail = (e as CustomEvent<LmNfcTagEventDetail>).detail;
       const target =
-        e.detail?.member_no ||
-        e.detail?.token_or_uid ||
-        e.detail?.tag_uid ||
-        e.detail?.query ||
-        e.detail?.hp;
-      const rssi = typeof e.detail?.rssi === 'number' ? e.detail.rssi : undefined;
-      const authType = e.detail?.auth_type as ('BLE' | 'NFC' | 'QR' | undefined);
+        detail?.member_no ||
+        detail?.token_or_uid ||
+        detail?.tag_uid ||
+        detail?.query ||
+        detail?.hp;
+      const rssi = typeof detail?.rssi === 'number' ? detail.rssi : undefined;
+      const authType = detail?.auth_type;
       if (target) {
         handleSmartTagDetected(String(target), undefined, rssi, authType);
       }
     };
     window.addEventListener('lm-nfc-tag', handleCustomTagEvent);
     return () => {
-      delete (window as any).__LM_TRIGGER_SMART_AUTH__;
+      delete window.__LM_TRIGGER_SMART_AUTH__;
       window.removeEventListener('lm-nfc-tag', handleCustomTagEvent);
     };
   }, [handleSmartTagDetected, isSmartTagEnabled]);
@@ -1386,8 +1415,8 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                       ? `${primary.item_name} 외 ${assignableAssets.length - 1}건 보유`
                       : `${primary.item_name}${remCnt != null ? ` (잔여 ${remCnt}회)` : ''}`;
                   }
-                  if ((detectedMember as any).item_name) {
-                    return (detectedMember as any).item_name;
+                  if (detectedMember.item_name) {
+                    return detectedMember.item_name;
                   }
                   return `회원번호 ${detectedMember.member_no} · 일일권/상품 이용 가능`;
                 })()}
