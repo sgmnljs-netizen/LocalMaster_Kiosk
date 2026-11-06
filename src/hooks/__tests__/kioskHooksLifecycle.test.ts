@@ -226,6 +226,29 @@ describe('W3-KSK-hooks: 키오스크 커스텀 훅 타이머·상태머신·언�
       hook.unmount();
       expect(clearTimeoutSpy).toHaveBeenCalled();
     });
+
+    it('연속 5회 탭 시 정확히 1회 트리거되고 timeoutMs 경과 시 누적 탭 카운트가 0으로 초기화된다', () => {
+      const onTrigger = vi.fn();
+      const hook = mountHook(() => useHiddenAdminTrigger(5, 2000));
+
+      for (let i = 0; i < 4; i += 1) {
+        hook.current.handleTap(onTrigger);
+      }
+      expect(onTrigger).not.toHaveBeenCalled();
+
+      // 2초 타임아웃 경과 -> 탭 카운트 리셋
+      vi.advanceTimersByTime(2000);
+      hook.current.handleTap(onTrigger);
+      expect(onTrigger).not.toHaveBeenCalled();
+
+      // 나머지 4회 연속 탭 -> 총 5회 도달로 트리거 발동
+      for (let i = 0; i < 4; i += 1) {
+        hook.current.handleTap(onTrigger);
+      }
+      expect(onTrigger).toHaveBeenCalledTimes(1);
+
+      hook.unmount();
+    });
   });
 
   describe('useKioskVanPayment', () => {
@@ -336,6 +359,42 @@ describe('W3-KSK-hooks: 키오스크 커스텀 훅 타이머·상태머신·언�
       hook.unmount();
       expect(cancelSpy).toHaveBeenCalledTimes(1);
     });
+
+    it('렌더 반영 전 더블탭으로 startPayment가 동시 호출되어도 진행 중 세션을 훼손하지 않고 E_BUSY로 즉시 차단한다', async () => {
+      let resolveFirst!: (res: CardApprovalResult) => void;
+      const reqSpy = vi.spyOn(kioskVanClient, 'requestCardPayment').mockImplementation((_params, onStateChange) => {
+        onStateChange?.('WAITING_CARD');
+        return new Promise<CardApprovalResult>((resolve) => {
+          resolveFirst = resolve;
+        });
+      });
+
+      const hook = mountHook(() => useKioskVanPayment());
+      const firstPromise = hook.current.startPayment({ amount: 25000, timeoutSeconds: 10 });
+      const secondResult = await hook.current.startPayment({ amount: 25000, timeoutSeconds: 10 });
+
+      expect(secondResult.success).toBe(false);
+      expect(secondResult.error_code).toBe('E_BUSY');
+      expect(reqSpy).toHaveBeenCalledTimes(1);
+      expect(hook.current.state).toBe('WAITING_CARD');
+
+      resolveFirst({
+        success: true,
+        auth_code: '55443322',
+        approved_at: '2026-11-06T20:00:00+09:00',
+        card_no_masked: '941012-**-****-1111',
+        issuer_name: '국민카드',
+        acquirer_name: '국민카드',
+        terminal_id: '88010003',
+        amount: 25000,
+        installment_months: 0,
+      });
+
+      const firstResult = await firstPromise;
+      expect(firstResult.success).toBe(true);
+      expect(hook.current.state).toBe('APPROVED');
+      hook.unmount();
+    });
   });
 
   describe('useKioskHardwareHeartbeat & probeKioskHardwareHealthOnce', () => {
@@ -372,6 +431,48 @@ describe('W3-KSK-hooks: 키오스크 커스텀 훅 타이머·상태머신·언�
 
       hb.unmount();
       expect(clearIntervalSpy).toHaveBeenCalled();
+    });
+
+    it('프로브 진행 중 focus·설정변경 이벤트가 겹쳐도 병렬 중첩 실행 없이 단일 직렬 재점검(Coalesced Recheck)으로 최신 설정을 반영한다', async () => {
+      let activeVcatProbes = 0;
+      let maxConcurrentVcatProbes = 0;
+      const requestedUrls: string[] = [];
+
+      storageMap.set(
+        'lm-kiosk-settings',
+        JSON.stringify({ providerType: 'KCP_VAN', vcatPort: '9099', storeCode: 'S-HB-01' })
+      );
+
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        if (url.includes('/status')) {
+          activeVcatProbes += 1;
+          maxConcurrentVcatProbes = Math.max(maxConcurrentVcatProbes, activeVcatProbes);
+          await Promise.resolve();
+          await Promise.resolve();
+          activeVcatProbes -= 1;
+          return new Response(JSON.stringify({ isOnline: true, status: 'ONLINE' }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ status: 'ONLINE', printer_status: 'ONLINE' }), { status: 200 });
+      });
+
+      const hb = mountHook(() => useKioskHardwareHeartbeat());
+      // 프로브 1 진행 도중 SMARTRO(:8089)로 설정 변경 후 focus/settings 이벤트 동시 발생
+      storageMap.set(
+        'lm-kiosk-settings',
+        JSON.stringify({ providerType: 'SMARTRO_VAN', vcatPort: '8089', storeCode: 'S-HB-01' })
+      );
+      const p1 = hb.current.checkHealth();
+      const p2 = hb.current.checkHealth();
+      await Promise.all([p1, p2]);
+
+      expect(maxConcurrentVcatProbes).toBe(1);
+      expect(requestedUrls.some((u) => u.includes('127.0.0.1:9099/vcat/status'))).toBe(true);
+      expect(requestedUrls.some((u) => u.includes('127.0.0.1:8089/smartro/status'))).toBe(true);
+      expect(getKioskHardwareHealth().vcatStatus).toBe('ONLINE');
+
+      hb.unmount();
     });
   });
 });

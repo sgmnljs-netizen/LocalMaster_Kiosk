@@ -35,6 +35,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isTimeoutRef = useRef<boolean>(false);
   const stateRef = useRef<VanPaymentState>('IDLE');
+  const inFlightRef = useRef<boolean>(false);
 
   const updateVanState = useCallback((next: VanPaymentState) => {
     stateRef.current = next;
@@ -60,6 +61,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const reset = useCallback(() => {
     clearTimer();
     isTimeoutRef.current = false;
+    inFlightRef.current = false;
     updateVanState('IDLE');
     setRemainingSeconds(KIOSK_VAN_APPROVAL_TIMEOUT_SEC);
     setError(null);
@@ -68,6 +70,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
   const cancelPayment = useCallback(() => {
     isTimeoutRef.current = false;
+    inFlightRef.current = false;
     kioskVanClient.cancelCurrentRequest();
     clearTimer();
     updateVanState('CANCELLED');
@@ -76,7 +79,23 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
   const startPayment = useCallback(
     async (params: CardPaymentRequestParams): Promise<CardApprovalResult> => {
+      if (inFlightRef.current) {
+        return {
+          success: false,
+          auth_code: '',
+          approved_at: new Date().toISOString(),
+          card_no_masked: '',
+          issuer_name: '',
+          acquirer_name: '',
+          terminal_id: kioskVanClient.getConfig().terminalId,
+          amount: params.amount,
+          installment_months: params.installmentMonths ?? 0,
+          error_code: 'E_BUSY',
+          error_message: '이미 결제가 진행 중입니다.',
+        };
+      }
       reset();
+      inFlightRef.current = true;
       isTimeoutRef.current = false;
       const totalTimeout = params.timeoutSeconds || KIOSK_VAN_APPROVAL_TIMEOUT_SEC;
       setRemainingSeconds(totalTimeout);
@@ -157,9 +176,11 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         };
         setResult(failResult);
         return failResult;
+      } finally {
+        inFlightRef.current = false;
       }
     },
-    [reset, clearTimer]
+    [reset, clearTimer, updateVanState]
   );
 
   const isProcessing = state === 'READY' || state === 'WAITING_CARD' || state === 'REQUESTING';

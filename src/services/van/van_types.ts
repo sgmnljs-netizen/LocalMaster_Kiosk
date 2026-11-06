@@ -25,6 +25,7 @@ export type VanErrorCode =
   | 'E_INVALID_AMOUNT' // 유효하지 않은 금액
   | 'E_INVALID_AUTH_NO' // 취소 시 승인번호 불일치
   | 'E_NETWORK_ERROR' // VAN사 통신망 장애
+  | 'E_BUSY' // 단말기 이미 결제 진행 중(중복 호출 방어)
   | 'E_UNKNOWN';
 
 /** 단말기 결제 요청 파라미터 */
