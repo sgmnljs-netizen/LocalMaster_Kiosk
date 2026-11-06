@@ -182,17 +182,26 @@ export async function fetchWithPaymentRetry(
 
   try {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (init.signal?.aborted) {
+        const callerAbortErr = new Error('Aborted by caller');
+        callerAbortErr.name = 'AbortError';
+        throw callerAbortErr;
+      }
+
       const controller = new AbortController();
+      const onCallerAbort = () => controller.abort();
+      if (init.signal) {
+        init.signal.addEventListener('abort', onCallerAbort, { once: true });
+      }
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         const fetchInit: RequestInit = {
           ...init,
           headers: Object.keys(baseHeaders).length > 0 ? baseHeaders : init.headers,
-          signal: init.signal ?? controller.signal,
+          signal: controller.signal,
         };
         const response = await fetch(url, fetchInit);
-        clearTimeout(timer);
 
         if (response.ok || !isRetryableHttpStatus(response.status)) {
           clearPaymentRetryStatus();
@@ -200,7 +209,7 @@ export async function fetchWithPaymentRetry(
         }
 
         // 5xx / 408 / 429 일시 장애 -> 남은 재시도가 있으면 대기 후 재시도
-        if (attempt < maxRetries) {
+        if (attempt < maxRetries && !init.signal?.aborted) {
           const waitMs = delays[attempt];
           notifyPaymentRetryStatus({
             active: true,
@@ -215,13 +224,18 @@ export async function fetchWithPaymentRetry(
 
         clearPaymentRetryStatus();
         return response;
-      } catch (err: any) {
-        clearTimeout(timer);
+      } catch (err: unknown) {
         lastError = err;
+
+        // 호출자 시그널이 명시적으로 취소된 경우 백오프 재시도 없이 즉시 전파
+        if (init.signal?.aborted) {
+          throw err;
+        }
 
         if (attempt < maxRetries) {
           const waitMs = delays[attempt];
-          const isAbort = err?.name === 'AbortError';
+          const errName = err instanceof Error ? err.name : '';
+          const isAbort = errName === 'AbortError';
           notifyPaymentRetryStatus({
             active: true,
             attempt: attempt + 1,
@@ -231,6 +245,11 @@ export async function fetchWithPaymentRetry(
           });
           await sleep(waitMs);
           continue;
+        }
+      } finally {
+        clearTimeout(timer);
+        if (init.signal) {
+          init.signal.removeEventListener('abort', onCallerAbort);
         }
       }
     }

@@ -2186,7 +2186,7 @@ class HybridAPIClient {
       message: string;
     };
   }> {
-    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const todayStr = TimeMaster.getKstYmd(TimeMaster.getSyncedDate()).replace(/-/g, '');
     const storeCd = this.getStoreCd();
     const extraOptions = typeof extraOrUsedPoints === 'object' && extraOrUsedPoints !== null
       ? extraOrUsedPoints
@@ -3074,13 +3074,13 @@ class HybridAPIClient {
     }
 
     if (mIdx !== -1) {
-      const today = new Date();
+      const syncedToday = TimeMaster.getSyncedDate();
       members[mIdx].recent_product_nm = targetProd.prod_nm;
       
       if (targetProd.days) {
-        const exp = new Date();
+        const exp = new Date(syncedToday.getTime());
         exp.setDate(exp.getDate() + targetProd.days);
-        members[mIdx].expiry_date = exp.toISOString().slice(0, 10);
+        members[mIdx].expiry_date = TimeMaster.getKstYmd(exp);
         members[mIdx].remain_days = targetProd.days;
       }
       localStorage.setItem('LM_MEMBERS', JSON.stringify(members));
@@ -3088,7 +3088,7 @@ class HybridAPIClient {
       const sales = JSON.parse(localStorage.getItem('LM_SALES') || '[]') as unknown[];
       sales.push({
         sale_id: `S-${Date.now()}`,
-        sale_dt: today.toISOString().slice(0, 10).replace(/-/g, ''),
+        sale_dt: TimeMaster.getKstYmd(syncedToday).replace(/-/g, ''),
         total_amt: payAmt,
         pay_amt: payAmt,
         pay_method: 'CARD',
@@ -4340,8 +4340,30 @@ class HybridAPIClient {
   ): Promise<{ success: boolean; message: string }> {
     const isConnected = !isDemoEnvironment() && !resId.startsWith('R-HOLD-') ? true : await this.checkConnection();
     const storeCd = this.getStoreCd();
+    const resolvedAuthCode = String(options?.apprNo || options?.auth_code || '').trim() || null;
+    const resolvedTerminalId = options?.terminal_id || this.getTerminalId();
+    const isRealWebhookWal =
+      amount > 0 &&
+      Boolean(resolvedAuthCode) &&
+      !String(resolvedAuthCode).startsWith('FREE-') &&
+      !String(resolvedAuthCode).startsWith('POINT-') &&
+      resolvedAuthCode !== 'MEMBERSHIP';
 
     if (isConnected && !resId.startsWith('R-HOLD-')) {
+      const walId =
+        isRealWebhookWal && resolvedAuthCode
+          ? PaymentOutboxManager.recordWalInFlight({
+              storeCd,
+              terminalId: resolvedTerminalId,
+              authCode: resolvedAuthCode,
+              vanTrNo: options?.van_tr_no,
+              amount,
+              purpose: 'PAYMENT_WEBHOOK',
+              endpoint: '/v1/kiosk/payment-webhook',
+              payload: { resId, amount, paymentMethod, prodCd: options?.prodCd },
+            })
+          : null;
+
       try {
         const res = await fetchWithPaymentRetry(
           `${this.getBaseUrl()}/v1/kiosk/payment-webhook?store_cd=${encodeURIComponent(storeCd)}`,
@@ -4355,14 +4377,14 @@ class HybridAPIClient {
               res_id: resId,
               amount: amount,
               payment_method: paymentMethod,
-              terminal_id: options?.terminal_id || this.getTerminalId(),
+              terminal_id: resolvedTerminalId,
               coupon_no: options?.couponNo || null,
               coupon_discount: options?.couponDiscount ?? 0,
               used_points: options?.usedPoints ?? 0,
               grade_discount_amount: options?.gradeDiscountAmount ?? 0,
               prod_cd: options?.prodCd || null,
-              approval_no: options?.auth_code || null,
-              van_tr_no: options?.van_tr_no || options?.auth_code || null,
+              approval_no: resolvedAuthCode,
+              van_tr_no: options?.van_tr_no || resolvedAuthCode || null,
               card_no_masked: options?.card_no_masked || null,
               issuer_name: options?.issuer_name || null,
               acquirer_name: options?.acquirer_name || null,
@@ -4372,13 +4394,14 @@ class HybridAPIClient {
           },
           {
             label: '결제 웹훅 확정',
-            idempotencyKey: options?.van_tr_no || options?.auth_code || resId,
+            idempotencyKey: options?.van_tr_no || resolvedAuthCode || resId,
           }
         );
         if (res.ok) {
           const data = await res.json();
           if (data.success !== false) {
-            PaymentOutboxManager.removeByAuthCode(options?.auth_code);
+            PaymentOutboxManager.removeEntry(walId);
+            PaymentOutboxManager.removeByAuthCode(resolvedAuthCode);
           }
           // 백엔드 처리 성공 시 Edge DB HOLD 캐시 정제
           const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
@@ -4427,9 +4450,9 @@ class HybridAPIClient {
         localStorage.setItem('LM_BAYS', JSON.stringify(bays));
       }
       
-      // 매출 기록(LM_SALES) 추가
+      // 매출 기록(LM_SALES) 추가 (심야 00:00~08:59 KST 전일 UTC 오기록 방지)
       const sales = JSON.parse(localStorage.getItem('LM_SALES') || '[]') as EdgeSaleRecord[];
-      const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const todayStr = TimeMaster.getKstYmd(TimeMaster.getSyncedDate()).replace(/-/g, '');
       sales.push({
         sale_id: `S-${Date.now()}`,
         sale_dt: todayStr,
