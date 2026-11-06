@@ -2271,18 +2271,19 @@ class HybridAPIClient {
     const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
 
     if (isConnected) {
+      const effectiveBayAuthCode = paymentApproval?.auth_code || paymentApproval?.apprNo || null;
       const isRealBayCardWal =
         (amount ?? 0) > 0 &&
-        Boolean(paymentApproval?.auth_code) &&
-        !String(paymentApproval?.auth_code).startsWith('FREE-') &&
-        !String(paymentApproval?.auth_code).startsWith('POINT-') &&
-        paymentApproval?.auth_code !== 'MEMBERSHIP';
-      const walId = isRealBayCardWal && paymentApproval?.auth_code
+        Boolean(effectiveBayAuthCode) &&
+        !String(effectiveBayAuthCode).startsWith('FREE-') &&
+        !String(effectiveBayAuthCode).startsWith('POINT-') &&
+        effectiveBayAuthCode !== 'MEMBERSHIP';
+      const walId = isRealBayCardWal && effectiveBayAuthCode
         ? PaymentOutboxManager.recordWalInFlight({
             storeCd,
             terminalId: paymentApproval?.terminal_id || this.getTerminalId(),
-            authCode: paymentApproval.auth_code,
-            vanTrNo: paymentApproval.van_tr_no,
+            authCode: effectiveBayAuthCode,
+            vanTrNo: paymentApproval?.van_tr_no,
             amount: amount ?? 0,
             purpose: 'ALLOCATE_BAY',
             endpoint: '/v1/kiosk/allocate-bay',
@@ -2293,7 +2294,7 @@ class HybridAPIClient {
         const parsedItemId = memberItemId !== undefined && memberItemId !== null ? Number(memberItemId) : null;
         const idempotencyKey =
           paymentApproval?.van_tr_no ||
-          paymentApproval?.auth_code ||
+          effectiveBayAuthCode ||
           `ALLOC_${storeCd}_${bayNo}_${memberNo || 'GUEST'}_${parsedItemId ?? 'DAILY'}_${amount ?? 0}`;
         const res = await fetchWithPaymentRetry(
           `${this.getBaseUrl()}/v1/kiosk/allocate-bay?store_cd=${encodeURIComponent(storeCd)}`,
@@ -2317,12 +2318,12 @@ class HybridAPIClient {
               used_points: extraOptions?.usedPoints ?? 0,
               grade_discount_amount: extraOptions?.gradeDiscountAmount ?? 0,
               ...(extraOptions?.acceptClosingTruncate !== undefined ? { accept_closing_truncate: extraOptions.acceptClosingTruncate } : {}),
-              approval_no: paymentApproval?.auth_code || null,
+              approval_no: effectiveBayAuthCode,
               issuer_name: paymentApproval?.issuer_name || null,
               acquirer_name: paymentApproval?.acquirer_name || null,
               card_no_masked: paymentApproval?.card_no_masked || null,
               installment_months: paymentApproval?.installment_months ?? 0,
-              van_tr_no: paymentApproval?.van_tr_no || paymentApproval?.auth_code || null,
+              van_tr_no: paymentApproval?.van_tr_no || effectiveBayAuthCode,
               raw_data: paymentApproval?.raw_response || null,
             }),
           },
@@ -2334,7 +2335,7 @@ class HybridAPIClient {
 
         if (res.ok) {
           PaymentOutboxManager.removeEntry(walId);
-          PaymentOutboxManager.removeByAuthCode(paymentApproval?.auth_code);
+          PaymentOutboxManager.removeByAuthCode(effectiveBayAuthCode);
           const data = await res.json();
           const effDuration = data.duration_min ?? durationMin;
           const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
@@ -2536,6 +2537,7 @@ class HybridAPIClient {
     const storeCd = this.getStoreCd();
 
     if (isConnected) {
+      const effectiveGroupAuthCode = paymentApproval?.auth_code || paymentApproval?.apprNo || null;
       let firstPaidItemAssigned = false;
       let remCouponDisc = options?.discountAmount ?? 0;
       let remGradeDisc = options?.gradeDiscountAmount ?? 0;
@@ -2585,8 +2587,8 @@ class HybridAPIClient {
           grade_discount_amount: slotGradeDisc,
           used_points: slotUsedPts,
           coupon_no: isFirstPaid ? (options?.couponNo || null) : null,
-          approval_no: hasCardApproval ? (paymentApproval?.auth_code || null) : null,
-          van_tr_no: hasCardApproval ? (paymentApproval?.van_tr_no || paymentApproval?.auth_code || null) : null,
+          approval_no: hasCardApproval ? effectiveGroupAuthCode : null,
+          van_tr_no: hasCardApproval ? (paymentApproval?.van_tr_no || effectiveGroupAuthCode) : null,
           issuer_name: hasCardApproval ? (paymentApproval?.issuer_name || null) : null,
           acquirer_name: hasCardApproval ? (paymentApproval?.acquirer_name || null) : null,
           card_no_masked: hasCardApproval ? (paymentApproval?.card_no_masked || null) : null,
@@ -2602,16 +2604,16 @@ class HybridAPIClient {
       const leaderMemberNo = targets[0]?.memberNo || '';
       const isRealGroupCardWal =
         totalCardAmount > 0 &&
-        Boolean(paymentApproval?.auth_code) &&
-        !String(paymentApproval?.auth_code).startsWith('FREE-') &&
-        !String(paymentApproval?.auth_code).startsWith('POINT-') &&
-        paymentApproval?.auth_code !== 'MEMBERSHIP';
-      const groupWalId = isRealGroupCardWal && paymentApproval?.auth_code
+        Boolean(effectiveGroupAuthCode) &&
+        !String(effectiveGroupAuthCode).startsWith('FREE-') &&
+        !String(effectiveGroupAuthCode).startsWith('POINT-') &&
+        effectiveGroupAuthCode !== 'MEMBERSHIP';
+      const groupWalId = isRealGroupCardWal && effectiveGroupAuthCode
         ? PaymentOutboxManager.recordWalInFlight({
             storeCd,
             terminalId: paymentApproval?.terminal_id || this.getTerminalId(),
-            authCode: paymentApproval.auth_code,
-            vanTrNo: paymentApproval.van_tr_no,
+            authCode: effectiveGroupAuthCode,
+            vanTrNo: paymentApproval?.van_tr_no,
             amount: totalCardAmount,
             purpose: 'ALLOCATE_GROUP',
             endpoint: '/v1/kiosk/allocate-group',
@@ -2631,8 +2633,8 @@ class HybridAPIClient {
               master_member_no: leaderMemberNo,
               member_no: leaderMemberNo,
               total_card_amount: totalCardAmount,
-              approval_no: paymentApproval?.auth_code || null,
-              van_tr_no: paymentApproval?.van_tr_no || paymentApproval?.auth_code || null,
+              approval_no: effectiveGroupAuthCode,
+              van_tr_no: paymentApproval?.van_tr_no || effectiveGroupAuthCode,
               terminal_id: paymentApproval?.terminal_id || this.getTerminalId(),
               van_terminal_id: paymentApproval?.terminal_id || this.getTerminalId(),
               used_points: options?.usedPoints ?? 0,
@@ -2649,7 +2651,7 @@ class HybridAPIClient {
             label: '동반자 그룹 타석 배정',
             idempotencyKey:
               paymentApproval?.van_tr_no ||
-              paymentApproval?.auth_code ||
+              effectiveGroupAuthCode ||
               `GRP_${storeCd}_${leaderMemberNo || 'GUEST'}_${targets.map((t) => t.bayNo).join('-')}`,
           }
         );
@@ -2658,7 +2660,7 @@ class HybridAPIClient {
           const data = await res.json();
           if (data.success !== false) {
             PaymentOutboxManager.removeEntry(groupWalId);
-            PaymentOutboxManager.removeByAuthCode(paymentApproval?.auth_code);
+            PaymentOutboxManager.removeByAuthCode(effectiveGroupAuthCode);
             return {
               success: true,
               message: data.message || '동반자 타석 배정이 완료되었습니다.',
@@ -3046,7 +3048,7 @@ class HybridAPIClient {
     const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
 
     if (isConnected || !isDemoEnvironment()) {
-      const effectiveApprNo = apprNo || cardApp?.auth_code || null;
+      const effectiveApprNo = apprNo || cardApp?.auth_code || cardApp?.apprNo || null;
       const effectiveVanTrNo = vanTrNo || cardApp?.van_tr_no || effectiveApprNo || null;
       const isRealPurchaseCardWal =
         payAmt > 0 &&
@@ -3342,19 +3344,19 @@ class HybridAPIClient {
 
     if (isConnected || !isDemoEnvironment()) {
       const cardApp = extraPaymentInfo?.cardApproval;
-      const effectiveApprNo = cardApp?.auth_code || extraPaymentInfo?.apprNo || null;
+      const effectiveApprNo = cardApp?.auth_code || cardApp?.apprNo || extraPaymentInfo?.apprNo || null;
       const isRealLockerCardWal =
         payAmt > 0 &&
-        Boolean(cardApp?.auth_code) &&
-        !String(cardApp?.auth_code).startsWith('FREE-') &&
-        !String(cardApp?.auth_code).startsWith('POINT-') &&
-        cardApp?.auth_code !== 'MEMBERSHIP';
-      const lockerWalId = isRealLockerCardWal && cardApp?.auth_code
+        Boolean(effectiveApprNo) &&
+        !String(effectiveApprNo).startsWith('FREE-') &&
+        !String(effectiveApprNo).startsWith('POINT-') &&
+        effectiveApprNo !== 'MEMBERSHIP';
+      const lockerWalId = isRealLockerCardWal && effectiveApprNo
         ? PaymentOutboxManager.recordWalInFlight({
             storeCd: this.getStoreCd(),
             terminalId: cardApp?.terminal_id || this.getTerminalId(),
-            authCode: cardApp.auth_code,
-            vanTrNo: cardApp.van_tr_no,
+            authCode: effectiveApprNo,
+            vanTrNo: cardApp?.van_tr_no,
             amount: payAmt,
             purpose: 'EXTEND_LOCKER',
             endpoint: '/v1/kiosk/payment-webhook',
@@ -4185,7 +4187,7 @@ class HybridAPIClient {
   ): Promise<boolean> {
     const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
     const storeCd = this.getStoreCd();
-    const resolvedAuthCode = vanApproval?.auth_code || vanApproval?.authCode || null;
+    const resolvedAuthCode = vanApproval?.auth_code || vanApproval?.apprNo || vanApproval?.authCode || null;
     const resolvedVanTrNo = vanApproval?.van_tr_no || vanApproval?.vanTrNo || resolvedAuthCode;
     const resolvedCardMasked = vanApproval?.card_no_masked || vanApproval?.cardNoMasked || null;
     const resolvedIssuerName = vanApproval?.issuer_name || vanApproval?.issuerName || null;
