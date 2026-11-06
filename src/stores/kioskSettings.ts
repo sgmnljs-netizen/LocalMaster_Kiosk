@@ -158,25 +158,45 @@ export function normalizeApiUrl(rawUrl?: string): string {
   return base.endsWith('/api') ? base : `${base}/api`;
 }
 
+function cloneDefaultKioskSettings(overrides?: Partial<KioskSettings>): KioskSettings {
+  return {
+    ...DEFAULT_KIOSK_SETTINGS,
+    menuOverrides: {},
+    authMethods: { ...DEFAULT_AUTH_METHODS },
+    ...overrides,
+  };
+}
+
+function sanitizeMinGapMinutes(raw: unknown, fallback = DEFAULT_KIOSK_SETTINGS.minGapMinutes ?? 60): number {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 10) {
+    return Math.floor(raw);
+  }
+  return fallback;
+}
+
 export function getKioskSettings(): KioskSettings {
   try {
     if (typeof window === 'undefined' || !window.localStorage) {
-      return DEFAULT_KIOSK_SETTINGS;
+      return cloneDefaultKioskSettings();
     }
     const defaultApi = getDefaultApiUrl();
     const raw = localStorage.getItem(STORAGE_KEY);
     const fallbackStoreCd = localStorage.getItem('LM_STORE_CD') || DEFAULT_KIOSK_SETTINGS.storeCode;
     if (!raw) {
-      return {
-        ...DEFAULT_KIOSK_SETTINGS,
+      return cloneDefaultKioskSettings({
         apiUrl: defaultApi,
         storeCode: fallbackStoreCd,
-        menuOverrides: {},
-        authMethods: { ...DEFAULT_AUTH_METHODS },
-      };
+      });
     }
-    const parsed = JSON.parse(raw);
-    const parsedApi = (parsed.apiUrl || defaultApi).trim().replace(/\/+$/, '');
+    const parsedRaw: unknown = JSON.parse(raw);
+    if (!parsedRaw || typeof parsedRaw !== 'object' || Array.isArray(parsedRaw)) {
+      return cloneDefaultKioskSettings({
+        apiUrl: defaultApi,
+        storeCode: fallbackStoreCd,
+      });
+    }
+    const parsed = parsedRaw as Partial<KioskSettings> & Record<string, unknown>;
+    const parsedApi = String(parsed.apiUrl || defaultApi).trim().replace(/\/+$/, '');
     const isLocalhostTarget = parsedApi.includes('127.0.0.1') || parsedApi.includes('localhost');
     const isRemoteClient = typeof window !== 'undefined' && window.location && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
     const effectiveApi = isLocalhostTarget && isRemoteClient ? defaultApi : parsedApi;
@@ -186,25 +206,31 @@ export function getKioskSettings(): KioskSettings {
     const resolvedDigest = typeof parsed.adminPinDigest === 'string' && /^[0-9a-f]{64}$/i.test(parsed.adminPinDigest)
       ? parsed.adminPinDigest.toLowerCase()
       : (legacyPlainPin ? computeOwnerPinDigest(legacyPlainPin) : undefined);
+    const safeMenuOverrides =
+      parsed.menuOverrides && typeof parsed.menuOverrides === 'object' && !Array.isArray(parsed.menuOverrides)
+        ? parsed.menuOverrides
+        : {};
+    const safeAuthMethods =
+      parsed.authMethods && typeof parsed.authMethods === 'object' && !Array.isArray(parsed.authMethods)
+        ? parsed.authMethods
+        : {};
     return {
       ...DEFAULT_KIOSK_SETTINGS,
       ...parsed,
       adminPin: '',
       adminPinDigest: resolvedDigest,
-      storeCode: parsed.storeCode || fallbackStoreCd,
+      storeCode: typeof parsed.storeCode === 'string' && parsed.storeCode ? parsed.storeCode : fallbackStoreCd,
       apiUrl: effectiveApi,
-      menuOverrides: parsed.menuOverrides && typeof parsed.menuOverrides === 'object' ? parsed.menuOverrides : {},
+      menuOverrides: safeMenuOverrides,
       authMethods: {
         ...DEFAULT_AUTH_METHODS,
-        ...(parsed.authMethods && typeof parsed.authMethods === 'object' ? parsed.authMethods : {}),
+        ...safeAuthMethods,
       },
       defaultAuthMode: parsed.defaultAuthMode || DEFAULT_KIOSK_SETTINGS.defaultAuthMode,
-      minGapMinutes: typeof parsed.minGapMinutes === 'number' && parsed.minGapMinutes >= 10
-        ? parsed.minGapMinutes
-        : 60,
+      minGapMinutes: sanitizeMinGapMinutes(parsed.minGapMinutes),
     };
   } catch {
-    return DEFAULT_KIOSK_SETTINGS;
+    return cloneDefaultKioskSettings();
   }
 }
 
@@ -406,6 +432,10 @@ export function saveKioskSettings(
         ? computeOwnerPinDigest(incomingPlainPin) !== OFFLINE_INITIAL_DEFAULT_PIN_DIGEST
         : (settings.hasCustomAdminPin ?? current.hasCustomAdminPin),
     apiUrl: (settings.apiUrl ?? current.apiUrl ?? DEFAULT_KIOSK_SETTINGS.apiUrl).trim().replace(/\/+$/, ''),
+    minGapMinutes:
+      settings.minGapMinutes !== undefined
+        ? sanitizeMinGapMinutes(settings.minGapMinutes, current.minGapMinutes)
+        : sanitizeMinGapMinutes(current.minGapMinutes),
   };
   if (typeof localStorage !== 'undefined') {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -556,8 +586,8 @@ export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSetti
     if (srv.defaultAuthMode) {
       patch.defaultAuthMode = srv.defaultAuthMode;
     }
-    if (typeof srv.minGapMinutes === 'number' && srv.minGapMinutes >= 10) {
-      patch.minGapMinutes = srv.minGapMinutes;
+    if (typeof srv.minGapMinutes === 'number' && Number.isFinite(srv.minGapMinutes) && srv.minGapMinutes >= 10) {
+      patch.minGapMinutes = Math.floor(srv.minGapMinutes);
     }
     if (srv.topDashboardMode) {
       patch.topDashboardMode = srv.topDashboardMode;
@@ -688,13 +718,14 @@ export async function bootstrapLocalKioskSettings(
 }
 
 export function useKioskSettings() {
-  const [settings, setSettings] = useState<KioskSettings>(getKioskSettings());
+  const [settings, setSettings] = useState<KioskSettings>(() => getKioskSettings());
 
   useEffect(() => {
     const handleUpdate = () => {
       setSettings(getKioskSettings());
     };
     window.addEventListener('kiosk-settings-changed', handleUpdate);
+    handleUpdate();
     void bootstrapLocalKioskSettings();
     return () => window.removeEventListener('kiosk-settings-changed', handleUpdate);
   }, []);

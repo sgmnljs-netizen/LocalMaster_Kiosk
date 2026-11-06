@@ -21,7 +21,7 @@ let healthState: KioskHardwareHealthState = {
 const listeners = new Set<(state: KioskHardwareHealthState) => void>();
 
 function notify() {
-  listeners.forEach((listener) => listener({ ...healthState }));
+  Array.from(listeners).forEach((listener) => listener({ ...healthState }));
 }
 
 export function getKioskHardwareHealth(): KioskHardwareHealthState {
@@ -70,10 +70,11 @@ export const setLastCheckedAt = (timestamp: number) => {
 };
 
 export function useKioskHardwareHealthStore() {
-  const [state, setState] = useState<KioskHardwareHealthState>(healthState);
+  const [state, setState] = useState<KioskHardwareHealthState>(() => getKioskHardwareHealth());
 
   useEffect(() => {
     listeners.add(setState);
+    setState(getKioskHardwareHealth());
     return () => {
       listeners.delete(setState);
     };
