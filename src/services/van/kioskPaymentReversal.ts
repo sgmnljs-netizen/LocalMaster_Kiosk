@@ -36,7 +36,7 @@ export async function executeKioskAutoReversal(
   params: ExecuteAutoReversalParams
 ): Promise<AutoReversalResult> {
   const { cardApproval, payAmount, reason, isTaxFree = false, vat, terminalId, storeCd, memberNo, prodCd } = params;
-  const apprStr = String(cardApproval?.apprNo || cardApproval?.auth_code || '');
+  const apprStr = String(cardApproval?.apprNo || cardApproval?.auth_code || '').trim();
 
   // 1. 0원 결제, 무료 쿠폰(FREE-), 전액 포인트(POINT-), 회원권(MEMBERSHIP) 등은 망취소 대상 아님
   if (
@@ -66,7 +66,7 @@ export async function executeKioskAutoReversal(
     const orgDate = extractKstYyyyMmDd(cardApproval.approved_at);
     const cancelRes = await kioskVanClient.cancelCardPayment({
       amount: effectiveAmt,
-      orgAuthCode: cardApproval.auth_code,
+      orgAuthCode: apprStr,
       orgApprovedDate: orgDate,
       terminalId: effectiveTid,
       vanTrNo: cardApproval.van_tr_no,
@@ -77,7 +77,7 @@ export async function executeKioskAutoReversal(
     });
 
     if (cancelRes.success) {
-      PaymentOutboxManager.removeByAuthCode(cardApproval.auth_code);
+      PaymentOutboxManager.removeByAuthCode(apprStr);
       return {
         success: true,
         reversalAttempted: true,
@@ -94,7 +94,7 @@ export async function executeKioskAutoReversal(
           prod_cd: prodCd || undefined,
           terminalId: effectiveTid || 'KIOSK-01',
           deviceType: 'KIOSK',
-          authNo: cardApproval.auth_code,
+          authNo: apprStr,
           amount: effectiveAmt,
           cardName: cardApproval.issuer_name || '',
           cardNoMasked: cardApproval.card_no_masked || '',
@@ -117,8 +117,9 @@ export async function executeKioskAutoReversal(
         message: `카드 자동 취소 실패 (${cancelRes.error_message || '단말기 미응답'}). 관제 시스템에 긴급 접수되었습니다. 영수증을 지참하여 직원에게 문의하세요.`,
       };
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     // 🚨 [고아 결제(Ghost Charge) 긴급 DLQ 보고: 망취소 통신 예외 발생 시]
+    const errMsg = err instanceof Error ? err.message : '단말기 연결 실패';
     let dlqId: string | undefined;
     let dlqReported = false;
     try {
@@ -128,14 +129,14 @@ export async function executeKioskAutoReversal(
         prod_cd: prodCd || undefined,
         terminalId: effectiveTid || 'KIOSK-01',
         deviceType: 'KIOSK',
-        authNo: cardApproval.auth_code,
+        authNo: apprStr,
         amount: effectiveAmt,
         cardName: cardApproval.issuer_name || '',
         cardNoMasked: cardApproval.card_no_masked || '',
         vanTrNo: cardApproval.van_tr_no,
         approvedAt: cardApproval.approved_at,
         backendErrorReason: reason,
-        reversalErrorReason: `망취소 통신 오류: ${err?.message || '단말기 연결 실패'}`,
+        reversalErrorReason: `망취소 통신 오류: ${errMsg}`,
       });
       dlqReported = Boolean(dlqRes?.success);
       dlqId = dlqRes?.dlq_id;
@@ -148,7 +149,7 @@ export async function executeKioskAutoReversal(
       reversalAttempted: true,
       dlqReported,
       dlqId,
-      message: `망취소 통신 오류: ${err?.message || '단말기 연결 실패'}. 관제 시스템에 긴급 접수되었습니다.`,
+      message: `망취소 통신 오류: ${errMsg}. 관제 시스템에 긴급 접수되었습니다.`,
     };
   }
 }

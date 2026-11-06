@@ -5,7 +5,7 @@ import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
 import { MemberAuth } from './MemberAuth';
 import { TimeMaster } from '../utils/timeMaster';
 import { kioskVanClient } from '../services/van/van_client';
-import { normalizeVanProvider } from '../services/van/van_types';
+import { normalizeVanProvider, type CardApprovalResult } from '../services/van/van_types';
 import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC, extractKstYyyyMmDd } from '../services/van/adapters/BaseVanAdapter';
 import { PaymentOutboxManager } from '../services/paymentResilience';
 import { useKioskSettings } from '../stores/kioskSettings';
@@ -819,16 +819,25 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     }
   };
 
-  const rollbackVanApprovalIfNeeded = async (resId: string, amount: number, vanResult?: any, reason?: string): Promise<boolean | null> => {
-    const authCodeStr = String(vanResult?.auth_code || '');
+  const rollbackVanApprovalIfNeeded = async (
+    resId: string,
+    amount: number,
+    vanResult?: (Partial<CardApprovalResult> & { prodCd?: string }) | null,
+    reason?: string
+  ): Promise<boolean | null> => {
+    const authCodeStr = String(vanResult?.apprNo || vanResult?.auth_code || '').trim();
     if (
+      !vanResult ||
       amount <= 0 ||
       !authCodeStr ||
       authCodeStr.startsWith('FREE-') ||
       authCodeStr.startsWith('POINT-') ||
       authCodeStr.startsWith('MEMBERSHIP') ||
-      (vanResult?.amount !== undefined && vanResult.amount <= 0)
+      (vanResult.amount !== undefined && vanResult.amount <= 0)
     ) {
+      if (authCodeStr) {
+        PaymentOutboxManager.removeByAuthCode(authCodeStr);
+      }
       return null;
     }
     const matchedProd = getMatchedCourseProduct();
@@ -837,14 +846,14 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     const cancelAmt = vanResult.amount || amount;
     const cancelVat = isTaxFree ? 0 : Math.round(cancelAmt / 11);
     const cancelInstallment = vanResult.installment_months || 0;
-    const resolvedProdCd = vanResult?.prodCd || matchedProd?.prod_cd || `PAR3_${course || 'COURSE'}`;
+    const resolvedProdCd = vanResult.prodCd || matchedProd?.prod_cd || `PAR3_${course || 'COURSE'}`;
     try {
       const cancelRes = await kioskVanClient.cancelCardPayment({
         amount: cancelAmt,
         vat: cancelVat,
         isTaxFree,
         installmentMonths: cancelInstallment,
-        orgAuthCode: vanResult.auth_code,
+        orgAuthCode: authCodeStr,
         orgApprovedDate,
         terminalId: vanResult.terminal_id,
         vanTrNo: vanResult.van_tr_no,
@@ -857,7 +866,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           member_no: players[0]?.member_no || memberNo,
           prod_cd: resolvedProdCd,
           amount: cancelAmt,
-          auth_code: vanResult.auth_code,
+          authNo: authCodeStr,
+          auth_code: authCodeStr,
           card_no_masked: vanResult.card_no_masked || '',
           issuer_name: vanResult.issuer_name || '',
           van_tr_no: vanResult.van_tr_no || '',
@@ -869,18 +879,19 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         });
         return false;
       } else {
-        PaymentOutboxManager.removeByAuthCode(vanResult.auth_code);
+        PaymentOutboxManager.removeByAuthCode(authCodeStr);
         return true;
       }
-    } catch (cancelErr: any) {
+    } catch (cancelErr: unknown) {
       const backendReason = reason || `Par3 webhook failed (resId=${resId})`;
-      const revReason = cancelErr?.message || String(cancelErr);
+      const revReason = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
       await api.reportGhostCharge({
         store_cd: api.getStoreCd(),
         member_no: players[0]?.member_no || memberNo,
         prod_cd: resolvedProdCd,
         amount: cancelAmt,
-        auth_code: vanResult.auth_code,
+        authNo: authCodeStr,
+        auth_code: authCodeStr,
         card_no_masked: vanResult.card_no_masked || '',
         issuer_name: vanResult.issuer_name || '',
         van_tr_no: vanResult.van_tr_no || '',
