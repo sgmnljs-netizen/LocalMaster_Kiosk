@@ -549,7 +549,15 @@ class HybridAPIClient {
   public isOnline: boolean = true;
   private ws: WebSocket | null = null;
   private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private wsPingTimer: ReturnType<typeof setInterval> | null = null;
   private bayUpdateListeners: Array<(data: Bay) => void> = [];
+
+  private clearWsPingTimer(): void {
+    if (this.wsPingTimer) {
+      clearInterval(this.wsPingTimer);
+      this.wsPingTimer = null;
+    }
+  }
 
   constructor() {
     const settings = getKioskSettings();
@@ -972,15 +980,17 @@ class HybridAPIClient {
       const wsUrl = buildWsUrl();
       if (this.ws && this.ws.readyState <= WebSocket.OPEN) {
         if (this.ws.url === wsUrl) return;
+        this.clearWsPingTimer();
         this.ws.onclose = null;
         this.ws.close();
         this.ws = null;
       }
       
       try {
-        this.ws = new WebSocket(wsUrl);
+        const socket = new WebSocket(wsUrl);
+        this.ws = socket;
 
-        this.ws.onopen = () => {
+        socket.onopen = () => {
           console.log('[WS-Kiosk] 연결 수립:', wsUrl);
           if (this.wsReconnectTimer) {
             clearTimeout(this.wsReconnectTimer);
@@ -994,17 +1004,18 @@ class HybridAPIClient {
           }).catch(err => {
             console.error('[WS-Kiosk] 재연결 타석 동기화 실패:', err);
           });
-          // Ping 유지 (30초마다)
-          const pingInterval = setInterval(() => {
-            if (this.ws?.readyState === WebSocket.OPEN) {
-              this.ws.send('PING');
+          // Ping 유지 (30초마다 — 이전 재연결 사이클의 타이머를 먼저 해제하여 영구 중복 누수 차단)
+          this.clearWsPingTimer();
+          this.wsPingTimer = setInterval(() => {
+            if (this.ws === socket && socket.readyState === WebSocket.OPEN) {
+              socket.send('PING');
             } else {
-              clearInterval(pingInterval);
+              this.clearWsPingTimer();
             }
           }, 30000);
         };
 
-        this.ws.onmessage = (evt) => {
+        socket.onmessage = (evt) => {
           try {
             const data = JSON.parse(evt.data) as Record<string, unknown>;
             onMessage?.(data);
@@ -1136,20 +1147,31 @@ class HybridAPIClient {
           }
         };
 
-        this.ws.onclose = (evt) => {
+        socket.onclose = (evt) => {
+          this.clearWsPingTimer();
+          if (this.ws === socket) {
+            this.ws = null;
+          }
           console.warn(`[WS-Kiosk] 연결 해제됨 (code=${evt.code}). 3초 후 자동 재연결 시도...`);
-          this.ws = null;
-          // 자동 재연결 (1008: 인증 실패는 제외)
-          if (evt.code !== 1008) {
+          // 자동 재연결 (1008: 인증 실패는 제외, 활성 리스너가 남아있을 때만)
+          if (evt.code !== 1008 && this.bayUpdateListeners.length > 0) {
+            if (this.wsReconnectTimer) {
+              clearTimeout(this.wsReconnectTimer);
+            }
             this.wsReconnectTimer = setTimeout(connect, 3000);
           }
         };
 
-        this.ws.onerror = () => {
+        socket.onerror = () => {
           // 새로고침이나 네트워크 재연결 시 자연스러운 이벤트이므로 콘솔 빨간 에러 노이즈 억제
         };
       } catch (e) {
-        this.wsReconnectTimer = setTimeout(connect, 3000);
+        if (this.bayUpdateListeners.length > 0) {
+          if (this.wsReconnectTimer) {
+            clearTimeout(this.wsReconnectTimer);
+          }
+          this.wsReconnectTimer = setTimeout(connect, 3000);
+        }
       }
     };
 
@@ -1159,6 +1181,7 @@ class HybridAPIClient {
     return () => {
       this.bayUpdateListeners = this.bayUpdateListeners.filter(l => l !== onBayUpdate);
       if (this.bayUpdateListeners.length === 0) {
+        this.clearWsPingTimer();
         if (this.wsReconnectTimer) {
           clearTimeout(this.wsReconnectTimer);
           this.wsReconnectTimer = null;
