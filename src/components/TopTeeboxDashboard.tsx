@@ -34,7 +34,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
 
   // 🔄 [구역 카테고리 동적 격리] 상위 PracticeSelect에서 전달된 구역 필터링 타석 목록 기준 (PAR3만 안전 제외)
   const practiceBays = bays.filter(bay => {
-    const zCode = String((bay as any).zone_code || (bay as any).zoneCode || '').toUpperCase();
+    const zCode = String(bay.zone_code || bay.zoneCode || '').toUpperCase();
     return zCode !== 'PAR3';
   });
 
@@ -65,7 +65,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   };
 
   const renderBayCard = (bay: Bay, floorBayCount: number) => {
-    const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+    const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
     const isUnderMaintenance = isBayBlocked(bay);
     const isLessonOnly = Boolean(bay.is_lesson_only);
     const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance && !isLessonOnly;

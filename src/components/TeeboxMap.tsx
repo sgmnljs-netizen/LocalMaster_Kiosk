@@ -95,7 +95,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         REQ: 5,
       };
       const practiceReservations = resList
-        .filter((r: any) => {
+        .filter((r) => {
           const st = String(r.status_cd || '').toUpperCase();
           if (!(st in statusPriority)) return false;
           if (['HOLD', 'UNPAID'].includes(String(r.payment_status || '').toUpperCase())) return false;
@@ -106,7 +106,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           const bNo = Number(r.bay_no ?? r.resource_no ?? 0);
           return bNo > 0 && bNo < 1000;
         })
-        .sort((a: any, b: any) => {
+        .sort((a, b) => {
           const pa = statusPriority[String(a.status_cd || '').toUpperCase()] ?? 99;
           const pb = statusPriority[String(b.status_cd || '').toUpperCase()] ?? 99;
           return pa - pb;
@@ -116,8 +116,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       const activeResBayNo = Number(activeRes?.bay_no ?? activeRes?.resource_no ?? 0);
       if (activeRes && activeResBayNo > 0) {
         const matchedBay = bays.find(b => Number(b.bay_no) === activeResBayNo);
-        const physStatus = String((matchedBay as any)?.status_info?.code || matchedBay?.status || '').toUpperCase();
-        const physMemNo = String((matchedBay as any)?.current_member_no || matchedBay?.member_no || '').trim();
+        const physStatus = String(matchedBay?.status_info?.code || matchedBay?.status || '').toUpperCase();
+        const physMemNo = String(matchedBay?.current_member_no || matchedBay?.member_no || '').trim();
         const isPhysicallyOwnedByMe =
           Boolean(matchedBay) &&
           ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(physStatus) &&
@@ -131,11 +131,13 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           // 물리 타석의 상태/잔여시간으로 오염되지 않도록 예약 원장 기준 가상 타석 정보 합성
           const resStatus = String(activeRes.status_cd || 'CHK').toUpperCase();
           const fallbackMin = Number(matchedBay?.minutes_left ?? 0);
-          const durMin = Number((activeRes as any).duration_min ?? fallbackMin) || fallbackMin;
+          const durMin = Number(activeRes.duration_min ?? fallbackMin) || fallbackMin;
           setFallbackMoveBay({
+            bay_id: matchedBay?.bay_id ?? activeResBayNo,
             bay_no: activeResBayNo,
             floor_no: matchedBay?.floor_no || 1,
-            status: resStatus as any,
+            type: matchedBay?.type ?? 'RIGHT',
+            status: resStatus,
             current_member_no: effMemberNo,
             current_user_name: effMemberName,
             member_name: effMemberName,
@@ -144,7 +146,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             start_time: activeRes.start_time || '',
             end_time: activeRes.end_time || '',
             res_id: activeRes.res_id,
-          } as any);
+          });
         }
       } else {
         setFallbackMoveBay(null);
@@ -159,17 +161,17 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   // 1순위: 본인 member_no(또는 member_no 미존재 시 성명)로 실제 가동 중인 타석 (동명이인 타인 member_no 절대 배제)
   const activeOwnedBay = isMoveMode
     ? bays.find(b => {
-        const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+        const st = String(b.status_info?.code || b.status || '').toUpperCase();
         if (!['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(st)) return false;
 
-        const bayMemberNo = String((b as any).current_member_no || (b as any).member_no || '').trim();
+        const bayMemberNo = String(b.current_member_no || b.member_no || '').trim();
         if (bayMemberNo !== '') {
           return Boolean(effMemberNo && bayMemberNo === String(effMemberNo).trim());
         }
         if (effMemberNo && String(b.current_user_name || '').trim() === String(effMemberNo).trim()) {
           return true;
         }
-        const bayUserName = String((b as any).member_name || b.current_user_name || '').trim();
+        const bayUserName = String(b.member_name || b.current_user_name || '').trim();
         return effMemberName !== '' && bayUserName === effMemberName;
       })
     : null;
@@ -178,30 +180,31 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const nextReservedOwnedBay = isMoveMode && !activeOwnedBay && !fallbackMoveBay
     ? (() => {
         const found = bays.find(b => {
-          const nextCheckinSt = String((b as any).next_res_checkin_status || '').toUpperCase();
+          const nextCheckinSt = String(b.next_res_checkin_status || '').toUpperCase();
           if (!['CHK', 'RSV', 'CONFIRMED', 'QUEUE', 'QUEUED', 'WAIT', 'REQ', 'COMPLETED', 'PENDING', 'REQUESTED'].includes(nextCheckinSt)) return false;
-          const nextMemNo = String((b as any).next_res_member_no || '').trim();
+          const nextMemNo = String(b.next_res_member_no || '').trim();
           if (nextMemNo !== '') {
             return Boolean(effMemberNo && nextMemNo === String(effMemberNo).trim());
           }
-          const nextResName = String((b as any).next_res_name || '').trim();
+          const nextResName = String(b.next_res_name || '').trim();
           return effMemberName !== '' && nextResName === effMemberName;
         });
         if (!found) return null;
         const fallbackMin = Number(found.minutes_left ?? 0);
-        const durMin = Number((found as any).next_res_duration_min ?? fallbackMin) || fallbackMin;
-        return {
+        const durMin = Number(found.next_res_duration_min ?? fallbackMin) || fallbackMin;
+        const virtualBay: Bay = {
           ...found,
-          status: 'CHK' as any,
+          status: 'CHK',
           status_info: { code: 'CHK', is_transferable: true },
           current_member_no: effMemberNo,
           current_user_name: effMemberName,
           member_name: effMemberName,
           minutes_left: durMin,
           duration_min: durMin,
-          end_time: (found as any).next_res_end_time || '',
+          end_time: found.next_res_end_time || '',
           end_epoch_ms: undefined,
-        } as Bay;
+        };
+        return virtualBay;
       })()
     : null;
 
@@ -217,25 +220,25 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   // minutes_left 정밀 파싱 및 end_time/epoch SSOT fallback 계산
   const calculateRemMin = useCallback((bay: Bay | null | undefined): number => {
     if (!bay) return 0;
-    const st = String((bay as any)?.status_info?.code || bay.status || '').toUpperCase();
+    const st = String(bay.status_info?.code || bay.status || '').toUpperCase();
     if (['CHK', 'RSV', 'CONFIRMED', 'RESERVED', 'QUEUE', 'QUEUED', 'WAIT', 'REQ'].includes(st)) {
-      const explicitMin = Number((bay as any).duration_min || bay.minutes_left || 0);
+      const explicitMin = Number(bay.duration_min || bay.minutes_left || 0);
       if (explicitMin > 0) return explicitMin;
     }
     return TimeMaster.getRemainingMinutes(bay);
   }, []);
 
-  const currentBayStatus = String((currentBay as any)?.status_info?.code || currentBay?.status || '').toUpperCase();
+  const currentBayStatus = String(currentBay?.status_info?.code || currentBay?.status || '').toUpperCase();
   const isReservedNotStarted = ['CHK', 'RSV', 'CONFIRMED', 'RESERVED', 'QUEUE', 'QUEUED', 'WAIT', 'REQ'].includes(currentBayStatus);
   const currentRemMin = calculateRemMin(currentBay);
   const isGlobalPaused = Boolean(
-    bays.some(b => Boolean((b as any).is_global_paused) || String((b as any).pause_type || '').toUpperCase() === 'GLOBAL')
+    bays.some(b => Boolean(b.is_global_paused) || String(b.pause_type || '').toUpperCase() === 'GLOBAL')
   );
   const isTimeRestricted = Boolean(
     isMoveMode &&
     currentBay &&
     !isReservedNotStarted &&
-    ((currentBay as any).status_info?.is_transferable === false || currentRemMin < 5)
+    (currentBay.status_info?.is_transferable === false || currentRemMin < 5)
   );
   const hasNoActiveBay = isMoveMode && !currentBay;
 
@@ -320,11 +323,11 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       return;
     }
 
-    const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+    const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
     const isBlocked =
-      (bay as any).is_active === false ||
-      (bay as any).is_paused === true ||
-      (bay as any).is_global_paused === true ||
+      bay.is_active === false ||
+      bay.is_paused === true ||
+      bay.is_global_paused === true ||
       ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
     if (isBlocked) return;
     if (['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus)) {
@@ -398,13 +401,13 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출 및 타석 번호 오름차순 정렬
   const floorBays = sortBaysByNumber(
     bays.filter(b => {
-      const zCode = String((b as any).zone_code || (b as any).zoneCode || '');
+      const zCode = String(b.zone_code || b.zoneCode || '');
       if (zCode.toUpperCase() === 'PAR3') return false;
 
       if (selectedZoneIds && selectedZoneIds.length > 0) {
         const match = selectedZoneIds.some(zid => 
           String(zid).toUpperCase() === zCode.toUpperCase() || 
-          String(zid).toUpperCase() === String((b as any).category_id || '').toUpperCase()
+          String(zid).toUpperCase() === String(b.category_id || '').toUpperCase()
         );
         if (!match) return false;
       } else if (zCode.toUpperCase() === 'ROOM') {
@@ -418,7 +421,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   const availableFloors = Array.from(
     new Set(
       bays
-        .filter(b => String((b as any).zone_code || (b as any).zoneCode || '').toUpperCase() !== 'PAR3')
+        .filter(b => String(b.zone_code || b.zoneCode || '').toUpperCase() !== 'PAR3')
         .map(b => getBayFloorNo(b))
     )
   ).sort((a, b) => a - b);
@@ -964,8 +967,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               const minBay = Math.min(...floorBays.map((b) => b.bay_no));
               const maxBay = Math.max(...floorBays.map((b) => b.bay_no));
               const availCnt = floorBays.filter((b) => {
-                const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
-                return st === 'AVAILABLE' && (b as any).is_active !== false && !isLessonOnlyBay(b) && !evaluateBayHardwareState(b).isBlocked;
+                const st = String(b.status_info?.code || b.status || '').toUpperCase();
+                return st === 'AVAILABLE' && b.is_active !== false && !isLessonOnlyBay(b) && !evaluateBayHardwareState(b).isBlocked;
               }).length;
               const sims = Array.from(
                 new Set(

@@ -18,7 +18,7 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
 }) => {
   // 연습타석 구역 기준 필터링
   const practiceBays = bays.filter(bay => {
-    const zCode = (bay as any).zone_code || (bay as any).zoneCode || '';
+    const zCode = bay.zone_code || bay.zoneCode || '';
     return zCode !== 'PAR3' && zCode !== 'ROOM';
   });
 
@@ -47,12 +47,12 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
   };
 
   const totalAvailable = practiceBays.filter(b => {
-    const st = String((b as any).status_info?.code || b.status || '').toUpperCase();
+    const st = String(b.status_info?.code || b.status || '').toUpperCase();
     return st === 'AVAILABLE' && !isBayBlocked(b);
   }).length;
 
   const renderBayIndicator = (bay: Bay) => {
-    const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+    const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
     const isUnderMaintenance = isBayBlocked(bay);
     const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance;
     const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';

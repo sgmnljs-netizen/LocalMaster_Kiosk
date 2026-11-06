@@ -26,7 +26,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   isMoveMode = false,
 }) => {
   const hwState = evaluateBayHardwareState(bay);
-  const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+  const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
   const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
   const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
   const isPrepare = canonicalStatus === 'PREPARE';
