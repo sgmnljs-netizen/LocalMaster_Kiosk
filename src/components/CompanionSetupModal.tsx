@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UserPlus, Timer, X, AlertCircle, UserCheck } from 'lucide-react';
 import { api, Member, MemberAsset, Bay } from '../services/api';
 import { TimeMaster } from '../utils/timeMaster';
+import { parseNullableFloorNumber } from '../utils/floorUtils';
 import { isKioskChannelProduct, normalizeYmdDigits } from '../utils/kioskPurchaseEligibility';
 import { checkIfKioskDailyProduct, evaluateDailyPassEligibility } from '../utils/kioskProductSpecSummary';
 
@@ -43,10 +44,7 @@ export const filterCompanionAssignableAssets = (
 ): MemberAsset[] => {
   const targetZoneCode = (targetZoneCodeInput || 'BAY').toUpperCase();
   const todayDigits = normalizeYmdDigits(todayYmdInput || TimeMaster.getKstYmd(TimeMaster.getSyncedDate()));
-  const parsedFloor = targetFloorInput !== undefined && targetFloorInput !== null && String(targetFloorInput).trim() !== ''
-    ? Number(String(targetFloorInput).toUpperCase().replace(/[^0-9-]/g, ''))
-    : NaN;
-  const targetFloorNo = Number.isFinite(parsedFloor) ? parsedFloor : null;
+  const targetFloorNo = parseNullableFloorNumber(targetFloorInput);
   return assets.filter((a) => {
     if (a.is_assignable === false) return false;
     const startDigits = normalizeYmdDigits(a.start_date);
@@ -62,7 +60,9 @@ export const filterCompanionAssignableAssets = (
       return false;
     }
     if (targetFloorNo !== null && Array.isArray(a.allowed_floors) && a.allowed_floors.length > 0) {
-      const allowedFloorNums = a.allowed_floors.map(f => Number(f)).filter(n => Number.isFinite(n));
+      const allowedFloorNums = a.allowed_floors
+        .map((f) => parseNullableFloorNumber(f))
+        .filter((n): n is number => n !== null);
       if (allowedFloorNums.length > 0 && !allowedFloorNums.includes(targetFloorNo)) {
         return false;
       }

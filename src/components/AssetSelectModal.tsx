@@ -2,6 +2,7 @@ import React from 'react';
 import { UserCheck, Check, X, AlertTriangle, CreditCard, Hand, Clock, Calendar, RefreshCw } from 'lucide-react';
 import { Member, MemberAsset, Bay } from '../services/api';
 import { TimeMaster } from '../utils/timeMaster';
+import { parseNullableFloorNumber } from '../utils/floorUtils';
 import { normalizeYmdDigits } from '../utils/kioskPurchaseEligibility';
 
 const DEFAULT_SESSION_MIN = 60;
@@ -35,6 +36,24 @@ export interface AssetSelectModalProps {
   onChangeBay: () => void;
 }
 
+export function evaluateAssetFloorMismatchReason(
+  asset: MemberAsset,
+  rawFloor?: number | string | null
+): string | null {
+  const targetFloorNo = parseNullableFloorNumber(rawFloor);
+  if (targetFloorNo === null || !Array.isArray(asset.allowed_floors) || asset.allowed_floors.length === 0) {
+    return null;
+  }
+  const allowedFloorNums = asset.allowed_floors
+    .map((f) => parseNullableFloorNumber(f))
+    .filter((n): n is number => n !== null);
+  if (allowedFloorNums.length > 0 && !allowedFloorNums.includes(targetFloorNo)) {
+    const formattedFloors = allowedFloorNums.map((f) => (f < 0 ? `B${Math.abs(f)}` : String(f)));
+    return `${formattedFloors.join('·')}층 전용 이용권입니다.`;
+  }
+  return null;
+}
+
 export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
   authMember,
   selectedBayNo,
@@ -50,25 +69,13 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
   const currentBayObj = bays.find(b => b.bay_no === selectedBayNo);
   const targetZoneCode = currentBayObj?.zone_code?.toUpperCase() || 'BAY';
   const rawFloor = currentBayObj?.floor_no ?? currentBayObj?.floor;
-  const parsedFloorNo = rawFloor !== undefined && rawFloor !== null
-    ? Number(String(rawFloor).toUpperCase().replace(/[^0-9-]/g, ''))
-    : NaN;
-  const targetFloorNo = Number.isFinite(parsedFloorNo) ? parsedFloorNo : null;
   const bayMaxMin = currentBayObj?.max_assignable_min;
   const nextResStartStr = currentBayObj?.next_limit_res_start_time || '예정';
 
   const todayDigits = normalizeYmdDigits(TimeMaster.getKstYmd(TimeMaster.getSyncedDate()));
 
-  const getFloorMismatchReason = (asset: MemberAsset): string | null => {
-    if (targetFloorNo === null || !Array.isArray(asset.allowed_floors) || asset.allowed_floors.length === 0) {
-      return null;
-    }
-    const allowedFloorNums = asset.allowed_floors.map(f => Number(f)).filter(n => Number.isFinite(n));
-    if (allowedFloorNums.length > 0 && !allowedFloorNums.includes(targetFloorNo)) {
-      return `${allowedFloorNums.join('·')}층 전용 이용권입니다.`;
-    }
-    return null;
-  };
+  const getFloorMismatchReason = (asset: MemberAsset): string | null =>
+    evaluateAssetFloorMismatchReason(asset, rawFloor);
 
   // 1. 유효 배정 가능 이용권 필터링 (SSOT logic_type / access_rules / 미래 개시일 이중 방어)
   const validAssets = (authMember.assets || []).filter(asset => {
