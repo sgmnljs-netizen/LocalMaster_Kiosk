@@ -63,8 +63,8 @@ const parseProductJsonSafe = (raw: unknown): Record<string, any> => {
 };
 
 const getLockerKey = (locker: Locker): string => {
-  const idPart = (locker as any)?.locker_id;
-  const noPart = (locker as any)?.display_no || locker.locker_no;
+  const idPart = locker.locker_id;
+  const noPart = locker.display_no || locker.locker_no;
   return idPart !== undefined && idPart !== null ? `ID:${idPart}:NO:${noPart}` : `NO:${noPart}`;
 };
 
@@ -94,7 +94,7 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
       const effMemberNo = member?.member_no || memberNo;
       // 1. 내 라카 찾기 (회원번호로 조회)
       let foundLockers = await api.getMemberLockers(effMemberNo);
-      const memberLockerInfo = (member as any)?.locker_info;
+      const memberLockerInfo = member?.locker_info;
 
       // 🛡️ [BUG-L02 FIX] 온라인 상태에서는 백엔드(/v1/kiosk/members/{member_no}/lockers)가 유예기간 경과 여부를 검증한 단일 진실 공급원(SSOT)이므로,
       // 오프라인 폴백 모드(!api.isOnline)일 때만 member.locker_info 캐시를 사용하고 상태값 및 알파뉴메릭 번호를 안전하게 보존한다.
@@ -108,13 +108,13 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
             {
               locker_id: parsedId > 0 ? parsedId : undefined,
               locker_no: rawDisplayNo,
+              display_no: rawDisplayNo,
               group_id: memberLockerInfo.group_id,
               zone_name: memberLockerInfo.zone_name,
               status: rawStatus === 'EXPIRED' ? 'EXPIRED' : 'OCCUPIED',
               member_no: effMemberNo,
               member_name: member?.member_name || memberName,
               end_dt: memberLockerInfo.end_dt || memberLockerInfo.expiry_date || '',
-              ...({ display_no: rawDisplayNo } as any)
             }
           ];
         } else {
@@ -227,15 +227,15 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
 
     // 🛡️ [BUG-L01 FIX] 다중 라카 보유 시 member.locker_info(첫 번째 라카)가 아닌 사용자가 선택한 라카(selectedObj)를 최우선 참조
     const displayLockerNo = String(
-      (selectedObj as any)?.display_no ||
+      selectedObj.display_no ||
       selectedObj.locker_no ||
-      (selectedObj as any)?.locker_id ||
+      selectedObj.locker_id ||
       ''
     ).trim();
 
     const numericDigits = displayLockerNo.replace(/[^0-9]/g, '');
     const targetLockerId =
-      Number((selectedObj as any)?.locker_id) ||
+      Number(selectedObj.locker_id) ||
       Number(selectedObj.locker_no) ||
       (numericDigits ? Number(numericDigits) : 0);
 
@@ -457,7 +457,7 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                   : null;
                 const isExpired = locker.status === 'EXPIRED' || (diffDays !== null && diffDays < 0);
                 const formattedEndDt = formatYmdDisplay(locker.end_dt);
-                const badgeLabel = String((locker as any).display_no || locker.locker_no);
+                const badgeLabel = String(locker.display_no || locker.locker_no);
                 const zoneLabel = locker.zone_name || locker.group_id;
 
                 return (

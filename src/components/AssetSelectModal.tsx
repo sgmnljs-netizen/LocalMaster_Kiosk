@@ -106,7 +106,7 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
   // 현재 선택된 이용권 객체
   const selectedAssetObj = validAssets.find(a => parseInt(a.member_item_id) === selectedAssetId) || null;
   const selectedAssetName = selectedAssetObj
-    ? ((selectedAssetObj as any).prod_nm || selectedAssetObj.item_name)
+    ? (selectedAssetObj.prod_nm || selectedAssetObj.item_name)
     : null;
   const selectedAssetMin = selectedAssetObj ? (selectedAssetObj.duration_min ?? DEFAULT_SESSION_MIN) : DEFAULT_SESSION_MIN;
 
@@ -317,7 +317,7 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
               {(() => {
                 const unassignableReasons = (authMember.assets || [])
                   .filter(a => a.is_assignable === false && a.unassignable_reason)
-                  .map(a => `• ${(a as any).prod_nm || a.item_name}: ${a.unassignable_reason}`);
+                  .map(a => `• ${a.prod_nm || a.item_name}: ${a.unassignable_reason}`);
                 if (unassignableReasons.length === 0) return null;
                 return (
                   <div style={{ fontSize: '15px', color: '#dc2626', background: '#fef2f2', padding: '12px 18px', borderRadius: '14px', textAlign: 'left', width: '100%', boxSizing: 'border-box' }}>
@@ -362,7 +362,7 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
                 const daysLabel = asset.available_days_label || (lang === 'KO' ? '매일 이용' : 'Everyday');
                 const timeLabel = asset.available_time_label || (lang === 'KO' ? '전 시간(종일)' : 'All Day');
                 const dailyLimit = asset.daily_limit_count;
-                const startStr = asset.start_date || (asset as any).start_dt;
+                const startStr = asset.start_date || asset.start_dt;
                 const expiryStr = asset.expiry_date || asset.end_date || asset.end_dt || authMember.expiry_date || '~';
                 const fullValidityText = startStr ? `${startStr} ~ ${expiryStr}` : `~ ${expiryStr}`;
 
@@ -459,7 +459,7 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
                           letterSpacing: '-0.6px',
                           lineHeight: 1.2
                         }}>
-                          {(asset as any).prod_nm || (asset as any).item_name}
+                          {asset.prod_nm || asset.item_name}
                         </span>
 
                         <span style={{
@@ -595,7 +595,7 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <span style={{ fontSize: '20px', fontWeight: 800, color: '#64748b' }}>
-                      {(asset as any).prod_nm || asset.item_name}
+                      {asset.prod_nm || asset.item_name}
                     </span>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: '#dc2626' }}>
                       ⚠️ {asset.unassignable_reason}

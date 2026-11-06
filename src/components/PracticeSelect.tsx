@@ -153,13 +153,13 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 커스텀 구역 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출
   const practiceBays = bays.filter(bay => {
-    const zCode = String((bay as any).zone_code || (bay as any).zoneCode || '');
+    const zCode = String(bay.zone_code || bay.zoneCode || '');
     if (zCode.toUpperCase() === 'PAR3') return false;
 
     if (selectedZoneIds && selectedZoneIds.length > 0) {
       return selectedZoneIds.some(zid => 
         String(zid).toUpperCase() === zCode.toUpperCase() || 
-        String(zid).toUpperCase() === String((bay as any).category_id || '').toUpperCase()
+        String(zid).toUpperCase() === String(bay.category_id || '').toUpperCase()
       );
     }
 
@@ -264,9 +264,9 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       return;
     }
 
-    const canonicalStatus = String((bay as any).status_info?.code || bay.status || '').toUpperCase();
+    const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
     const isBlockedStatus =
-      (bay as any).is_active === false ||
+      bay.is_active === false ||
       ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
     if (isBlockedStatus) return;
 
@@ -454,7 +454,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     practiceBays.filter(b => (b.floor ? String(b.floor) : (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor)
   );
   const filteredBays = floorBays.filter(b => {
-    const stCode = String((b as any).status_info?.code || b.status || '').toUpperCase();
+    const stCode = String(b.status_info?.code || b.status || '').toUpperCase();
     const h = String(b.handedness || (b.type === 'LEFT' ? 'LEFT' : 'RIGHT')).toUpperCase();
     if (filterChip === 'RIGHT') {
       return h === 'RIGHT' || h === 'BOTH';
@@ -467,6 +467,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     if (filterChip === 'AVAILABLE') {
       return isBayTrulyAvailableForKiosk(b) || selectedBayNo === b.bay_no || selectedBayNos.includes(b.bay_no);
     }
+    void stCode;
     return true;
   });
 
@@ -486,7 +487,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 모달 표기용 선택 타석 정보 추출
   const selectedBay = selectedBayNo !== null ? bays.find(b => b.bay_no === selectedBayNo) : null;
-  const selectedBayStatus = selectedBay ? String((selectedBay as any).status_info?.code || selectedBay.status || '').toUpperCase() : '';
+  const selectedBayStatus = selectedBay ? String(selectedBay.status_info?.code || selectedBay.status || '').toUpperCase() : '';
   const isOccupied = !!selectedBay && ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(selectedBayStatus);
 
   return (

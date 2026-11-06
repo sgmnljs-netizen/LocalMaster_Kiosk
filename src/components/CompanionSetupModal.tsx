@@ -113,8 +113,8 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   const effectiveDurationMin =
     selectedDurationMin && selectedDurationMin > 0
       ? selectedDurationMin
-      : Number((leaderDefaultAsset as any)?.duration_min) > 0
-        ? Number((leaderDefaultAsset as any)?.duration_min)
+      : Number(leaderDefaultAsset?.duration_min) > 0
+        ? Number(leaderDefaultAsset?.duration_min)
         : 60;
 
   // 각 타석별 배정 설정 상태
@@ -125,9 +125,9 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       if (idx === 0) {
         // 대표자 타석
         const validAsset = getFirstAssignableAsset(leaderMember, targetBay);
-        const assetDur = Number((validAsset as any)?.duration_min);
+        const assetDur = Number(validAsset?.duration_min);
         const durMin = assetDur > 0 ? assetDur : effectiveDurationMin;
-        const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
+        const parsedId = validAsset ? Number(validAsset.member_item_id || validAsset.id) : undefined;
         return {
           bayNo,
           isLeader: true,
@@ -280,9 +280,9 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
           (!t.memberNo && memberHpClean && (t.hp || '').replace(/[^0-9]/g, '') === memberHpClean))
     );
     const validAsset = getFirstAssignableAsset(member, targetBay);
-    const parsedId = validAsset ? Number(validAsset.member_item_id || (validAsset as any).id) : undefined;
-    const assetLogic = String((validAsset as any)?.logic_type || '').toUpperCase();
-    const assetRemCnt = Number(validAsset?.rem_count ?? (validAsset as any)?.remain_cnt ?? 0);
+    const parsedId = validAsset ? Number(validAsset.member_item_id || validAsset.id) : undefined;
+    const assetLogic = String(validAsset?.logic_type || '').toUpperCase();
+    const assetRemCnt = Number(validAsset?.rem_count ?? validAsset?.remain_cnt ?? 0);
     const isCountAsset = (assetLogic === 'COUNT' || assetLogic === 'COUPON') || assetRemCnt > 0;
 
     // 동일 회원이 이미 다른 슬롯에 등록되어 있고 횟수권 다회 보유자가 아닌 경우 회원권 중복 차감 차단
@@ -294,7 +294,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       parsedId &&
       (!alreadyAssignedSlot || (isCountAsset && assetRemCnt > usedCountForSameAsset))
     );
-    const companionAssetDur = Number((validAsset as any)?.duration_min);
+    const companionAssetDur = Number(validAsset?.duration_min);
     const resolvedCompanionDur =
       canUseMembership && companionAssetDur > 0 ? companionAssetDur : effectiveDurationMin;
 
@@ -394,11 +394,11 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
     for (const [itemId, usedCount] of usageByItemId.entries()) {
       if (usedCount > 1) {
         const matchedAsset = allKnownAssets.find(
-          a => Number(a.member_item_id || (a as any).id) === itemId
+          a => Number(a.member_item_id || a.id) === itemId
         );
         if (matchedAsset) {
           const logicType = String(matchedAsset.logic_type || '').toUpperCase();
-          const remCnt = Number(matchedAsset.rem_count ?? (matchedAsset as any).remain_cnt ?? 0);
+          const remCnt = Number(matchedAsset.rem_count ?? matchedAsset.remain_cnt ?? 0);
           if ((logicType === 'PERIOD' || logicType === 'MEMBERSHIP') && remCnt <= 0) {
             setSearchError('기간제 정기 회원권은 1인 1타석만 배정 가능합니다. 동반자 타석은 횟수권 또는 일일 타석권을 선택해 주세요.');
             return;
@@ -423,7 +423,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
     : undefined;
   const currentAssignableAssets = getAssignableAssets(currentSlotMember, currentSlotBay);
   const selectedAsset = currentAssignableAssets.find(
-    a => Number(a.member_item_id || (a as any).id) === Number(currentTarget?.memberItemId)
+    a => Number(a.member_item_id || a.id) === Number(currentTarget?.memberItemId)
   ) || currentAssignableAssets[0];
   const totalPrice = targets.reduce((sum, t) => sum + t.price, 0);
 
@@ -782,7 +782,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      const resolvedAssetId = currentTarget.memberItemId || (selectedAsset ? Number(selectedAsset.member_item_id || (selectedAsset as any).id) : undefined);
+                      const resolvedAssetId = currentTarget.memberItemId || (selectedAsset ? Number(selectedAsset.member_item_id || selectedAsset.id) : undefined);
                       if (currentTarget.isGuest || !resolvedAssetId) {
                         setSearchError(lang === 'KO' ? '사용 가능한 회원권이 없습니다. 회원 조회 후 이용하거나 일일 타석권을 선택해 주세요.' : 'No valid membership found.');
                         return;

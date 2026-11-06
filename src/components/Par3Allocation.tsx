@@ -5,6 +5,7 @@ import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
 import { MemberAuth } from './MemberAuth';
 import { TimeMaster } from '../utils/timeMaster';
 import { kioskVanClient } from '../services/van/van_client';
+import { normalizeVanProvider } from '../services/van/van_types';
 import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC, extractKstYyyyMmDd } from '../services/van/adapters/BaseVanAdapter';
 import { PaymentOutboxManager } from '../services/paymentResilience';
 import { useKioskSettings } from '../stores/kioskSettings';
@@ -211,12 +212,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   const currentHoldResIdRef = useRef<string | null>(null);
 
   const restoreDefaultVanConfig = useCallback(() => {
-    let rawProvider = (settings.providerType || 'KCP').toUpperCase();
-    if (rawProvider.endsWith('_VAN')) {
-      rawProvider = rawProvider.replace('_VAN', '');
-    }
     kioskVanClient.setConfig({
-      provider: rawProvider as any,
+      provider: normalizeVanProvider(settings.providerType),
+      providerType: settings.providerType || 'KCP',
       terminalId: settings.terminalId || '88010003',
       vcatPort: parseInt(settings.vcatPort, 10) || 9099,
     });
@@ -645,7 +643,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       if (res.success && res.res_id) {
         currentHoldResIdRef.current = res.res_id;
         // 예약 선점 성공 -> 서버가 확정 산출한 pay_amt(res.price)가 있으면 최우선 사용하여 실물 VAN 단말기 승인 진입
-        const serverValidatedAmt = typeof (res as any).price === 'number' && (res as any).price >= 0 ? (res as any).price : totalAmount;
+        const serverValidatedAmt = typeof res.price === 'number' && res.price >= 0 ? res.price : totalAmount;
         await runRealCardPayment(res.res_id, serverValidatedAmt);
       } else {
         setErrorMsg(res.message);
@@ -687,7 +685,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
     try {
       // [Layer 1 Pre-Flight Gate] VAN 리더기 활성화 전 백엔드 온라인 가용성 검증
-      if (typeof (api as any).verifyBackendReadyForPayment === 'function') {
+      if (typeof api.verifyBackendReadyForPayment === 'function') {
         const preflight = await api.verifyBackendReadyForPayment();
         if (preflight && preflight.ready === false) {
           await api.cancelHoldReservation(resId).catch(() => {});
@@ -709,7 +707,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         (Boolean(businessMerchantId) && businessMerchantId !== 'MAIN') ||
         Boolean(proIdStr);
 
-      if (typeof (api as any).resolveTerminalRoute === 'function') {
+      if (typeof api.resolveTerminalRoute === 'function') {
         const routeRes = await api.resolveTerminalRoute(
           settings.deviceId,
           businessMerchantId,
@@ -732,9 +730,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         }
         if (routeRes.terminal_id) {
           routedTerminalId = routeRes.terminal_id;
+          const rawRouteProvider = String(routeRes.van_provider || routeRes.provider_type || settings.providerType || 'KCP');
           kioskVanClient.setConfig({
-            provider: String(routeRes.van_provider || routeRes.provider_type || settings.providerType || 'KCP').replace('_VAN', '') as any,
-            ...({ providerType: routeRes.van_provider || routeRes.provider_type || settings.providerType } as any),
+            provider: normalizeVanProvider(rawRouteProvider),
+            providerType: rawRouteProvider,
             vcatPort: Number(routeRes.vcat_port || settings.vcatPort) || 9099,
             terminalId: routeRes.terminal_id,
           });
@@ -911,13 +910,20 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         gradeDiscountAmount: vanResult?.gradeDiscountAmount ?? calculateTotalGradeDiscount(),
         usedPoints: vanResult?.usedPoints ?? usedPoints ?? 0,
       };
+      const parseConfirmResult = (
+        rawRes: boolean | { success?: boolean; message?: string }
+      ): { ok: boolean; message?: string } => {
+        if (typeof rawRes === 'boolean') return { ok: rawRes };
+        return { ok: Boolean(rawRes?.success), message: rawRes?.message };
+      };
       const confirmRes = await api.confirmKioskPaymentWebhook(
         resId,
         amount,
         amount === 0 ? 'TICKET' : 'CARD',
         webhookOptions
       );
-      const isSuccess = typeof confirmRes === 'boolean' ? confirmRes : !!(confirmRes as any)?.success;
+      const parsedConfirm = parseConfirmResult(confirmRes);
+      const isSuccess = parsedConfirm.ok;
 
       if (isSuccess) {
         if (authNo && amount > 0) {
@@ -948,7 +954,8 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
         setPaymentState('DONE');
       } else {
-        const rollbackSucceeded = await rollbackVanApprovalIfNeeded(resId, amount, vanResult, (confirmRes as any)?.message || 'Par3 webhook returned false');
+        const confirmErrMessage = parsedConfirm.message || 'Par3 webhook returned false';
+        const rollbackSucceeded = await rollbackVanApprovalIfNeeded(resId, amount, vanResult, confirmErrMessage);
         await api.cancelHoldReservation(resId).catch(() => {});
         currentHoldResIdRef.current = null;
         fetchSlots();
