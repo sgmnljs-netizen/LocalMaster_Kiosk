@@ -6,6 +6,7 @@
  */
 export class TimeMaster {
   private static serverOffsetMs: number = 0;
+  private static readonly KST_UTC_OFFSET_MS: number = 9 * 3600 * 1000;
 
   /** 백엔드 server_epoch_ms를 기반으로 클라이언트-서버 시계 오차 동기화 */
   static syncServerTime(serverEpochMs?: number | null): void {
@@ -19,12 +20,47 @@ export class TimeMaster {
     return Date.now() + TimeMaster.serverOffsetMs;
   }
 
-  /** KST 로컬 기준 YYYY-MM-DD 날짜 추출 (toISOString UTC -9h 오차 방지) */
+  /** 호스트 OS 타임존(UTC 등)과 무관하게 KST(UTC+9) 시각 구성요소를 결정론적으로 추출 */
+  static getKstParts(d: Date = new Date()): {
+    year: number;
+    month: string;
+    day: string;
+    weekday: number;
+    hours: string;
+    minutes: string;
+    seconds: string;
+  } {
+    const kst = new Date(d.getTime() + TimeMaster.KST_UTC_OFFSET_MS);
+    return {
+      year: kst.getUTCFullYear(),
+      month: String(kst.getUTCMonth() + 1).padStart(2, '0'),
+      day: String(kst.getUTCDate()).padStart(2, '0'),
+      weekday: kst.getUTCDay(),
+      hours: String(kst.getUTCHours()).padStart(2, '0'),
+      minutes: String(kst.getUTCMinutes()).padStart(2, '0'),
+      seconds: String(kst.getUTCSeconds()).padStart(2, '0'),
+    };
+  }
+
+  /** KST(UTC+9) 기준 YYYY-MM-DD 날짜 추출 (toISOString UTC -9h 오차 및 비-KST 호스트 오차 방지) */
   static getKstYmd(d: Date = new Date()): string {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    const { year, month, day } = TimeMaster.getKstParts(d);
+    return `${year}-${month}-${day}`;
+  }
+
+  /** KST(UTC+9) 기준 HHmm 4자리 시각 추출 */
+  static getKstHhMm(d: Date = new Date()): string {
+    const { hours, minutes } = TimeMaster.getKstParts(d);
+    return `${hours}${minutes}`;
+  }
+
+  /** Naive ISO 문자열(타임존 미포함)을 KST(+09:00)로 안전하게 정규화 파싱 */
+  private static parseIsoAsKstDate(isoLike: string): Date {
+    const hasExplicitTz = isoLike.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(isoLike);
+    if (!hasExplicitTz && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(isoLike)) {
+      return new Date(`${isoLike}+09:00`);
+    }
+    return new Date(isoLike);
   }
 
   /** 타석 종료시간(ISO 8601 / HH:mm / HHmm) 안전 파싱 및 자정 경과(+24h) 보정 */
@@ -35,7 +71,7 @@ export class TimeMaster {
 
     // 1. ISO 8601 또는 전체 날짜 문자열 우선 파싱 (예: 2026-10-15T20:30:00 -> 20:26 오작동 원천 차단)
     if (trimmed.includes('T') || trimmed.includes('-') || trimmed.length > 5) {
-      const d = new Date(trimmed);
+      const d = TimeMaster.parseIsoAsKstDate(trimmed);
       if (!isNaN(d.getTime())) {
         return d;
       }
@@ -141,9 +177,8 @@ export class TimeMaster {
     if (epoch && typeof epoch === 'number') {
       const d = new Date(epoch);
       if (!isNaN(d.getTime())) {
-        const hh = String(d.getHours()).padStart(2, '0');
-        const mm = String(d.getMinutes()).padStart(2, '0');
-        return `${hh}:${mm}`;
+        const { hours, minutes } = TimeMaster.getKstParts(d);
+        return `${hours}:${minutes}`;
       }
     }
 
@@ -159,9 +194,10 @@ export class TimeMaster {
     if (!trimmed) return '종료';
 
     if (trimmed.includes('T') || trimmed.includes('-') || trimmed.length > 5) {
-      const d = new Date(trimmed);
+      const d = TimeMaster.parseIsoAsKstDate(trimmed);
       if (!isNaN(d.getTime())) {
-        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        const { hours, minutes } = TimeMaster.getKstParts(d);
+        return `${hours}:${minutes}`;
       }
     }
 
@@ -253,16 +289,14 @@ export class TimeMaster {
     return TimeMaster.formatEndTime(bay);
   }
 
-  /** 날짜 및 시각 포맷팅 (YYYY.MM.DD HH:mm:ss) */
+  /** 날짜 및 시각 포맷팅 (YYYY.MM.DD HH:mm:ss — KST 고정) */
   static formatKstDateTime(d: Date = new Date(), includeSeconds: boolean = true): string {
-    const ymd = TimeMaster.getKstYmd(d).replace(/-/g, '.');
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
+    const { year, month, day, hours, minutes, seconds } = TimeMaster.getKstParts(d);
+    const ymd = `${year}.${month}.${day}`;
     if (!includeSeconds) {
-      return `${ymd} ${hh}:${mm}`;
+      return `${ymd} ${hours}:${minutes}`;
     }
-    const ss = String(d.getSeconds()).padStart(2, '0');
-    return `${ymd} ${hh}:${mm}:${ss}`;
+    return `${ymd} ${hours}:${minutes}:${seconds}`;
   }
 
   /** 매장 마감시각까지 남은 분(minute) 산출 (심야 익일 마감 06:00~05:00 및 자정 00:00 마감 정밀 구분) */

@@ -19,12 +19,9 @@ export function formatKioskLiveClock(
   date: Date = TimeMaster.getSyncedDate(),
   lang: 'KO' | 'EN' = 'KO'
 ): FormattedKioskClock {
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  const { month, day, weekday: weekdayIdx, hours, minutes } = TimeMaster.getKstParts(date);
   const weekday =
-    lang === 'KO' ? KO_WEEKDAYS[date.getDay()] : EN_WEEKDAYS[date.getDay()];
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
+    lang === 'KO' ? KO_WEEKDAYS[weekdayIdx] : EN_WEEKDAYS[weekdayIdx];
 
   return {
     dateLabel: `${month}.${day} (${weekday})`,

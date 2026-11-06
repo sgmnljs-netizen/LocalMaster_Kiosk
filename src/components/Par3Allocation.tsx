@@ -1145,7 +1145,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               const PAR3_PREP_CUTOFF_MS = 600_000;
               const kstNow = TimeMaster.getSyncedDate();
               const todayYmd = TimeMaster.getKstYmd(kstNow);
-              const curHourMin = `${String(kstNow.getHours()).padStart(2, '0')}${String(kstNow.getMinutes()).padStart(2, '0')}`;
+              const curHourMin = TimeMaster.getKstHhMm(kstNow);
               
               // 준비시간 Cutoff (10분 이내) 계산 (프론트 2중 방어 - KST 서버 동기화 시각 및 심야 23:50~23:59 롤오버 방어)
               const cutoffNow = new Date(TimeMaster.getSyncedNowMs() + PAR3_PREP_CUTOFF_MS);
@@ -1153,7 +1153,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               const cutoffHourMin =
                 cutoffYmd > todayYmd
                   ? '2400'
-                  : `${String(cutoffNow.getHours()).padStart(2, '0')}${String(cutoffNow.getMinutes()).padStart(2, '0')}`;
+                  : TimeMaster.getKstHhMm(cutoffNow);
 
               // 현재시각 이전 과거 시각만 필터링하고, 준비시간(10분 이내) 슬롯은 목록에 표시하되 마감 처리
               const displayedSlots = slots.filter(s => {

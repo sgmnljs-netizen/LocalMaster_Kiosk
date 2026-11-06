@@ -23,24 +23,13 @@ interface TeeboxMapProps {
   selectedZoneIds?: (string | number)[];
 }
 
-// 🛡️ 시각 표시 KST 친절 정규화 헬퍼 (ISO UTC 원시 문자열 방어)
+// 🛡️ 시각 표시 KST 친절 정규화 헬퍼 (ISO UTC 원시 문자열 및 비-KST 호스트 타임존 오차 방어)
 const formatEndTime = (timeStr?: string | null): string => {
-  if (!timeStr) return '';
-  if (timeStr.includes('T')) {
-    const d = new Date(timeStr);
-    if (!isNaN(d.getTime())) {
-      const hours = String(d.getHours()).padStart(2, '0');
-      const minutes = String(d.getMinutes()).padStart(2, '0');
-      return `${hours}:${minutes}`;
-    }
-  }
-  if (/^\d{4}$/.test(timeStr)) {
-    return `${timeStr.slice(0, 2)}:${timeStr.slice(2, 4)}`;
-  }
+  if (!timeStr || !String(timeStr).trim()) return '';
   if (/^\d{2}:\d{2}:\d{2}$/.test(timeStr)) {
     return timeStr.slice(0, 5);
   }
-  return timeStr;
+  return TimeMaster.formatEndTime(timeStr);
 };
 
 export const TeeboxMap: React.FC<TeeboxMapProps> = ({

@@ -2,7 +2,10 @@ import React from 'react';
 import { Layers } from 'lucide-react';
 import { Bay } from '../services/api';
 import { TimeMaster } from '../utils/timeMaster';
-import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
+import {
+  evaluateBayHardwareState,
+  isBayTrulyAvailableForKiosk,
+} from '../utils/bayStatusGuard';
 import { sortFloorsDescending, sortBaysByNumber } from '../utils/floorUtils';
 
 interface MiniTeeboxMonitorProps {
@@ -46,15 +49,13 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
     return evaluateBayHardwareState(b).isBlocked;
   };
 
-  const totalAvailable = practiceBays.filter(b => {
-    const st = String(b.status_info?.code || b.status || '').toUpperCase();
-    return st === 'AVAILABLE' && !isBayBlocked(b);
-  }).length;
+  const totalAvailable = practiceBays.filter(b => isBayTrulyAvailableForKiosk(b)).length;
 
   const renderBayIndicator = (bay: Bay) => {
     const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
     const isUnderMaintenance = isBayBlocked(bay);
-    const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance;
+    const isLessonOnly = Boolean(bay.is_lesson_only);
+    const isAvailable = isBayTrulyAvailableForKiosk(bay);
     const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
     const isPrepare = canonicalStatus === 'PREPARE';
     const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
@@ -99,7 +100,19 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
     const hwState = evaluateBayHardwareState(bay);
     const remMin = TimeMaster.getRemainingMinutes(bay);
     const titleText = `${bay.bay_no}번 타석: ${
-      isAvailable ? '이용가능' : isPrepare ? '대기중' : isOccupied ? `이용중(${remMin}분)` : isPreOccupied ? '선점중' : (hwState.isBallEmpty ? '공부족' : (hwState.shortLabel || '점검중'))
+      isAvailable
+        ? '이용가능'
+        : isLessonOnly
+          ? '레슨전용'
+          : isPrepare
+            ? '대기중'
+            : isOccupied
+              ? `이용중(${remMin}분)`
+              : isPreOccupied
+                ? '선점중'
+                : hwState.isBallEmpty
+                  ? '공부족'
+                  : hwState.shortLabel || '점검중'
     }`;
 
     return (
