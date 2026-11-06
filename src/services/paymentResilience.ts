@@ -269,6 +269,8 @@ export async function fetchWithPaymentRetry(
  *   로컬 큐에 영구 보존했다가 네트워크 복구 시 자동으로 백엔드에 재전송합니다.
  */
 export class PaymentOutboxManager {
+  private static flushInFlight: Promise<{ flushed: number; remaining: number }> | null = null;
+
   static getEntries(): PaymentOutboxEntry[] {
     try {
       const raw = localStorage.getItem(PAYMENT_RESILIENCE_CONFIG.OUTBOX_STORAGE_KEY);
@@ -384,54 +386,69 @@ export class PaymentOutboxManager {
   static async flushPendingDlq(
     sendDlqFn: (payload: Record<string, unknown>) => Promise<boolean>
   ): Promise<{ flushed: number; remaining: number }> {
-    const entries = this.getEntries();
-    if (entries.length === 0) {
-      return { flushed: 0, remaining: 0 };
+    if (this.flushInFlight) {
+      return this.flushInFlight;
     }
 
-    const nowMs = Date.now();
-    let flushed = 0;
-    let mutated = false;
-    const updatedEntries: PaymentOutboxEntry[] = [];
-
-    for (const item of entries) {
-      const createdMs = Date.parse(item.createdAt);
-      const isStaleWal =
-        item.kind === 'WAL_IN_FLIGHT' &&
-        Boolean(item.authCode) &&
-        item.amount > 0 &&
-        !Number.isNaN(createdMs) &&
-        nowMs - createdMs >= PAYMENT_RESILIENCE_CONFIG.STALE_WAL_MS;
-
-      if (item.kind !== 'PENDING_DLQ' && !isStaleWal) {
-        updatedEntries.push(item);
-        continue;
+    this.flushInFlight = (async () => {
+      const snapshot = this.getEntries();
+      if (snapshot.length === 0) {
+        return { flushed: 0, remaining: 0 };
       }
 
-      mutated = true;
-      const dlqPayload =
-        item.kind === 'PENDING_DLQ'
-          ? item.payload
-          : {
-              store_cd: item.storeCd,
-              terminal_id: item.terminalId || 'KIOSK-01',
-              device_type: 'KIOSK',
-              auth_no: item.authCode,
-              amount: item.amount,
-              card_name: item.payload?.issuer_name || item.payload?.cardName || '',
-              card_no_masked: item.payload?.card_no_masked || item.payload?.cardNoMasked || '',
-              van_tr_no: item.vanTrNo,
-              approved_at: item.payload?.approved_at || item.createdAt,
-              backend_error_reason: `키오스크 비정상 종료/정전 복구 감지 (${item.purpose || item.endpoint || 'WAL_IN_FLIGHT'})`,
-              reversal_error_reason: '전원 차단 또는 프로세스 강제 종료로 현장 망취소 미수행',
-            };
+      const nowMs = Date.now();
+      let flushed = 0;
+      let mutated = false;
+      const flushedIds = new Set<string>();
+      const updatedById = new Map<string, PaymentOutboxEntry>();
 
-      try {
-        const ok = await sendDlqFn(dlqPayload);
-        if (ok) {
-          flushed++;
-        } else {
-          updatedEntries.push({
+      for (const item of snapshot) {
+        const createdMs = Date.parse(item.createdAt);
+        const isStaleWal =
+          item.kind === 'WAL_IN_FLIGHT' &&
+          Boolean(item.authCode) &&
+          item.amount > 0 &&
+          !Number.isNaN(createdMs) &&
+          nowMs - createdMs >= PAYMENT_RESILIENCE_CONFIG.STALE_WAL_MS;
+
+        if (item.kind !== 'PENDING_DLQ' && !isStaleWal) {
+          continue;
+        }
+
+        mutated = true;
+        const dlqPayload =
+          item.kind === 'PENDING_DLQ'
+            ? item.payload
+            : {
+                store_cd: item.storeCd,
+                terminal_id: item.terminalId || 'KIOSK-01',
+                device_type: 'KIOSK',
+                auth_no: item.authCode,
+                amount: item.amount,
+                card_name: item.payload?.issuer_name || item.payload?.cardName || '',
+                card_no_masked: item.payload?.card_no_masked || item.payload?.cardNoMasked || '',
+                van_tr_no: item.vanTrNo,
+                approved_at: item.payload?.approved_at || item.createdAt,
+                backend_error_reason: `키오스크 비정상 종료/정전 복구 감지 (${item.purpose || item.endpoint || 'WAL_IN_FLIGHT'})`,
+                reversal_error_reason: '전원 차단 또는 프로세스 강제 종료로 현장 망취소 미수행',
+              };
+
+        try {
+          const ok = await sendDlqFn(dlqPayload);
+          if (ok) {
+            flushed++;
+            flushedIds.add(item.id);
+          } else {
+            updatedById.set(item.id, {
+              ...item,
+              kind: 'PENDING_DLQ',
+              payload: dlqPayload,
+              retryCount: item.retryCount + 1,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } catch {
+          updatedById.set(item.id, {
             ...item,
             kind: 'PENDING_DLQ',
             payload: dlqPayload,
@@ -439,20 +456,30 @@ export class PaymentOutboxManager {
             updatedAt: new Date().toISOString(),
           });
         }
-      } catch {
-        updatedEntries.push({
-          ...item,
-          kind: 'PENDING_DLQ',
-          payload: dlqPayload,
-          retryCount: item.retryCount + 1,
-          updatedAt: new Date().toISOString(),
-        });
       }
-    }
 
-    if (mutated) {
-      this.saveEntries(updatedEntries);
+      if (!mutated) {
+        return { flushed: 0, remaining: this.getEntries().length };
+      }
+
+      // 비동기 전송 도중 신규 기록된 WAL/DLQ 엔트리를 보존하고 이미 정상 제거된 엔트리는 부활시키지 않도록 최신 큐와 병합
+      const latestEntries = this.getEntries();
+      const mergedEntries: PaymentOutboxEntry[] = [];
+      for (const current of latestEntries) {
+        if (flushedIds.has(current.id)) {
+          continue;
+        }
+        const updated = updatedById.get(current.id);
+        mergedEntries.push(updated ?? current);
+      }
+      this.saveEntries(mergedEntries);
+      return { flushed, remaining: mergedEntries.length };
+    })();
+
+    try {
+      return await this.flushInFlight;
+    } finally {
+      this.flushInFlight = null;
     }
-    return { flushed, remaining: updatedEntries.length };
   }
 }
