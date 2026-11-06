@@ -65,6 +65,8 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
             cardNoMasked: data.card_info.card_no_masked,
             approvalNo: data.card_info.approval_no,
             terminalId: data.card_info.terminal_id,
+            installmentMonths: data.card_info.installment_months,
+            approvalDt: data.card_info.approval_dt,
           }
         : undefined,
       cashInfo: data.cash_receipt_info
@@ -101,8 +103,9 @@ export class WindowsBridgePrinterAdapter implements IPrinterAdapter {
         success: false,
         message: errJson?.message || `프린터 브릿지 출력 실패 (HTTP ${res.status})`,
       };
-    } catch (err: any) {
-      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+    } catch (err: unknown) {
+      const errName = err instanceof Error ? err.name : '';
+      if (errName === 'TimeoutError' || errName === 'AbortError') {
         return { success: false, message: '프린터 출력 응답 대기 시간 초과 (10초)' };
       }
       return await this.fallbackEscPosPrint(data);
@@ -132,15 +135,25 @@ export class WindowsBridgeScannerAdapter implements IScannerAdapter {
 
   private connectWebSocket(): void {
     if (typeof window === 'undefined' || !this.isListening) return;
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
     const cfg = this.getConfig();
     const wsUrl = `ws://${cfg.bridgeHost.replace(/^https?:\/\//, '')}:${cfg.bridgePort}/ws/scanner`;
 
     try {
-      this.ws = new WebSocket(wsUrl);
-      this.ws.onmessage = (event) => {
+      const socket = new WebSocket(wsUrl);
+      this.ws = socket;
+      socket.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          const barcode = data.barcode || data.code || String(data);
+          const data = JSON.parse(event.data) as Record<string, unknown> | string;
+          const barcode =
+            typeof data === 'object' && data !== null
+              ? String(data.barcode || data.code || '')
+              : String(data);
           if (barcode) {
             this.handlers.forEach((h) => h(barcode.trim()));
           }
@@ -150,13 +163,15 @@ export class WindowsBridgeScannerAdapter implements IScannerAdapter {
           }
         }
       };
-      this.ws.onclose = () => {
-        this.ws = null;
+      socket.onclose = () => {
+        if (this.ws === socket) {
+          this.ws = null;
+        }
         if (this.isListening) {
           this.scheduleReconnect();
         }
       };
-      this.ws.onerror = () => {
+      socket.onerror = () => {
         // handled by onclose
       };
     } catch {
@@ -178,8 +193,11 @@ export class WindowsBridgeScannerAdapter implements IScannerAdapter {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
-        this.ws?.close();
-        this.ws = null;
+        if (this.ws) {
+          this.ws.onclose = null;
+          this.ws.close();
+          this.ws = null;
+        }
       }
     };
   }
