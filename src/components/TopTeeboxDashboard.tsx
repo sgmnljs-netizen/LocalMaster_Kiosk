@@ -67,8 +67,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   const renderBayCard = (bay: Bay, floorBayCount: number) => {
     const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
     const isUnderMaintenance = isBayBlocked(bay);
-    const isLessonOnly = Boolean(bay.is_lesson_only);
-    const isAvailable = canonicalStatus === 'AVAILABLE' && !isUnderMaintenance && !isLessonOnly;
+    const isAvailable = isBayTrulyAvailableForKiosk(bay);
     const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
     const isPrepare = canonicalStatus === 'PREPARE';
     const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
@@ -93,7 +92,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
       borderCol = '#ffffff';
       textColor = '#ffffff';
       glow = '0 0 0 3px #ffffff, 0 0 0 6px #0071e3, 0 6px 20px rgba(0, 113, 227, 0.6)';
-    } else if (bay.is_paused) {
+    } else if (bay.is_paused || bay.is_global_paused) {
       // 🟠 일시정지 / 볼회수: 앰버 오렌지
       bgCol = 'linear-gradient(145deg, #ea580c 0%, #c2410c 100%)';
       borderCol = 'rgba(255, 255, 255, 0.2)';
@@ -148,7 +147,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
             ? 'selectedBayHaloPulse 1.6s infinite ease-in-out'
             : (isPreOccupied ? 'dashboardPulse 1.5s infinite ease-in-out' : 'none')
         }}
-        title={`${bay.bay_no}번 타석: ${isSelected ? '선택됨' : bay.is_paused ? '일시정지' : isAvailable ? '이용가능' : (isOccupied || isPrepare) ? '사용중' : isPreOccupied ? '선점중' : '점검중'}`}
+        title={`${bay.bay_no}번 타석: ${isSelected ? '선택됨' : (bay.is_paused || bay.is_global_paused) ? '일시정지' : isAvailable ? '이용가능' : (isOccupied || isPrepare) ? '사용중' : isPreOccupied ? '선점중' : '점검중'}`}
       >
         {/* 타석 번호 (색상으로만 상태 구분, 글씨 라벨 일절 없음) */}
         <span style={{ fontSize: numFontSize, fontWeight: 800, color: textColor, lineHeight: 1, letterSpacing: '-0.5px' }}>

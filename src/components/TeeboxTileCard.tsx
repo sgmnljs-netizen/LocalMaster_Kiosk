@@ -2,7 +2,7 @@ import React from 'react';
 import { api, Bay } from '../services/api';
 import { Lock, Wrench, Clock } from 'lucide-react';
 import { TimeMaster } from '../utils/timeMaster';
-import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
+import { evaluateBayHardwareState, isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
 
 interface TeeboxTileCardProps {
   bay: Bay;
@@ -32,7 +32,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   const isPrepare = canonicalStatus === 'PREPARE';
   const isMaintenance = hwState.isBlocked;
   const isLessonOnly = Boolean(bay.is_lesson_only);
-  const isAvailable = canonicalStatus === 'AVAILABLE' && !isOccupied && !isPreOccupied && !isPrepare && !isMaintenance && !isLessonOnly;
+  const isAvailable = isBayTrulyAvailableForKiosk(bay);
   const isSelfLocked = isPreOccupied && (isSelected || (!!bay.lock_terminal_id && bay.lock_terminal_id === api.getTerminalId()));
   const isClickable = !isMaintenance && (isAvailable || isOccupied || isPrepare || isSelected || isSelfLocked || isLessonOnly || isCurrentMyBay);
 
