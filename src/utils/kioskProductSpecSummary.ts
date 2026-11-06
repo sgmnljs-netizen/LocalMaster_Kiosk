@@ -1,4 +1,5 @@
 import type { Bay, Product } from '../services/api';
+import { normalizeFloorZoneToken } from './floorUtils';
 
 const FALLBACK_SESSION_MIN = 60;
 
@@ -1032,20 +1033,17 @@ function checkBayZoneCompatibility(
     return cleaned.map((c) => labelMap[c] || DEFAULT_ZONE_FALLBACK_LABELS[c] || c).join('·');
   };
 
-  const bayFloor = selectedBay.floor
-    ? String(selectedBay.floor).trim().toUpperCase()
-    : selectedBay.floor_no
-      ? `${selectedBay.floor_no}F`
-      : '';
+  const bayFloor =
+    normalizeFloorZoneToken(selectedBay.floor ?? selectedBay.floor_no) ||
+    (selectedBay.floor ? String(selectedBay.floor).trim().toUpperCase() : '');
   const bayZone = String(selectedBay.zone_code || 'BAY').trim().toUpperCase();
 
-  // 1. 물리 층 제한 검증 (ReservationValidationService.validate_access_rules step 0 정합)
+  // 1. 물리 층 제한 검증 (ReservationValidationService.validate_access_rules step 0 정합 — B1/B1F/-1 정규화 포함)
   if (bayFloor && allowedZones.length > 0) {
-    const floorLikeZones = allowedZones.filter(
-      (az) => (az.endsWith('F') && /\d/.test(az)) || (az.startsWith('B') && /^\d+$/.test(az.slice(1)))
-    );
+    const floorLikeZones = allowedZones.filter((az) => Boolean(normalizeFloorZoneToken(az)));
+    const normalizedAllowedFloors = floorLikeZones.map((az) => normalizeFloorZoneToken(az));
     const hasWildcardZone = allowedZones.some((a) => ['ALL', 'GENERAL', 'BAY', 'BAT', 'TEEBOX', '전체'].includes(a));
-    if (floorLikeZones.length > 0 && !hasWildcardZone && !allowedZones.includes(bayFloor)) {
+    if (floorLikeZones.length > 0 && !hasWildcardZone && !normalizedAllowedFloors.includes(bayFloor)) {
       return { ok: false, requiredLabel: formatRequired(floorLikeZones) };
     }
   }
