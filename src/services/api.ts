@@ -3726,22 +3726,25 @@ class HybridAPIClient {
     const ip = deviceIp || this.resolveKioskFaceTerminalIp();
     const storeCd = this.getStoreCd();
 
+    if (externalSignal?.aborted) {
+      return null;
+    }
+
+    const controller = new AbortController();
+    const onExternalAbort = () => controller.abort();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15초 타임아웃
+
+    // 외부 취소 시그널 이벤트 리스너 바인딩 (내부 15초 타임아웃과 동시 동작하도록 controller.signal 단일 전달)
+    if (externalSignal) {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15초 타임아웃
-
-      // 외부 취소 시그널 이벤트 리스너 바인딩
-      if (externalSignal) {
-        externalSignal.addEventListener('abort', () => controller.abort());
-      }
-
       const res = await fetch(`${this.getBaseUrl()}/v1/face-terminal/scan-identity?ip=${encodeURIComponent(ip)}&store_cd=${encodeURIComponent(storeCd)}&role=KIOSK`, {
         method: 'GET',
         headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
-        signal: externalSignal || controller.signal
+        signal: controller.signal
       });
-
-      clearTimeout(timeoutId);
 
       if (res.ok) {
         const data = await res.json();
@@ -3751,11 +3754,17 @@ class HybridAPIClient {
           return member;
         }
       }
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
+    } catch (err: unknown) {
+      const errName = err instanceof Error ? err.name : '';
+      if (errName === 'AbortError') {
         console.log('[Kiosk Face Auth] 안면 스캔 비동기 작업이 취소되었습니다.');
       } else {
         console.warn('[Kiosk Face Auth] 백엔드 안면 단말기 통신 지연/오류:', err);
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', onExternalAbort);
       }
     }
     return null;
