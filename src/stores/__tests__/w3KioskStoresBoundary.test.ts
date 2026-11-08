@@ -1,0 +1,91 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  getKioskSettings,
+  hydrateKioskDeviceSettingsFromServer,
+  sanitizeMinGapMinutes,
+  saveKioskSettings,
+} from '../kioskSettings';
+
+describe('W3-KSK-stores: kioskSettings storeCode 공백 트림·캐시 소거 및 서버 하이드레이션 레이스 가드', () => {
+  const storageMap = new Map<string, string>();
+  const mockLocalStorage = {
+    getItem: (k: string) => (storageMap.has(k) ? storageMap.get(k)! : null),
+    setItem: (k: string, v: string) => storageMap.set(k, String(v)),
+    removeItem: (k: string) => storageMap.delete(k),
+    clear: () => storageMap.clear(),
+  };
+
+  beforeEach(() => {
+    storageMap.clear();
+    vi.stubGlobal('localStorage', mockLocalStorage);
+    vi.stubGlobal('window', {
+      location: {
+        hostname: '127.0.0.1',
+        port: '5179',
+        origin: 'http://127.0.0.1:5179',
+        protocol: 'http:',
+      },
+      localStorage: mockLocalStorage,
+      dispatchEvent: () => true,
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sanitizeMinGapMinutes는 숫자형 문자열을 허용하고 [10, 1440] 범위로 안전 클램핑한다', () => {
+    expect(sanitizeMinGapMinutes('45')).toBe(45);
+    expect(sanitizeMinGapMinutes('9999')).toBe(1440);
+    expect(sanitizeMinGapMinutes('5', 50)).toBe(50);
+    expect(sanitizeMinGapMinutes(null, 5)).toBe(60);
+  });
+
+  it('saveKioskSettings는 storeCode 앞뒤 공백을 제거하고 타 지점 전환 시 로컬 도메인 캐시를 즉시 소거한다', () => {
+    saveKioskSettings({ storeCode: 'STORE_A' });
+    mockLocalStorage.setItem('LM_BAYS', '[{"bay_no":1}]');
+    mockLocalStorage.setItem('LM_PRODUCTS', '[{"prod_cd":"P1"}]');
+
+    const switched = saveKioskSettings({ storeCode: '  STORE_B  ' });
+    expect(switched.storeCode).toBe('STORE_B');
+    expect(mockLocalStorage.getItem('LM_STORE_CD')).toBe('STORE_B');
+    expect(mockLocalStorage.getItem('LM_BAYS')).toBeNull();
+    expect(mockLocalStorage.getItem('LM_PRODUCTS')).toBeNull();
+  });
+
+  it('hydrateKioskDeviceSettingsFromServer 응답 대기 중 지점이 변경되면 구형 지점 설정 덮어쓰기를 차단한다', async () => {
+    saveKioskSettings({ storeCode: 'STORE_A', terminalId: 'TID-INIT' });
+
+    let resolveFetch!: (val: unknown) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve;
+          })
+      )
+    );
+
+    const hydratePromise = hydrateKioskDeviceSettingsFromServer();
+
+    // 인플라이트 도중 관리자가 STORE_B로 지점 변경
+    saveKioskSettings({ storeCode: 'STORE_B', terminalId: 'TID-STORE-B' });
+
+    resolveFetch({
+      ok: true,
+      json: async () => ({
+        has_saved_settings: true,
+        settings: {
+          terminalId: 'STALE-TID-STORE-A',
+          minGapMinutes: '30',
+        },
+      }),
+    });
+
+    const hydrated = await hydratePromise;
+    expect(hydrated).toBeNull();
+    expect(getKioskSettings().storeCode).toBe('STORE_B');
+    expect(getKioskSettings().terminalId).toBe('TID-STORE-B');
+  });
+});

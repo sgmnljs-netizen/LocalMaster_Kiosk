@@ -167,11 +167,24 @@ function cloneDefaultKioskSettings(overrides?: Partial<KioskSettings>): KioskSet
   };
 }
 
-function sanitizeMinGapMinutes(raw: unknown, fallback = DEFAULT_KIOSK_SETTINGS.minGapMinutes ?? 60): number {
-  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 10) {
-    return Math.floor(raw);
+export function sanitizeMinGapMinutes(
+  raw: unknown,
+  fallback = DEFAULT_KIOSK_SETTINGS.minGapMinutes ?? 60
+): number {
+  const safeFallback =
+    typeof fallback === 'number' && Number.isFinite(fallback) && fallback >= 10
+      ? Math.min(1440, Math.floor(fallback))
+      : 60;
+  const parsed =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && raw.trim() !== ''
+        ? Number(raw.trim())
+        : Number.NaN;
+  if (Number.isFinite(parsed) && parsed >= 10) {
+    return Math.min(1440, Math.floor(parsed));
   }
-  return fallback;
+  return safeFallback;
 }
 
 export function getKioskSettings(): KioskSettings {
@@ -421,9 +434,14 @@ export function saveKioskSettings(
   const resolvedDigest = incomingPlainPin
     ? computeOwnerPinDigest(incomingPlainPin)
     : (settings.adminPinDigest ?? current.adminPinDigest);
+  const normalizedStoreCode =
+    settings.storeCode !== undefined
+      ? String(settings.storeCode).trim()
+      : String(current.storeCode || '').trim();
   const next: KioskSettings = {
     ...current,
     ...settings,
+    storeCode: normalizedStoreCode,
     providerType: normalizeVanProviderType(settings.providerType ?? current.providerType),
     adminPin: '',
     adminPinDigest: resolvedDigest,
@@ -440,7 +458,7 @@ export function saveKioskSettings(
   if (typeof localStorage !== 'undefined') {
     const prevLmStore = (localStorage.getItem('LM_STORE_CD') || '').trim();
     const hadSettingsEntry = localStorage.getItem(STORAGE_KEY) !== null;
-    const previousPersistedStore = prevLmStore || (hadSettingsEntry ? current.storeCode : '');
+    const previousPersistedStore = (prevLmStore || (hadSettingsEntry ? current.storeCode : '')).trim();
     if (previousPersistedStore && next.storeCode && previousPersistedStore !== next.storeCode) {
       for (const cacheKey of [
         'LM_STORE_INFO',
@@ -573,6 +591,10 @@ export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSetti
     );
     if (!res.ok) return null;
     const data = await res.json();
+    const latestStoreCd = (localStorage.getItem('LM_STORE_CD') || getKioskSettings().storeCode || '').trim();
+    if (latestStoreCd && latestStoreCd !== storeCd) {
+      return null;
+    }
     if (!data?.has_saved_settings || !data?.settings || typeof data.settings !== 'object') {
       return null;
     }
@@ -602,8 +624,8 @@ export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSetti
     if (srv.defaultAuthMode) {
       patch.defaultAuthMode = srv.defaultAuthMode;
     }
-    if (typeof srv.minGapMinutes === 'number' && Number.isFinite(srv.minGapMinutes) && srv.minGapMinutes >= 10) {
-      patch.minGapMinutes = Math.floor(srv.minGapMinutes);
+    if (srv.minGapMinutes !== undefined && srv.minGapMinutes !== null) {
+      patch.minGapMinutes = sanitizeMinGapMinutes(srv.minGapMinutes, current.minGapMinutes);
     }
     if (srv.topDashboardMode) {
       patch.topDashboardMode = srv.topDashboardMode;
