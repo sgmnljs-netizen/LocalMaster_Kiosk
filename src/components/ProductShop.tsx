@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ShoppingBag, X, Layers, Hand, Clock } from 'lucide-react';
 import { api, Bay, Product } from '../services/api';
-import { TimeMaster } from '../utils/timeMaster';
 import {
   buildKioskProductSpecSummary,
   checkIfKioskDailyProduct,
@@ -40,6 +39,11 @@ interface ProductShopProps {
   allStoreFloors?: string[];
   zoneLabelMap?: Record<string, string>;
   hasActiveMembership?: boolean;
+  isStoreClosed?: boolean;
+  storeClosedReason?: string | null;
+  storeOpenTime?: string | null;
+  storeCloseTime?: string | null;
+  isStore24h?: boolean;
   nowOverride?: Date;
   initialProducts?: Product[];
   onProductSelected: (product: Product) => void;
@@ -66,6 +70,11 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   allStoreFloors,
   zoneLabelMap,
   hasActiveMembership = false,
+  isStoreClosed = false,
+  storeClosedReason = null,
+  storeOpenTime = null,
+  storeCloseTime = null,
+  isStore24h = false,
   nowOverride,
   initialProducts,
   onProductSelected,
@@ -380,9 +389,14 @@ export const ProductShop: React.FC<ProductShopProps> = ({
                     maxAssignableMin,
                     nextLimitResStartTime,
                     selectedBay,
-                    now: nowOverride ?? TimeMaster.getSyncedDate(),
+                    now: nowOverride,
                     allStoreFloors,
                     zoneLabelMap,
+                    isStoreClosed,
+                    storeClosedReason,
+                    storeOpenTime,
+                    storeCloseTime,
+                    isStore24h,
                   })
                 : null;
             const isCardDisabled = Boolean(dailyEligibility && !dailyEligibility.eligible);

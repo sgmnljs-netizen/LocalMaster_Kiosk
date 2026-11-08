@@ -1,5 +1,6 @@
 import type { Bay, Product } from '../services/api';
 import { normalizeFloorZoneToken } from './floorUtils';
+import { TimeMaster } from './timeMaster';
 
 const FALLBACK_SESSION_MIN = 60;
 
@@ -126,6 +127,11 @@ export interface DailyPassEligibilityOptions {
   now?: Date;
   allStoreFloors?: string[];
   zoneLabelMap?: Record<string, string>;
+  isStoreClosed?: boolean;
+  storeClosedReason?: string | null;
+  storeOpenTime?: string | null;
+  storeCloseTime?: string | null;
+  isStore24h?: boolean;
 }
 
 export interface DailyPassEligibilityResult {
@@ -1118,10 +1124,44 @@ export function evaluateDailyPassEligibility(
   const metaObj = parseRecord(prod.meta_data);
   const timeSummary = summarizeTimeRestriction(rules, metaObj, prod.schedule_notice);
   const daySummary = summarizeDayRestriction(rules);
-  const nowDate = options.now ?? new Date();
+  const nowDate = options.now ?? TimeMaster.getSyncedDate();
   const { curYmd, curEn, curKr, curHhmm, isWeekendDay } = getKstDayAndHhmm(nowDate);
   const rawEvalYmd = String(prod.evaluated_ymd || '').replace(/\D/g, '');
   const isSameEvaluatedDay = !rawEvalYmd || rawEvalYmd === curYmd;
+
+  // 3-0. 실시간 매장 휴무일(WS settings_updated / getStoreInfo) 및 매장 영업시간 검증
+  const effectiveDayType = String(
+    (isSameEvaluatedDay ? prod.today_day_type : null) || (isWeekendDay ? 'WEEKEND' : 'WEEKDAY')
+  ).toUpperCase();
+
+  if (options.isStoreClosed === true || effectiveDayType === 'STORE_CLOSED') {
+    const reasonText = options.storeClosedReason ? ` (${options.storeClosedReason})` : '';
+    return {
+      eligible: false,
+      reasonCode: 'SCHEDULE_MISMATCH',
+      badgeLabel: '⏰ 매장 휴무일',
+      buttonLabel: '매장 휴무일로 선택 불가',
+      modalTitle: '매장 휴무일 안내',
+      modalMessage: `오늘은 매장 휴무일${reasonText}로 일일 타석권을 배정할 수 없습니다.`,
+    };
+  }
+
+  if (options.isStore24h !== true && options.storeOpenTime && options.storeCloseTime) {
+    const normOpen = padHhmmToken(options.storeOpenTime);
+    const rawClose = padHhmmToken(options.storeCloseTime);
+    const normClose = rawClose === '00:00' && normOpen !== '00:00' ? '24:00' : rawClose;
+    const storeHoursCheck = checkHhmmInSlotRange(curHhmm, `${normOpen}-${normClose}`);
+    if (storeHoursCheck && !storeHoursCheck.matched) {
+      return {
+        eligible: false,
+        reasonCode: 'SCHEDULE_MISMATCH',
+        badgeLabel: `⏰ 영업시간 외 (${storeHoursCheck.rangeLabel})`,
+        buttonLabel: `매장 영업시간 외 (${storeHoursCheck.rangeLabel})`,
+        modalTitle: '매장 영업시간 안내',
+        modalMessage: `현재 매장 영업시간(${storeHoursCheck.rangeLabel})이 아니므로 일일 타석권을 즉시 배정할 수 없습니다.`,
+      };
+    }
+  }
 
   // 3-A. 백엔드 실시간 공휴일/시간대 판정이 당일 기준 명시적 불가(false)이고, 커스텀 시각 오버라이드가 없는 경우 우선 반영
   if (prod.is_usable_now === false && !options.now && isSameEvaluatedDay) {
@@ -1134,22 +1174,6 @@ export function evaluateDailyPassEligibility(
       buttonLabel: `현재 이용 불가 (${compactCondition})`,
       modalTitle: '이용 가능 요일·시간 안내',
       modalMessage: `${reasonDetail}\n\n현재 즉시 이용 가능한 다른 일일 타석권을 선택해 주세요.`,
-    };
-  }
-
-  // 3-B. 클라이언트 KST 실시간 판정 (자정 경과 및 오프라인 전일자 EdgeDB 캐시 오염 완벽 방어)
-  const effectiveDayType = String(
-    (isSameEvaluatedDay ? prod.today_day_type : null) || (isWeekendDay ? 'WEEKEND' : 'WEEKDAY')
-  ).toUpperCase();
-
-  if (effectiveDayType === 'STORE_CLOSED') {
-    return {
-      eligible: false,
-      reasonCode: 'SCHEDULE_MISMATCH',
-      badgeLabel: '⏰ 매장 휴무일',
-      buttonLabel: '매장 휴무일로 선택 불가',
-      modalTitle: '매장 휴무일 안내',
-      modalMessage: '오늘은 매장 휴무일로 일일 타석권을 배정할 수 없습니다.',
     };
   }
 

@@ -225,7 +225,12 @@ export default function KioskApp() {
   const [errorMasterCard, setErrorMasterCard] = useState<{ code: string; detail: string; traceId: string } | null>(null);
   const [errorModal, setErrorModal] = useState<ErrorModalData>({ isVisible: false, message: '' });
   const [storeName, setStoreName] = useState<string>('SGM Golf Academy');
+  const [storeOpenTime, setStoreOpenTime] = useState<string>('06:00');
   const [storeCloseTime, setStoreCloseTime] = useState<string>('24:00');
+  const [isStore24h, setIsStore24h] = useState<boolean>(false);
+  const [isStoreClosed, setIsStoreClosed] = useState<boolean>(false);
+  const [storeClosedReason, setStoreClosedReason] = useState<string | null>(null);
+  const [storePrepareMin, setStorePrepareMin] = useState<number>(3);
   const [checkinPolicy, setCheckinPolicy] = useState<string>('CHECKIN_REQUIRED');
   const [hwFailAlert, setHwFailAlert] = useState<{ bayNo: number; resId: string } | null>(null);
   const [hwFailCountdown, setHwFailCountdown] = useState<number>(10);
@@ -507,8 +512,17 @@ export default function KioskApp() {
         }
         const info = await api.getStoreInfo();
         setStoreName(info.store_nm);
+        if (info.open_time) {
+          setStoreOpenTime(info.open_time);
+        }
         if (info.close_time) {
           setStoreCloseTime(info.close_time);
+        }
+        setIsStore24h(Boolean(info.is_24h));
+        setIsStoreClosed(Boolean(info.is_closed));
+        setStoreClosedReason(info.closed_reason ?? null);
+        if (typeof info.prepare_time_min === 'number' && Number.isFinite(info.prepare_time_min) && info.prepare_time_min >= 0) {
+          setStorePrepareMin(Math.floor(info.prepare_time_min));
         }
         setCheckinPolicy(info.checkin_policy);
         setLogoUrl(info.logo_url);
@@ -918,6 +932,15 @@ export default function KioskApp() {
 
   // 실시간 미니 모니터 타석 클릭 단축키
   const handleMiniBayClick = async (bayNo: number) => {
+    if (isStoreClosed) {
+      showErrorModal(
+        storeClosedReason
+          ? `오늘은 매장 휴무일(${storeClosedReason})로 타석 배정을 진행할 수 없습니다.`
+          : '오늘은 매장 휴무일로 타석 배정을 진행할 수 없습니다.',
+        '매장 휴무일 안내'
+      );
+      return;
+    }
     showToast(lang === 'KO' ? `${bayNo}번 타석 선점 시도 중...` : `Securing teebox ${bayNo}...`);
     try {
       const success = await api.preoccupyBay(bayNo);
@@ -1646,9 +1669,12 @@ export default function KioskApp() {
         }
 
         const now = TimeMaster.getSyncedDate();
-        const diffMin = TimeMaster.getMinutesUntilClose(storeCloseTime, now);
+        const diffMin = TimeMaster.getMinutesUntilClose(storeCloseTime, now, {
+          is24h: isStore24h,
+          storeOpenTime,
+        });
         const PAYMENT_BUFFER_MIN = 2;
-        const prepareMin = 3;
+        const prepareMin = storePrepareMin;
         const maxWaitMin = targets.reduce((maxW, t) => {
           const bObj = bays.find(b => b.bay_no === t.bayNo);
           if (bObj && (bObj.status === 'OCCUPIED' || bObj.status === 'PREPARE')) {
@@ -1736,7 +1762,10 @@ export default function KioskApp() {
     if (purpose === 'ALLOCATE_DAILY' && selectedBayNo) {
       // ⏰ [일일권 결제 전 중간 빈타석 한도 및 마감시간 사전 점검 (SSOT)]
       const now = TimeMaster.getSyncedDate();
-      const diffMin = TimeMaster.getMinutesUntilClose(storeCloseTime, now);
+      const diffMin = TimeMaster.getMinutesUntilClose(storeCloseTime, now, {
+        is24h: isStore24h,
+        storeOpenTime,
+      });
 
       // [P0-07 & P2-2] 대기 타석 잔여시간(waitMin) 및 종료 시각 계산: TimeMaster SSOT 파서 사용
       const selectedBay = bays.find(b => b.bay_no === selectedBayNo);
@@ -1763,14 +1792,18 @@ export default function KioskApp() {
         return;
       }
 
-      // 1-2) 일일 타석권 구역(층/카테고리) 및 요일·공휴일·시간대 적합성 VAN 결제 진입 전 선제 방어
+      // 1-2) 일일 타석권 구역(층/카테고리) 및 요일·공휴일·시간대·매장휴무/영업시간 적합성 VAN 결제 진입 전 선제 방어
       const dailyEligibility = evaluateDailyPassEligibility(prod, {
         maxAssignableMin: selectedBay?.max_assignable_min,
         nextLimitResStartTime: selectedBay?.next_limit_res_start_time,
         selectedBay: selectedBay || null,
-        now,
         allStoreFloors,
         zoneLabelMap,
+        isStoreClosed,
+        storeClosedReason,
+        storeOpenTime,
+        storeCloseTime,
+        isStore24h,
       });
       if (!dailyEligibility.eligible) {
         showErrorModal(
@@ -1789,7 +1822,7 @@ export default function KioskApp() {
 
       // 결제 소요 버퍼: 카드 투입 및 통신에 약 1~2분 소요되므로 백엔드 409 및 망취소 방어를 위해 2분 버퍼 확보
       const PAYMENT_BUFFER_MIN = 2;
-      const prepareMin = 3;
+      const prepareMin = storePrepareMin;
       const totalOffsetMin = waitMin + prepareMin + PAYMENT_BUFFER_MIN;
       const maxUserMin = Math.max(0, diffMin - totalOffsetMin);
 
@@ -2611,8 +2644,28 @@ export default function KioskApp() {
               <KioskMainDashboard 
                 lang={lang}
                 kioskMenuConfigs={kioskMenuConfigs}
-                onPracticeTeebox={() => setStep('PRACTICE_SELECT')}
+                onPracticeTeebox={() => {
+                  if (isStoreClosed) {
+                    showErrorModal(
+                      storeClosedReason
+                        ? `오늘은 매장 휴무일(${storeClosedReason})로 타석 배정을 진행할 수 없습니다.`
+                        : '오늘은 매장 휴무일로 타석 배정을 진행할 수 없습니다.',
+                      '매장 휴무일 안내'
+                    );
+                    return;
+                  }
+                  setStep('PRACTICE_SELECT');
+                }}
                 onPar3Allocation={() => {
+                  if (isStoreClosed) {
+                    showErrorModal(
+                      storeClosedReason
+                        ? `오늘은 매장 휴무일(${storeClosedReason})로 파3 배정을 진행할 수 없습니다.`
+                        : '오늘은 매장 휴무일로 파3 배정을 진행할 수 없습니다.',
+                      '매장 휴무일 안내'
+                    );
+                    return;
+                  }
                   setPurpose('BOOK_PAR3');
                   setStep('PAR3_ALLOCATION');
                 }}
@@ -2986,6 +3039,11 @@ export default function KioskApp() {
                       allStoreFloors={allStoreFloors}
                       zoneLabelMap={zoneLabelMap}
                       hasActiveMembership={hasActivePeriodMembership}
+                      isStoreClosed={isStoreClosed}
+                      storeClosedReason={storeClosedReason}
+                      storeOpenTime={storeOpenTime}
+                      storeCloseTime={storeCloseTime}
+                      isStore24h={isStore24h}
                       onProductSelected={handleProductSelected}
                       onCancel={() => {
                         const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
@@ -3016,6 +3074,11 @@ export default function KioskApp() {
                   allStoreFloors={allStoreFloors}
                   zoneLabelMap={zoneLabelMap}
                   hasActiveMembership={hasActivePeriodMembership}
+                  isStoreClosed={isStoreClosed}
+                  storeClosedReason={storeClosedReason}
+                  storeOpenTime={storeOpenTime}
+                  storeCloseTime={storeCloseTime}
+                  isStore24h={isStore24h}
                   onProductSelected={handleProductSelected}
                   onCancel={handleGoHome}
                 />

@@ -317,10 +317,24 @@ export class TimeMaster {
     return `${ymd} ${hours}:${minutes}:${seconds}`;
   }
 
-  /** 매장 마감시각까지 남은 분(minute) 산출 (심야 익일 마감 06:00~05:00 및 자정 00:00 마감 정밀 구분 — KST 고정) */
-  static getMinutesUntilClose(storeCloseTime?: string | null, now: Date = TimeMaster.getSyncedDate()): number {
+  /** 매장 마감시각까지 남은 분(minute) 산출 (24시간 영업 무제한 보장, 심야 익일 마감 06:00~05:00 및 자정 00:00 마감 정밀 구분 — KST 고정) */
+  static getMinutesUntilClose(
+    storeCloseTime?: string | null,
+    now: Date = TimeMaster.getSyncedDate(),
+    options?: { is24h?: boolean; storeOpenTime?: string | null }
+  ): number {
+    const FULL_DAY_AVAILABLE_MINUTES = 1440;
+    if (options?.is24h === true) {
+      return FULL_DAY_AVAILABLE_MINUTES;
+    }
     const digitsOnly = String(storeCloseTime || '24:00').replace(/[^0-9]/g, '');
     const rawClean = digitsOnly.length === 4 ? digitsOnly : '2400';
+    if (options?.is24h !== false && options?.storeOpenTime) {
+      const openDigits = String(options.storeOpenTime).replace(/[^0-9]/g, '');
+      if (openDigits === '0000' && rawClean === '2359') {
+        return FULL_DAY_AVAILABLE_MINUTES;
+      }
+    }
     const cleanClose = rawClean === '0000' ? '2400' : rawClean;
     const parsedH = parseInt(cleanClose.slice(0, 2), 10);
     const parsedM = parseInt(cleanClose.slice(2, 4), 10);

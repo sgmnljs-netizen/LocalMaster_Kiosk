@@ -380,6 +380,7 @@ export interface KioskAuditLogItem {
 }
 
 export interface KioskStoreInfo {
+  store_cd?: string;
   store_nm: string;
   checkin_policy: string;
   address: string;
@@ -392,7 +393,14 @@ export interface KioskStoreInfo {
   owner_nm?: string;
   owner_name?: string;
   ceo_nm?: string;
+  open_time?: string;
   close_time: string;
+  is_24h?: boolean;
+  is_closed?: boolean;
+  closed_reason?: string | null;
+  break_start?: string | null;
+  break_end?: string | null;
+  prepare_time_min?: number;
   logo_url?: string;
   photo_url?: string;
   meta_data?: KioskStoreMetaData | string | null;
@@ -1468,7 +1476,31 @@ class HybridAPIClient {
           const resolvedTel = data.phone_no || data.tel || data.tel_no || '02-450-4500';
           const resolvedCeo = data.owner_nm || data.owner_name || data.ceo_name || data.ceo_nm || '';
           const resolvedBizNo = data.biz_no || data.biz_reg_no || data.business_no || '';
+          const parsedMeta =
+            typeof data.meta_data === 'string'
+              ? (() => {
+                  try {
+                    return JSON.parse(data.meta_data) as Record<string, unknown>;
+                  } catch {
+                    return {};
+                  }
+                })()
+              : ((data.meta_data as Record<string, unknown>) || {});
+          const todayOp = (parsedMeta.today_operation as Record<string, unknown>) || {};
+          const baseOp = (parsedMeta.operation as Record<string, unknown>) || {};
+          const resolvedOpenTime = String(data.open_time || todayOp.open_time || baseOp.open_time || '06:00');
+          const resolvedCloseTime = String(data.close_time || todayOp.close_time || baseOp.close_time || '23:00');
+          const resolvedIs24h = Boolean(
+            data.is_24h ?? todayOp.is_24h ?? baseOp.is_24h ?? (resolvedOpenTime === '00:00' && resolvedCloseTime === '23:59')
+          );
+          const resolvedIsClosed = Boolean(data.is_closed ?? todayOp.is_closed ?? false);
+          const resolvedClosedReason = (data.closed_reason ?? todayOp.closed_reason ?? null) as string | null;
+          const resolvedPrepareMin =
+            typeof data.prepare_time_min === 'number' && Number.isFinite(data.prepare_time_min) && data.prepare_time_min >= 0
+              ? Math.floor(data.prepare_time_min)
+              : 3;
           return {
+            store_cd: data.store_cd || this.getStoreCd(),
             store_nm: data.store_nm || 'SGM Golf Academy',
             checkin_policy: data.checkin_policy || 'CHECKIN_REQUIRED',
             address: data.address || '서울특별시 광진구 워커힐로 177',
@@ -1481,7 +1513,14 @@ class HybridAPIClient {
             owner_nm: resolvedCeo,
             owner_name: data.owner_name || resolvedCeo || undefined,
             ceo_nm: resolvedCeo,
-            close_time: data.close_time || '23:00',
+            open_time: resolvedOpenTime,
+            close_time: resolvedCloseTime,
+            is_24h: resolvedIs24h,
+            is_closed: resolvedIsClosed,
+            closed_reason: resolvedClosedReason,
+            break_start: (data.break_start ?? todayOp.break_start ?? baseOp.break_start ?? null) as string | null,
+            break_end: (data.break_end ?? todayOp.break_end ?? baseOp.break_end ?? null) as string | null,
+            prepare_time_min: resolvedPrepareMin,
             logo_url: data.logo_url || undefined,
             photo_url: data.photo_url || undefined,
             meta_data: data.meta_data
@@ -1493,6 +1532,7 @@ class HybridAPIClient {
     }
     // Offline Fallback
     const cached = safeParseStorageObject('LM_STORE_INFO') as {
+      store_cd?: string;
       phone_no?: string;
       tel?: string;
       tel_no?: string;
@@ -1506,7 +1546,14 @@ class HybridAPIClient {
       store_nm?: string;
       checkin_policy?: string;
       address?: string;
+      open_time?: string;
       close_time?: string;
+      is_24h?: boolean;
+      is_closed?: boolean;
+      closed_reason?: string | null;
+      break_start?: string | null;
+      break_end?: string | null;
+      prepare_time_min?: number;
       logo_url?: string;
       photo_url?: string;
       meta_data?: Record<string, unknown>;
@@ -1514,7 +1561,10 @@ class HybridAPIClient {
     const fallbackTel = cached.phone_no || cached.tel || cached.tel_no || '1566-8705';
     const fallbackCeo = cached.owner_nm || cached.owner_name || cached.ceo_name || cached.ceo_nm || '대표이사';
     const fallbackBizNo = cached.biz_no || cached.biz_reg_no || cached.business_no || '721-81-04039';
+    const cachedOpenTime = cached.open_time || '06:00';
+    const cachedCloseTime = cached.close_time || '23:00';
     return {
+      store_cd: cached.store_cd || this.getStoreCd(),
       store_nm: cached.store_nm || '골포스 강남 1호점 (체험관)',
       checkin_policy: cached.checkin_policy || 'CHECKIN_REQUIRED',
       address: cached.address || '서울특별시 강남구 테헤란로 123',
@@ -1527,7 +1577,17 @@ class HybridAPIClient {
       owner_nm: fallbackCeo,
       owner_name: cached.owner_name || fallbackCeo,
       ceo_nm: fallbackCeo,
-      close_time: cached.close_time || '23:00',
+      open_time: cachedOpenTime,
+      close_time: cachedCloseTime,
+      is_24h: Boolean(cached.is_24h ?? (cachedOpenTime === '00:00' && cachedCloseTime === '23:59')),
+      is_closed: Boolean(cached.is_closed ?? false),
+      closed_reason: cached.closed_reason ?? null,
+      break_start: cached.break_start ?? null,
+      break_end: cached.break_end ?? null,
+      prepare_time_min:
+        typeof cached.prepare_time_min === 'number' && Number.isFinite(cached.prepare_time_min) && cached.prepare_time_min >= 0
+          ? Math.floor(cached.prepare_time_min)
+          : 3,
       logo_url: cached.logo_url || undefined,
       photo_url: cached.photo_url || undefined,
       meta_data: cached.meta_data || { integration: { face_terminal_yn: true } }
