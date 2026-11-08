@@ -30,10 +30,29 @@ export function parseBayConfigJson(bay: Bay): BayConfigMeta {
   }
 }
 
+const NON_ERROR_HW_CODES = new Set([
+  '',
+  '0',
+  '00',
+  'NONE',
+  'NORMAL',
+  'OK',
+  'NULL',
+  'FALSE',
+]);
+
+export function isNonEmptyHardwareErrorCode(raw: unknown): boolean {
+  if (raw === null || raw === undefined || raw === false) return false;
+  const normalized = String(raw).trim().toUpperCase();
+  return !NON_ERROR_HW_CODES.has(normalized);
+}
+
 export function evaluateBayHardwareState(bay: Bay): BayHardwareState {
   const cfg = parseBayConfigJson(bay);
   const statusCode = typeof bay.status_info?.code === 'string' ? bay.status_info.code : '';
   const canonicalStatus = String(statusCode || bay.status || '').toUpperCase();
+  const cfgErrCode = String(cfg.error_code ?? '').trim().toUpperCase();
+  const bayErrCode = String(bay.error_code ?? '').trim().toUpperCase();
 
   // 1. 볼 공급 부족 (E01 or ball_box_detected === false or ball_box_status === 'EMPTY' or error_short_label === '볼부족')
   const isBallEmpty =
@@ -42,8 +61,8 @@ export function evaluateBayHardwareState(bay: Bay): BayHardwareState {
     cfg.ball_box_detected === false ||
     cfg.ball_box_status === 'EMPTY' ||
     cfg.error_short_label === '볼부족' ||
-    String(cfg.error_code) === 'E01' ||
-    String(bay.error_code) === 'E01';
+    cfgErrCode === 'E01' ||
+    bayErrCode === 'E01';
 
   // 2. 하드웨어 에러 / 통신 오류
   const isHwError =
@@ -51,7 +70,7 @@ export function evaluateBayHardwareState(bay: Bay): BayHardwareState {
     cfg.has_error === true ||
     cfg.status === 'communication_error' ||
     bay.has_error === true ||
-    Boolean(bay.error_code && String(bay.error_code) !== '0');
+    isNonEmptyHardwareErrorCode(bay.error_code);
 
   // 3. 상태 기반 점검/비활성 여부
   const isStatusBlocked =
