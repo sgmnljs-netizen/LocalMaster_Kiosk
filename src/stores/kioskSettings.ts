@@ -438,6 +438,22 @@ export function saveKioskSettings(
         : sanitizeMinGapMinutes(current.minGapMinutes),
   };
   if (typeof localStorage !== 'undefined') {
+    const prevLmStore = (localStorage.getItem('LM_STORE_CD') || '').trim();
+    const hadSettingsEntry = localStorage.getItem(STORAGE_KEY) !== null;
+    const previousPersistedStore = prevLmStore || (hadSettingsEntry ? current.storeCode : '');
+    if (previousPersistedStore && next.storeCode && previousPersistedStore !== next.storeCode) {
+      for (const cacheKey of [
+        'LM_STORE_INFO',
+        'LM_BAYS',
+        'LM_LOCKERS',
+        'LM_PRODUCTS',
+        'LM_MEMBERS',
+        'LM_PAR3_SLOTS',
+        'LM_ZONES',
+      ]) {
+        localStorage.removeItem(cacheKey);
+      }
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     if (next.storeCode) {
       localStorage.setItem('LM_STORE_CD', next.storeCode);

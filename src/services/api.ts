@@ -1137,10 +1137,17 @@ class HybridAPIClient {
         socket.onmessage = (evt) => {
           try {
             const data = JSON.parse(evt.data) as Record<string, unknown>;
+            const bayObjCandidate =
+              data.bay && typeof data.bay === 'object' ? (data.bay as Record<string, unknown>) : null;
+            const incomingStoreCd = String(data.store_cd || bayObjCandidate?.store_cd || '').trim();
+            const activeStoreCd = this.getStoreCd();
+            if (incomingStoreCd && activeStoreCd && incomingStoreCd !== activeStoreCd) {
+              return;
+            }
             onMessage?.(data);
 
             const eventType = String(data.type || data.event || '');
-            const bayObj = (data.bay as Record<string, unknown>) || data;
+            const bayObj = bayObjCandidate || data;
             const bayNo = (bayObj.bay_no as number) || (data.bay_no as number);
 
             if (['bay_updated', 'bay_update', 'bay_status_updated', 'bay_preoccupy'].includes(eventType)) {
@@ -1372,7 +1379,7 @@ class HybridAPIClient {
     };
   }
 
-  // 네트워크 헬스 체크 및 가맹점(store_cd) 자동 프로비저닝
+  // 네트워크 헬스 체크 및 미설정 기기 최초 가맹점(store_cd) 자동 프로비저닝 (설정 완료 지점 코드 덮어쓰기 원천 차단)
   async checkConnection(): Promise<boolean> {
     if (isDemoEnvironment()) {
       this.isOnline = true;
@@ -1380,27 +1387,43 @@ class HybridAPIClient {
     }
 
     try {
+      const persistedLmStore =
+        typeof localStorage !== 'undefined' ? (localStorage.getItem('LM_STORE_CD') || '').trim() : '';
+      const rawSettingsJson =
+        typeof localStorage !== 'undefined' ? localStorage.getItem('lm-kiosk-settings') : null;
+      const currentResolvedStore = this.getStoreCd();
+      const hasExplicitStore =
+        Boolean(persistedLmStore) ||
+        (Boolean(rawSettingsJson) && Boolean(currentResolvedStore) && currentResolvedStore !== 'H01-SE-001');
+      const targetUrl = hasExplicitStore
+        ? `${this.getBaseUrl()}/store?store_cd=${encodeURIComponent(currentResolvedStore)}`
+        : `${this.getBaseUrl()}/store`;
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2500);
-      const res = await fetch(`${this.getBaseUrl()}/store`, { 
+      const res = await fetch(targetUrl, {
         method: 'GET',
-        headers: {
-          'x-terminal-id': this.getTerminalId(),
-        },
+        headers: hasExplicitStore
+          ? this.getSecureHeaders()
+          : {
+              'x-terminal-id': this.getTerminalId(),
+            },
         signal: controller.signal
       });
       clearTimeout(timeoutId);
       if (res.ok) {
         this.isOnline = true;
         try {
-          const data = await res.clone().json();
-          if (data?.store_cd) {
-            const currentStoreCd = localStorage.getItem('LM_STORE_CD');
-            if (currentStoreCd !== data.store_cd) {
-              localStorage.setItem('LM_STORE_CD', data.store_cd);
+          const data = (await res.clone().json()) as Record<string, unknown>;
+          const serverStoreCd = typeof data?.store_cd === 'string' ? data.store_cd.trim() : '';
+          if (serverStoreCd) {
+            if (!hasExplicitStore) {
+              localStorage.setItem('LM_STORE_CD', serverStoreCd);
               localStorage.setItem('LM_STORE_INFO', JSON.stringify(data));
-              saveKioskSettings({ storeCode: data.store_cd }, { syncRemote: false });
+              saveKioskSettings({ storeCode: serverStoreCd }, { syncRemote: false });
               void hydrateKioskDeviceSettingsFromServer();
+            } else if (serverStoreCd === currentResolvedStore) {
+              localStorage.setItem('LM_STORE_INFO', JSON.stringify(data));
             }
           }
         } catch {
@@ -1426,6 +1449,7 @@ class HybridAPIClient {
     if (isDemoEnvironment()) {
       return { ready: true };
     }
+    const storeCd = this.getStoreCd();
     for (let i = 0; i < 2; i++) {
       const controller = new AbortController();
       const timeoutId = setTimeout(
@@ -1433,11 +1457,9 @@ class HybridAPIClient {
         PAYMENT_RESILIENCE_CONFIG.PREFLIGHT_TIMEOUT_MS
       );
       try {
-        const res = await fetch(`${this.getBaseUrl()}/store`, {
+        const res = await fetch(`${this.getBaseUrl()}/store?store_cd=${encodeURIComponent(storeCd)}`, {
           method: 'GET',
-          headers: {
-            'x-terminal-id': this.getTerminalId(),
-          },
+          headers: this.getSecureHeaders(),
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
