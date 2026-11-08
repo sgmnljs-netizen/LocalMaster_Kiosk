@@ -36,6 +36,24 @@ interface CompanionSetupModalProps {
   onCancel: () => void;
 }
 
+const NON_ASSIGNABLE_ASSET_STATUSES = new Set([
+  'PAUSED',
+  'HOLD',
+  'SUSPENDED',
+  'EXPIRED',
+  'CANCEL',
+  'CANCELLED',
+  'CNL',
+  'REFUND',
+  'REFUNDED',
+  'EXHAUSTED',
+  'INACTIVE',
+  'STOP',
+  'CLOSED',
+]);
+
+const NON_BAY_PASS_TYPES = new Set(['LESSON', 'LOCKER', 'RENTAL', 'PAR3', 'FNB']);
+
 export const filterCompanionAssignableAssets = (
   assets: MemberAsset[] = [],
   targetZoneCodeInput?: string | null,
@@ -47,8 +65,12 @@ export const filterCompanionAssignableAssets = (
   const targetFloorNo = parseNullableFloorNumber(targetFloorInput);
   return assets.filter((a) => {
     if (a.is_assignable === false) return false;
-    const startDigits = normalizeYmdDigits(a.start_date);
+    const rawStatus = String(a.status_cd || a.status || '').trim().toUpperCase();
+    if (rawStatus && NON_ASSIGNABLE_ASSET_STATUSES.has(rawStatus)) return false;
+    const startDigits = normalizeYmdDigits(a.start_date || a.start_dt);
     if (todayDigits && startDigits && startDigits > todayDigits) return false;
+    const endDigits = normalizeYmdDigits(a.end_date || a.end_dt || a.expiry_date);
+    if (todayDigits && endDigits && endDigits < todayDigits) return false;
     const logicType = (a.logic_type || 'PERIOD').toUpperCase();
     if (logicType === 'COUNT' || logicType === 'COUPON') {
       const cnt = a.remain_cnt ?? a.rem_count ?? 0;
@@ -67,7 +89,27 @@ export const filterCompanionAssignableAssets = (
         return false;
       }
     }
-    if (!a.allowed_categories || a.allowed_categories.length === 0) return true;
+    if (!a.allowed_categories || a.allowed_categories.length === 0) {
+      const passTypeUpper = String(a.pass_type || '').trim().toUpperCase();
+      if (targetZoneCode === 'BAY') {
+        if (NON_BAY_PASS_TYPES.has(passTypeUpper) || NON_BAY_PASS_TYPES.has(logicType)) {
+          return false;
+        }
+        const labelUpper = `${a.item_name || ''} ${a.prod_nm || ''}`.toUpperCase();
+        if (
+          labelUpper.includes('락카') ||
+          labelUpper.includes('라카') ||
+          labelUpper.includes('LOCKER') ||
+          labelUpper.includes('레슨') ||
+          labelUpper.includes('LESSON') ||
+          labelUpper.includes('대여') ||
+          labelUpper.includes('RENTAL')
+        ) {
+          return false;
+        }
+      }
+      return true;
+    }
     const allowedUpper = a.allowed_categories.map((c: string) => String(c).toUpperCase());
     return allowedUpper.includes(targetZoneCode);
   });

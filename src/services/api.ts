@@ -57,6 +57,8 @@ export interface MemberAsset {
   daily_limit_count?: number;
   logic_type?: string;
   pass_type?: string;
+  status_cd?: string;
+  status?: string;
   allowed_categories?: string[];
   allowed_floors?: number[];
   is_assignable?: boolean;

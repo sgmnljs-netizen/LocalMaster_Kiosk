@@ -80,9 +80,13 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   const slipDoneRef = useRef(false);
 
   useEffect(() => {
+    let cancelled = false;
     api.getStoreInfo().then((info) => {
-      if (info) setStoreInfo(info);
+      if (!cancelled && info) setStoreInfo(info);
     }).catch(console.error);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handlePrint = useCallback(async () => {

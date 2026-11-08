@@ -102,6 +102,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   }, [paymentState, createdReceipt, onVanBusyChange]);
 
   useEffect(() => {
+    let cancelled = false;
     const initData = async () => {
       try {
         const [kioskZones, kioskProducts, info] = await Promise.all([
@@ -109,6 +110,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           api.getProducts(),
           api.getStoreInfo()
         ]);
+        if (cancelled) return;
         
         setProducts(kioskProducts);
         setStoreInfo(info);
@@ -141,10 +143,15 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           setCourse(displayZones[0].zone_code);
         }
       } catch {
-        setErrorMsg('초기 설정 정보를 불러오는 데 실패했습니다.');
+        if (!cancelled) {
+          setErrorMsg('초기 설정 정보를 불러오는 데 실패했습니다.');
+        }
       }
     };
     initData();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedZoneIds]);
 
   const getTodayStr = () => {
