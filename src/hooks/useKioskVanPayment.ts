@@ -37,6 +37,29 @@ export function sanitizeVanPort(rawPort: unknown, defaultPort = 9099): number {
   return parsed;
 }
 
+export function sanitizeVanTimeoutSeconds(
+  rawTimeout: unknown,
+  fallback = KIOSK_VAN_APPROVAL_TIMEOUT_SEC
+): number {
+  const safeFallback =
+    typeof fallback === 'number' && Number.isFinite(fallback) && fallback >= 1
+      ? Math.min(180, Math.floor(fallback))
+      : KIOSK_VAN_APPROVAL_TIMEOUT_SEC;
+  if (typeof rawTimeout === 'boolean' || rawTimeout === null || rawTimeout === undefined) {
+    return safeFallback;
+  }
+  const parsed =
+    typeof rawTimeout === 'number'
+      ? rawTimeout
+      : typeof rawTimeout === 'string' && rawTimeout.trim() !== ''
+        ? Number(rawTimeout.trim())
+        : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return safeFallback;
+  }
+  return Math.min(180, Math.floor(parsed));
+}
+
 export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const { settings } = useKioskSettings();
   const [state, setState] = useState<VanPaymentState>('IDLE');
@@ -112,7 +135,10 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
       reset();
       inFlightRef.current = true;
       isTimeoutRef.current = false;
-      const totalTimeout = params.timeoutSeconds || KIOSK_VAN_APPROVAL_TIMEOUT_SEC;
+      const totalTimeout = sanitizeVanTimeoutSeconds(
+        params.timeoutSeconds,
+        KIOSK_VAN_APPROVAL_TIMEOUT_SEC
+      );
       setRemainingSeconds(totalTimeout);
 
       // 1초 단위 타이머 시작 (이미 VAN사 승인 통신 중['REQUESTING']일 때는 소켓 절단 금지 — 어댑터 원장 복구 보장)
@@ -134,7 +160,9 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
       }, 1000);
 
       try {
-        const res = await kioskVanClient.requestCardPayment(params, (newState) => {
+        const res = await kioskVanClient.requestCardPayment(
+          { ...params, timeoutSeconds: totalTimeout },
+          (newState) => {
           if (!isMountedRef.current) return;
           if (newState === 'CANCELLED' && isTimeoutRef.current) {
             updateVanState('TIMEOUT');

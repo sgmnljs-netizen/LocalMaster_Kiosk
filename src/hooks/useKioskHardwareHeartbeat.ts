@@ -42,7 +42,7 @@ export async function probeKioskHardwareHealthOnce(): Promise<HardwareProbeResul
                 if (typeof res.json === 'function') {
                     vcatBody = await res.json().catch(() => null);
                 }
-                const vcatSt = vcatBody?.status ? String(vcatBody.status).toUpperCase() : '';
+                const vcatSt = vcatBody?.status ? String(vcatBody.status).trim().toUpperCase() : '';
                 if (vcatBody?.isOnline === false || vcatSt === 'OFFLINE') {
                     nextVcat = 'OFFLINE';
                     nextVcatReason =
@@ -81,8 +81,8 @@ export async function probeKioskHardwareHealthOnce(): Promise<HardwareProbeResul
                 if (typeof res.json === 'function') {
                     healthBody = await res.json().catch(() => null);
                 }
-                const rawPrinterSt = healthBody?.printer_status ? String(healthBody.printer_status).toUpperCase() : '';
-                const rawDaemonSt = healthBody?.status ? String(healthBody.status).toUpperCase() : '';
+                const rawPrinterSt = healthBody?.printer_status ? String(healthBody.printer_status).trim().toUpperCase() : '';
+                const rawDaemonSt = healthBody?.status ? String(healthBody.status).trim().toUpperCase() : '';
                 if (
                     (rawPrinterSt && rawPrinterSt !== 'ONLINE') ||
                     rawDaemonSt === 'DEGRADED' ||
