@@ -37,16 +37,23 @@ export async function executeKioskAutoReversal(
 ): Promise<AutoReversalResult> {
   const { cardApproval, payAmount, reason, isTaxFree = false, vat, terminalId, storeCd, memberNo, prodCd } = params;
   const apprStr = String(cardApproval?.apprNo || cardApproval?.auth_code || '').trim();
+  const safePayAmt = Number.isFinite(payAmount) ? Math.floor(payAmount) : 0;
+  const hasExplicitCardAmt = cardApproval?.amount !== undefined && cardApproval?.amount !== null;
+  const safeCardAmt = hasExplicitCardAmt && Number.isFinite(Number(cardApproval?.amount))
+    ? Math.floor(Number(cardApproval?.amount))
+    : 0;
+  const effectiveAmt = safePayAmt > 0 ? safePayAmt : safeCardAmt;
 
-  // 1. 0원 결제, 무료 쿠폰(FREE-), 전액 포인트(POINT-), 회원권(MEMBERSHIP) 등은 망취소 대상 아님
+  // 1. 0원 결제, 무료 쿠폰(FREE-), 전액 포인트(POINT-), 회원권(MEMBERSHIP), 비정상(NaN/음수) 금액은 망취소 대상 아님
   if (
     !cardApproval ||
     !apprStr ||
     apprStr.startsWith('FREE-') ||
     apprStr.startsWith('POINT-') ||
     apprStr === 'MEMBERSHIP' ||
-    (cardApproval.amount !== undefined && cardApproval.amount <= 0) ||
-    payAmount <= 0
+    (hasExplicitCardAmt && safeCardAmt <= 0) ||
+    safePayAmt <= 0 ||
+    effectiveAmt <= 0
   ) {
     if (apprStr) {
       if (storeCd) {
@@ -63,8 +70,9 @@ export async function executeKioskAutoReversal(
   }
 
   // 2. VAN 단말기 망취소 시도 (2-Phase Commit 보상 트랜잭션)
-  const effectiveAmt = payAmount || cardApproval.amount;
-  const effectiveVat = vat !== undefined ? vat : (isTaxFree ? 0 : Math.round(effectiveAmt / 11));
+  const effectiveVat = vat !== undefined && Number.isFinite(vat)
+    ? Math.max(0, Math.floor(vat))
+    : (isTaxFree ? 0 : Math.round(effectiveAmt / 11));
   const effectiveTid = cardApproval.terminal_id || terminalId;
   try {
     const orgDate = extractKstYyyyMmDd(cardApproval.approved_at);

@@ -102,7 +102,7 @@ export const VALID_VAN_PROVIDERS: readonly VanProviderType[] = [
 
 /** 문자열 설정값을 엄격한 VanProviderType 유니온으로 정규화 */
 export function normalizeVanProvider(rawProvider?: string | null): VanProviderType {
-  const cleaned = String(rawProvider || 'KCP').toUpperCase().replace(/_VAN$/, '');
+  const cleaned = String(rawProvider || 'KCP').trim().toUpperCase().replace(/_VAN$/, '');
   return (VALID_VAN_PROVIDERS as readonly string[]).includes(cleaned)
     ? (cleaned as VanProviderType)
     : 'KCP';

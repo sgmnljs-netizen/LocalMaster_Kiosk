@@ -76,6 +76,44 @@ export function getTextLength(str: string): number {
   return len;
 }
 
+const MAX_CODE128_DATA_CHARS = 80;
+
+/**
+ * ESC/POS GS k 73 (Code128 Subset B: 0x7B 0x42) 바코드 페이로드 안전 직렬화
+ * - 인쇄 가능 ASCII(0x20..0x7E) 외 제어문자/한글 제거 (프린터 명령어 오염 및 출력 중단 방어)
+ * - ESC/POS Code128 특수 이스케이프 문자 '{'(0x7B)는 '{{'(0x7B, 0x7B)로 이스케이프
+ * - 길이 바이트(1바이트 n <= 255) 오버플로 원천 차단
+ */
+export function sanitizeEscPosCode128Payload(rawBarcode?: string | null): {
+  cleanText: string;
+  payloadBytes: number[];
+} {
+  const src = String(rawBarcode || '').trim();
+  if (!src) {
+    return { cleanText: '', payloadBytes: [] };
+  }
+  let cleanChars = '';
+  const dataBytes: number[] = [];
+  for (let i = 0; i < src.length && cleanChars.length < MAX_CODE128_DATA_CHARS; i++) {
+    const code = src.charCodeAt(i);
+    if (code >= 0x20 && code <= 0x7e) {
+      cleanChars += src[i];
+      if (code === 0x7b) {
+        dataBytes.push(0x7b, 0x7b);
+      } else {
+        dataBytes.push(code);
+      }
+    }
+  }
+  if (dataBytes.length === 0) {
+    return { cleanText: '', payloadBytes: [] };
+  }
+  return {
+    cleanText: cleanChars,
+    payloadBytes: [0x7b, 0x42, ...dataBytes],
+  };
+}
+
 export function formatTwoCol(left: string, right: string, totalWidth: number = 42): string {
   const leftLen = getTextLength(left);
   const rightLen = getTextLength(right);
@@ -193,17 +231,15 @@ export class KioskEscPosPrinterService {
 
       // 4) [Code128 5mm 슬림 출입 바코드] (스캔 인식 100% 보장)
       const barcode = data.barcodeText || (data.bayNo ? `BAY-${data.bayNo}-${data.receiptNo.slice(-6)}` : undefined);
-      if (barcode) {
+      const sanitizedBarcode = sanitizeEscPosCode128Payload(barcode);
+      if (sanitizedBarcode.payloadBytes.length > 0) {
         appendBytes(0x1b, 0x61, 0x01); // Center Align
         // 5mm 슬림 바코드: GS h 40 (0x28), GS w 2
         appendBytes(0x1d, 0x68, 0x28); // 바코드 높이 40 dot (약 5mm)
         appendBytes(0x1d, 0x77, 0x02); // 바코드 폭 2
         appendBytes(0x1d, 0x48, 0x00); // HRI 문자 내장 출력 비활성화
-        
-        const bBytes = encoder.encode(barcode);
-        const code128Payload = [0x7b, 0x42, ...Array.from(bBytes)];
-        appendBytes(0x1d, 0x6b, 0x49, code128Payload.length, ...code128Payload);
-        append(`\n${barcode} [게이트출입]\n`);
+        appendBytes(0x1d, 0x6b, 0x49, sanitizedBarcode.payloadBytes.length, ...sanitizedBarcode.payloadBytes);
+        append(`\n${sanitizedBarcode.cleanText} [게이트출입]\n`);
       }
 
       // 5) 절단 여백 1줄 최소화 (Feed 1 line) + Full Cut

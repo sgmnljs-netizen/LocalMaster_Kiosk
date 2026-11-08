@@ -16,16 +16,17 @@ import type {
   VanPaymentState,
   IVanTerminalAdapter,
 } from './van_types';
+import { normalizeVanProvider } from './van_types';
 import { VanAdapterFactory } from './adapters/VanAdapterFactory';
 import { DEFAULT_VAN_CONFIG } from './adapters/BaseVanAdapter';
 import { getKioskSettings } from '../../stores/kioskSettings';
 
-function resolveProviderType(providerType?: string): VanConfig['provider'] {
-  let raw = (providerType || DEFAULT_VAN_CONFIG.provider || 'KCP').toUpperCase();
-  if (raw.endsWith('_VAN')) {
-    raw = raw.replace('_VAN', '');
+export function sanitizeVcatPort(rawPort?: string | number | null, fallbackPort: number = DEFAULT_VAN_CONFIG.vcatPort): number {
+  const parsed = typeof rawPort === 'number' ? rawPort : parseInt(String(rawPort ?? ''), 10);
+  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 65535) {
+    return Math.floor(parsed);
   }
-  return raw as VanConfig['provider'];
+  return fallbackPort;
 }
 
 export class KioskVanClient implements IVanTerminalAdapter {
@@ -33,20 +34,23 @@ export class KioskVanClient implements IVanTerminalAdapter {
 
   constructor(customConfig?: Partial<VanConfig>) {
     const settings = getKioskSettings();
+    const mergedPort = customConfig?.vcatPort !== undefined
+      ? sanitizeVcatPort(customConfig.vcatPort, DEFAULT_VAN_CONFIG.vcatPort)
+      : sanitizeVcatPort(settings.vcatPort, DEFAULT_VAN_CONFIG.vcatPort);
     this.currentConfig = {
       ...DEFAULT_VAN_CONFIG,
-      provider: resolveProviderType(settings.providerType),
-      vcatPort: parseInt(settings.vcatPort, 10) || DEFAULT_VAN_CONFIG.vcatPort,
+      provider: normalizeVanProvider(settings.providerType),
       terminalId: settings.terminalId || DEFAULT_VAN_CONFIG.terminalId,
       ...customConfig,
+      vcatPort: mergedPort,
     };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('kiosk-settings-changed', () => {
         const updated = getKioskSettings();
         this.setConfig({
-          provider: resolveProviderType(updated.providerType),
-          vcatPort: parseInt(updated.vcatPort, 10) || DEFAULT_VAN_CONFIG.vcatPort,
+          provider: normalizeVanProvider(updated.providerType),
+          vcatPort: sanitizeVcatPort(updated.vcatPort, DEFAULT_VAN_CONFIG.vcatPort),
           terminalId: updated.terminalId || DEFAULT_VAN_CONFIG.terminalId,
         });
       });
@@ -62,7 +66,18 @@ export class KioskVanClient implements IVanTerminalAdapter {
   }
 
   public setConfig(newConfig: Partial<VanConfig>): void {
-    this.currentConfig = { ...this.currentConfig, ...newConfig };
+    const nextProvider = newConfig.provider !== undefined
+      ? normalizeVanProvider(newConfig.provider)
+      : this.currentConfig.provider;
+    const nextPort = newConfig.vcatPort !== undefined
+      ? sanitizeVcatPort(newConfig.vcatPort, this.currentConfig.vcatPort)
+      : this.currentConfig.vcatPort;
+    this.currentConfig = {
+      ...this.currentConfig,
+      ...newConfig,
+      provider: nextProvider,
+      vcatPort: nextPort,
+    };
     this.currentAdapter.setConfig(this.currentConfig);
   }
 
