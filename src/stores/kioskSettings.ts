@@ -586,8 +586,14 @@ export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSetti
     const storeCd = (localStorage.getItem('LM_STORE_CD') || current.storeCode || '').trim();
     if (!storeCd) return null;
 
+    const reqHeaders: Record<string, string> = { 'x-store-cd': storeCd };
+    const cleanDevKey = (current.deviceKey || '').trim();
+    if (cleanDevKey) {
+      reqHeaders['X-Device-Key'] = cleanDevKey;
+    }
     const res = await fetch(
-      `${baseUrl}/api/v1/kiosk/device-settings?store_cd=${encodeURIComponent(storeCd)}&device_id=${encodeURIComponent(current.deviceId || '')}`
+      `${baseUrl}/api/v1/kiosk/device-settings?store_cd=${encodeURIComponent(storeCd)}&device_id=${encodeURIComponent(current.deviceId || '')}`,
+      { headers: reqHeaders }
     );
     if (!res.ok) return null;
     const data = await res.json();

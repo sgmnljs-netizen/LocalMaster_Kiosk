@@ -1094,8 +1094,11 @@ class HybridAPIClient {
       };
     }
     
-    const buildWsUrl = () =>
-      `${this.getWsBaseUrl()}/ws/kiosk?store_cd=${encodeURIComponent(this.getStoreCd())}&terminal_id=${encodeURIComponent(this.getTerminalId())}&api_key=${encodeURIComponent(KIOSK_WS_KEY)}`;
+    const buildWsUrl = () => {
+      const devKey = (getKioskSettings()?.deviceKey || '').trim();
+      const baseWsUrl = `${this.getWsBaseUrl()}/ws/kiosk?store_cd=${encodeURIComponent(this.getStoreCd())}&terminal_id=${encodeURIComponent(this.getTerminalId())}&api_key=${encodeURIComponent(KIOSK_WS_KEY)}`;
+      return devKey ? `${baseWsUrl}&device_key=${encodeURIComponent(devKey)}` : baseWsUrl;
+    };
 
     const connect = () => {
       const wsUrl = buildWsUrl();

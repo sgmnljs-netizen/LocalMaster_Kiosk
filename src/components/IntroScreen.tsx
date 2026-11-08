@@ -124,7 +124,8 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
         const storeCd = api.getStoreCd();
         const baseUrl = api.getBaseUrl();
         const res = await fetch(
-          `${baseUrl}/v1/kiosk/intro-banners?store_cd=${encodeURIComponent(storeCd)}`
+          `${baseUrl}/v1/kiosk/intro-banners?store_cd=${encodeURIComponent(storeCd)}`,
+          { headers: api.getSecureHeaders() }
         );
         if (!res.ok) return;
         const data = await res.json();
