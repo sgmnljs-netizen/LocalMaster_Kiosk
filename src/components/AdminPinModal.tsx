@@ -15,6 +15,45 @@ interface AdminPinModalProps {
 }
 
 const ADMIN_PIN_IDLE_CLOSE_MS = 30000;
+const DEFAULT_SERVER_PIN_LOCKOUT_SEC = 60;
+
+export interface AdminPinKeyLike {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  repeat?: boolean;
+  isComposing?: boolean;
+  targetTagName?: string | null;
+  isContentEditable?: boolean;
+}
+
+export function shouldIgnoreAdminPinKeyEvent(evt: AdminPinKeyLike): boolean {
+  if (evt.ctrlKey || evt.metaKey || evt.altKey || evt.repeat || evt.isComposing) {
+    return true;
+  }
+  const tag = String(evt.targetTagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || evt.isContentEditable) {
+    return true;
+  }
+  return false;
+}
+
+export function parseAdminPinLockoutSeconds(
+  message?: string | null,
+  fallbackSec: number = DEFAULT_SERVER_PIN_LOCKOUT_SEC
+): number {
+  const safeFallback = Number.isFinite(fallbackSec) && fallbackSec > 0 ? Math.floor(fallbackSec) : DEFAULT_SERVER_PIN_LOCKOUT_SEC;
+  if (typeof message !== 'string' || !message.trim()) {
+    return safeFallback;
+  }
+  const secMatch = message.match(/(\d+)\s*초/);
+  if (!secMatch) {
+    return safeFallback;
+  }
+  const parsed = Number(secMatch[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(3600, Math.floor(parsed)) : safeFallback;
+}
 
 export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   isOpen,
@@ -27,8 +66,13 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   const [failCount, setFailCount] = useState(0);
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const isOpenRef = useRef<boolean>(isOpen);
+  const pinRef = useRef<string>('');
+  const isVerifyingRef = useRef<boolean>(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  isOpenRef.current = isOpen;
 
   const resetIdleTimer = useCallback(() => {
     if (idleTimerRef.current) {
@@ -37,6 +81,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
     }
     if (!isOpen) return;
     idleTimerRef.current = setTimeout(() => {
+      pinRef.current = '';
       setPin('');
       setErrorMsg('');
       onClose();
@@ -45,6 +90,8 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      pinRef.current = '';
+      isVerifyingRef.current = false;
       setPin('');
       setErrorMsg('');
       setFailCount(0);
@@ -52,6 +99,8 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
       setIsVerifying(false);
       resetIdleTimer();
     } else {
+      pinRef.current = '';
+      isVerifyingRef.current = false;
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
         idleTimerRef.current = null;
@@ -88,24 +137,53 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
     return () => clearInterval(timer);
   }, [lockoutUntil]);
 
-  // ⌨️ 물리 키보드 및 텐키패드(Numpad) 입력 지원
+  // ⌨️ 물리 키보드 및 텐키패드(Numpad) 입력 지원 (키 길게 누름 repeat 차단 및 Capture 격리)
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      if (
+        shouldIgnoreAdminPinKeyEvent({
+          key: e.key,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          altKey: e.altKey,
+          repeat: e.repeat,
+          isComposing: e.isComposing,
+          targetTagName: targetEl?.tagName,
+          isContentEditable: targetEl?.isContentEditable,
+        })
+      ) {
+        return;
+      }
       resetIdleTimer();
       if (e.key >= '0' && e.key <= '9') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         void handleNumClick(e.key);
       } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         handleDelete();
       } else if (e.key === 'Escape') {
-        handleClear();
-        onClose();
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (!isVerifyingRef.current) {
+          handleClear();
+          onClose();
+        }
       } else if (e.key === 'Delete') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         handleClear();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, pin, lockoutUntil, failCount, isVerifying, settings.adminPin, settings.adminPinDigest, settings.hasCustomAdminPin]);
 
   if (!isOpen) return null;
@@ -118,6 +196,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
     }
     failDelayTimerRef.current = setTimeout(() => {
       failDelayTimerRef.current = null;
+      if (!isOpenRef.current) return;
       if (nextFail >= 5) {
         const until = Date.now() + 30000;
         setLockoutUntil(until);
@@ -125,27 +204,31 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
       } else {
         setErrorMsg(`관리자 PIN 번호가 일치하지 않습니다. (${nextFail}/5)`);
       }
+      pinRef.current = '';
       setPin('');
     }, 150);
   };
 
   const handleNumClick = async (num: string) => {
     resetIdleTimer();
-    if (isVerifying) return;
+    if (!isOpenRef.current || isVerifyingRef.current || isVerifying) return;
     if (lockoutUntil && Date.now() < lockoutUntil) {
       const rem = Math.ceil((lockoutUntil - Date.now()) / 1000);
       setErrorMsg(`PIN 5회 오류로 잠금되었습니다. (${rem}초 후 재시도)`);
       return;
     }
-    if (pin.length >= 4) return;
-    const nextPin = pin + num;
+    if (pinRef.current.length >= 4) return;
+    const nextPin = pinRef.current + num;
+    pinRef.current = nextPin;
     setPin(nextPin);
     setErrorMsg('');
 
     if (nextPin.length === 4) {
+      isVerifyingRef.current = true;
       setIsVerifying(true);
       try {
         const res = await api.verifyAdminPin(nextPin);
+        if (!isOpenRef.current) return;
         if (!res.offline) {
           if (res.valid) {
             setKioskAdminSessionToken(res.pin_session_token || null, null);
@@ -159,6 +242,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
                 { syncRemote: false }
               );
             }
+            pinRef.current = '';
             setPin('');
             setErrorMsg('');
             setFailCount(0);
@@ -169,11 +253,11 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
               updateSettings({ hasCustomAdminPin: res.has_custom_admin_pin }, { syncRemote: false });
             }
             if (res.locked) {
-              const secMatch = typeof res.message === 'string' ? res.message.match(/(\d+)\s*초/) : null;
-              const remSec = secMatch ? Math.max(1, Number(secMatch[1])) : 60;
+              const remSec = parseAdminPinLockoutSeconds(res.message);
               setFailCount(5);
               setLockoutUntil(Date.now() + remSec * 1000);
               setErrorMsg(res.message || `PIN 5회 오류로 잠금되었습니다. (${remSec}초 후 재시도)`);
+              pinRef.current = '';
               setPin('');
             } else {
               applyPinFailure();
@@ -191,6 +275,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
         );
         if (offlineCheck.valid) {
           setKioskAdminSessionToken(null, nextPin);
+          pinRef.current = '';
           setPin('');
           setErrorMsg('');
           setFailCount(0);
@@ -200,21 +285,27 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
           applyPinFailure();
         }
       } finally {
-        setIsVerifying(false);
+        isVerifyingRef.current = false;
+        if (isOpenRef.current) {
+          setIsVerifying(false);
+        }
       }
     }
   };
 
   const handleDelete = () => {
     resetIdleTimer();
-    if (isVerifying || (lockoutUntil && Date.now() < lockoutUntil)) return;
-    setPin((prev) => prev.slice(0, -1));
+    if (isVerifyingRef.current || isVerifying || (lockoutUntil && Date.now() < lockoutUntil)) return;
+    const nextPin = pinRef.current.slice(0, -1);
+    pinRef.current = nextPin;
+    setPin(nextPin);
     setErrorMsg('');
   };
 
   const handleClear = () => {
     resetIdleTimer();
-    if (isVerifying) return;
+    if (isVerifyingRef.current || isVerifying) return;
+    pinRef.current = '';
     setPin('');
     if (!lockoutUntil || Date.now() >= lockoutUntil) {
       setErrorMsg('');
