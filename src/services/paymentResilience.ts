@@ -187,7 +187,11 @@ export async function fetchWithPaymentRetry(
       Object.assign(baseHeaders, init.headers as Record<string, string>);
     }
   }
-  if (options.idempotencyKey && !baseHeaders['x-idempotency-key']) {
+  const hasCallerIdempotencyHeader = Object.keys(baseHeaders).some((k) => {
+    const lower = k.toLowerCase();
+    return lower === 'x-idempotency-key' || lower === 'idempotency-key';
+  });
+  if (options.idempotencyKey && !hasCallerIdempotencyHeader) {
     baseHeaders['x-idempotency-key'] = String(options.idempotencyKey);
   }
 
@@ -315,12 +319,20 @@ export class PaymentOutboxManager {
     payload: Record<string, unknown>;
   }): string {
     const cleanAuth = String(params.authCode || '').trim();
+    const cleanStore = String(params.storeCd || '').trim();
     const id = cleanAuth
-      ? `WAL_${params.storeCd}_${cleanAuth}`
+      ? `WAL_${cleanStore}_${cleanAuth}`
       : `WAL_${Date.now()}_${params.vanTrNo || Math.random().toString(36).slice(2, 7)}`;
     const nowIso = new Date().toISOString();
     const entries = this.getEntries().filter(
-      (e) => e.id !== id && !(cleanAuth && e.kind === 'WAL_IN_FLIGHT' && e.authCode === cleanAuth)
+      (e) =>
+        e.id !== id &&
+        !(
+          cleanAuth &&
+          e.kind === 'WAL_IN_FLIGHT' &&
+          String(e.authCode || '').trim() === cleanAuth &&
+          (!cleanStore || !e.storeCd || String(e.storeCd).trim() === cleanStore)
+        )
     );
     entries.push({
       id,
@@ -328,7 +340,7 @@ export class PaymentOutboxManager {
       createdAt: nowIso,
       updatedAt: nowIso,
       retryCount: 0,
-      storeCd: params.storeCd,
+      storeCd: cleanStore || params.storeCd,
       terminalId: params.terminalId,
       authCode: cleanAuth,
       vanTrNo: params.vanTrNo,
@@ -350,11 +362,19 @@ export class PaymentOutboxManager {
     payload: Record<string, unknown>;
   }): string {
     const cleanAuth = String(params.authCode || '').trim();
-    const dedupKey = `DLQ_${params.storeCd}_${cleanAuth}_${params.amount}`;
+    const cleanStore = String(params.storeCd || '').trim();
+    const dedupKey = `DLQ_${cleanStore}_${cleanAuth}_${params.amount}`;
     const nowIso = new Date().toISOString();
-    // 동일 승인번호의 WAL_IN_FLIGHT가 남아있으면 PENDING_DLQ로 원자적 승격(치환)
+    // 동일 지점·승인번호의 WAL_IN_FLIGHT가 남아있으면 PENDING_DLQ로 원자적 승격(치환)
     const entries = this.getEntries().filter(
-      (e) => e.id !== dedupKey && !(cleanAuth && e.kind === 'WAL_IN_FLIGHT' && e.authCode === cleanAuth)
+      (e) =>
+        e.id !== dedupKey &&
+        !(
+          cleanAuth &&
+          e.kind === 'WAL_IN_FLIGHT' &&
+          String(e.authCode || '').trim() === cleanAuth &&
+          (!cleanStore || !e.storeCd || String(e.storeCd).trim() === cleanStore)
+        )
     );
     entries.push({
       id: dedupKey,
@@ -362,7 +382,7 @@ export class PaymentOutboxManager {
       createdAt: nowIso,
       updatedAt: nowIso,
       retryCount: 0,
-      storeCd: params.storeCd,
+      storeCd: cleanStore || params.storeCd,
       terminalId: params.terminalId,
       authCode: cleanAuth,
       vanTrNo: params.vanTrNo,
@@ -383,10 +403,20 @@ export class PaymentOutboxManager {
     }
   }
 
-  static removeByAuthCode(authCode?: string | null): void {
-    if (!authCode) return;
+  static removeByAuthCode(authCode?: string | null, storeCd?: string | null): void {
+    const cleanAuth = String(authCode || '').trim();
+    if (!cleanAuth) return;
+    const cleanStore = storeCd ? String(storeCd).trim() : '';
     const entries = this.getEntries();
-    const filtered = entries.filter((e) => e.authCode !== authCode);
+    const filtered = entries.filter((e) => {
+      if (String(e.authCode || '').trim() !== cleanAuth) {
+        return true;
+      }
+      if (cleanStore && e.storeCd && String(e.storeCd).trim() !== cleanStore) {
+        return true;
+      }
+      return false;
+    });
     if (filtered.length !== entries.length) {
       this.saveEntries(filtered);
     }

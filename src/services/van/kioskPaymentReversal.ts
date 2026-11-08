@@ -49,7 +49,11 @@ export async function executeKioskAutoReversal(
     payAmount <= 0
   ) {
     if (apprStr) {
-      PaymentOutboxManager.removeByAuthCode(apprStr);
+      if (storeCd) {
+        PaymentOutboxManager.removeByAuthCode(apprStr, storeCd);
+      } else {
+        PaymentOutboxManager.removeByAuthCode(apprStr);
+      }
     }
     return {
       success: false,
@@ -77,7 +81,11 @@ export async function executeKioskAutoReversal(
     });
 
     if (cancelRes.success) {
-      PaymentOutboxManager.removeByAuthCode(apprStr);
+      if (storeCd) {
+        PaymentOutboxManager.removeByAuthCode(apprStr, storeCd);
+      } else {
+        PaymentOutboxManager.removeByAuthCode(apprStr);
+      }
       return {
         success: true,
         reversalAttempted: true,
