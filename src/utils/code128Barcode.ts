@@ -48,19 +48,24 @@ export const CODE128_PATTERNS: readonly string[] = [
   '211214', '211232', '2331112',
 ];
 
-/**
- * Code 128 Set B 허용 문자(ASCII 32~126)로 안전 정규화합니다.
- */
-export function normalizeCode128Text(raw: string, fallback = 'GOLFOS'): string {
-  const cleaned = Array.from(String(raw || '').trim())
+function filterPrintableAscii(input: string): string {
+  return Array.from(String(input || '').trim())
     .filter((ch) => {
       const code = ch.charCodeAt(0);
       return code >= 32 && code <= 126;
     })
     .join('')
     .slice(0, 32);
+}
 
-  return cleaned.length > 0 ? cleaned : fallback;
+/**
+ * Code 128 Set B 허용 문자(ASCII 32~126)로 안전 정규화합니다.
+ */
+export function normalizeCode128Text(raw: string, fallback = 'GOLFOS'): string {
+  const cleaned = filterPrintableAscii(raw);
+  if (cleaned.length > 0) return cleaned;
+  const safeFallback = filterPrintableAscii(fallback);
+  return safeFallback.length > 0 ? safeFallback : 'GOLFOS';
 }
 
 /**

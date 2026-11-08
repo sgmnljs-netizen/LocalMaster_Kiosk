@@ -38,11 +38,23 @@ export interface KioskLockerSlipOptions {
 export function formatKioskHhMm(raw?: string | null): string {
   if (!raw) return '';
   const trimmed = String(raw).trim();
-  if (/^\d{4}$/.test(trimmed)) {
-    return `${trimmed.slice(0, 2)}:${trimmed.slice(2, 4)}`;
+  if (/^\d{3,4}$/.test(trimmed)) {
+    const padded = trimmed.padStart(4, '0');
+    const hh = Number(padded.slice(0, 2));
+    const mm = Number(padded.slice(2, 4));
+    if ((hh === 24 && mm === 0) || (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59)) {
+      return `${padded.slice(0, 2)}:${padded.slice(2, 4)}`;
+    }
   }
-  if (/^\d{2}:\d{2}/.test(trimmed)) {
-    return trimmed.slice(0, 5);
+  const colonMatch = trimmed.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (colonMatch) {
+    const hhStr = colonMatch[1].padStart(2, '0');
+    const mmStr = colonMatch[2];
+    const hh = Number(hhStr);
+    const mm = Number(mmStr);
+    if ((hh === 24 && mm === 0) || (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59)) {
+      return `${hhStr}:${mmStr}`;
+    }
   }
   if (trimmed.includes('T') || /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(trimmed)) {
     const d = TimeMaster.parseIsoAsKstDate(trimmed);
@@ -89,12 +101,17 @@ export function buildKioskBayAllocationSlipPayload(options: KioskBayAllocationSl
       : `${options.floor}F`
     : '';
 
-  const bayStr = !isNaN(Number(options.bayNo))
-    ? `${String(options.bayNo).padStart(2, '0')}번 타석`
-    : String(options.bayNo);
+  const rawBayStr = String(options.bayNo ?? '').trim();
+  const bayStr = /^\d+$/.test(rawBayStr)
+    ? `${rawBayStr.padStart(2, '0')}번 타석`
+    : (rawBayStr || '미지정 타석');
 
-  const oldBayStr = options.oldBayNo !== undefined && options.oldBayNo !== null
-    ? (!isNaN(Number(options.oldBayNo)) ? `${String(options.oldBayNo).padStart(2, '0')}번` : String(options.oldBayNo))
+  const rawOldBayStr =
+    options.oldBayNo !== undefined && options.oldBayNo !== null
+      ? String(options.oldBayNo).trim()
+      : '';
+  const oldBayStr = rawOldBayStr
+    ? (/^\d+$/.test(rawOldBayStr) ? `${rawOldBayStr.padStart(2, '0')}번` : rawOldBayStr)
     : '';
 
   const badgeText = isMoveBay && oldBayStr
@@ -226,7 +243,7 @@ export function buildKioskLockerSlipPayload(options: KioskLockerSlipOptions): Re
       duration_label: durationLabel,
       extra_note: options.extraNote || '',
     },
-    barcode_text: `LCK-${cleanLockerStr}`,
+    barcode_text: `LCK-${cleanLockerStr.replace(/[^0-9A-Za-z-]/g, '') || '0'}`,
     header_message: '★ [ 라 카 배 정 확 인 증 ] ★',
     footer_message: '기간 만료 후 미연장 시 보관 물품이 회수될 수 있으니 만료일을 확인해 주세요.',
     print_mode: 'AUTO',
