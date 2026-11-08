@@ -45,6 +45,39 @@ export const DEFAULT_AUTH_METHODS: KioskAuthMethodsConfig = {
   FACE: true,
 };
 
+const VALID_KIOSK_AUTH_MODES: readonly KioskAuthModeKey[] = [
+  'SMART_TAG',
+  'PHONE_KEYPAD',
+  'QR_SCAN',
+  'FACE',
+];
+
+const VALID_TOP_DASHBOARD_MODES: readonly KioskTopDashboardMode[] = [
+  'AUTO',
+  'COMPACT_1ROW',
+  'HIDDEN',
+];
+
+export function normalizeDefaultAuthMode(
+  raw: unknown,
+  fallback: KioskAuthModeKey = 'SMART_TAG'
+): KioskAuthModeKey {
+  const safeFallback = VALID_KIOSK_AUTH_MODES.includes(fallback) ? fallback : 'SMART_TAG';
+  if (typeof raw !== 'string') return safeFallback;
+  const upper = raw.trim().toUpperCase() as KioskAuthModeKey;
+  return VALID_KIOSK_AUTH_MODES.includes(upper) ? upper : safeFallback;
+}
+
+export function normalizeTopDashboardMode(
+  raw: unknown,
+  fallback: KioskTopDashboardMode = 'AUTO'
+): KioskTopDashboardMode {
+  const safeFallback = VALID_TOP_DASHBOARD_MODES.includes(fallback) ? fallback : 'AUTO';
+  if (typeof raw !== 'string') return safeFallback;
+  const upper = raw.trim().toUpperCase() as KioskTopDashboardMode;
+  return VALID_TOP_DASHBOARD_MODES.includes(upper) ? upper : safeFallback;
+}
+
 export function canonicalizeKioskMenuId(menuId: string): string {
   const upper = String(menuId || '').trim().toUpperCase();
   if (upper === 'ALLOCATION' || upper === 'ALLOCATE_MEMBERSHIP') return 'ALLOCATE_DAILY';
@@ -239,8 +272,15 @@ export function getKioskSettings(): KioskSettings {
         ...DEFAULT_AUTH_METHODS,
         ...safeAuthMethods,
       },
-      defaultAuthMode: parsed.defaultAuthMode || DEFAULT_KIOSK_SETTINGS.defaultAuthMode,
+      defaultAuthMode: normalizeDefaultAuthMode(
+        parsed.defaultAuthMode,
+        DEFAULT_KIOSK_SETTINGS.defaultAuthMode
+      ),
       minGapMinutes: sanitizeMinGapMinutes(parsed.minGapMinutes),
+      topDashboardMode: normalizeTopDashboardMode(
+        parsed.topDashboardMode,
+        DEFAULT_KIOSK_SETTINGS.topDashboardMode
+      ),
     };
   } catch {
     return cloneDefaultKioskSettings();
@@ -398,8 +438,11 @@ let kioskAdminSessionToken: string | null = null;
 let pendingOfflineVerifiedPin: string | null = null;
 
 export function setKioskAdminSessionToken(token: string | null, offlinePinFallback?: string | null): void {
-  kioskAdminSessionToken = token;
-  pendingOfflineVerifiedPin = offlinePinFallback ?? null;
+  kioskAdminSessionToken = typeof token === 'string' && token.trim() ? token.trim() : null;
+  pendingOfflineVerifiedPin =
+    typeof offlinePinFallback === 'string' && /^\d{4}$/.test(offlinePinFallback.trim())
+      ? offlinePinFallback.trim()
+      : null;
 }
 
 export function getKioskAdminSessionToken(): string | null {
@@ -450,10 +493,18 @@ export function saveKioskSettings(
         ? computeOwnerPinDigest(incomingPlainPin) !== OFFLINE_INITIAL_DEFAULT_PIN_DIGEST
         : (settings.hasCustomAdminPin ?? current.hasCustomAdminPin),
     apiUrl: (settings.apiUrl ?? current.apiUrl ?? DEFAULT_KIOSK_SETTINGS.apiUrl).trim().replace(/\/+$/, ''),
+    defaultAuthMode: normalizeDefaultAuthMode(
+      settings.defaultAuthMode ?? current.defaultAuthMode,
+      DEFAULT_KIOSK_SETTINGS.defaultAuthMode
+    ),
     minGapMinutes:
       settings.minGapMinutes !== undefined
         ? sanitizeMinGapMinutes(settings.minGapMinutes, current.minGapMinutes)
         : sanitizeMinGapMinutes(current.minGapMinutes),
+    topDashboardMode: normalizeTopDashboardMode(
+      settings.topDashboardMode ?? current.topDashboardMode,
+      DEFAULT_KIOSK_SETTINGS.topDashboardMode
+    ),
   };
   if (typeof localStorage !== 'undefined') {
     const prevLmStore = (localStorage.getItem('LM_STORE_CD') || '').trim();
@@ -628,13 +679,13 @@ export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSetti
       };
     }
     if (srv.defaultAuthMode) {
-      patch.defaultAuthMode = srv.defaultAuthMode;
+      patch.defaultAuthMode = normalizeDefaultAuthMode(srv.defaultAuthMode, current.defaultAuthMode);
     }
     if (srv.minGapMinutes !== undefined && srv.minGapMinutes !== null) {
       patch.minGapMinutes = sanitizeMinGapMinutes(srv.minGapMinutes, current.minGapMinutes);
     }
     if (srv.topDashboardMode) {
-      patch.topDashboardMode = srv.topDashboardMode;
+      patch.topDashboardMode = normalizeTopDashboardMode(srv.topDashboardMode, current.topDashboardMode);
     }
 
     return saveKioskSettings(patch, { syncRemote: false });

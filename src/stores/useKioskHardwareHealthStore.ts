@@ -66,7 +66,11 @@ export const setPrinterStatus = (status: DeviceHealthStatus, error: string | nul
 };
 
 export const setLastCheckedAt = (timestamp: number) => {
-  setKioskHardwareHealth({ lastCheckedAt: timestamp });
+  const safeTimestamp =
+    typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp > 0
+      ? Math.floor(timestamp)
+      : Date.now();
+  setKioskHardwareHealth({ lastCheckedAt: safeTimestamp });
 };
 
 export function useKioskHardwareHealthStore() {
