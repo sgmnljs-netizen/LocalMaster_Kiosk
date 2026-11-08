@@ -55,6 +55,55 @@ function buildMaskedName(name?: string): string {
   return `${name[0]}${'*'.repeat(name.length - 2)}${name[name.length - 1]}`;
 }
 
+export interface FaceScanResolutionGuardInput {
+  aborted: boolean;
+  isCurrentController: boolean;
+  isMounted: boolean;
+  hasDetectedMember: boolean;
+  hasDuplicateCandidates: boolean;
+  isAuthConfirmed: boolean;
+}
+
+export function shouldAcceptFaceScanResolution(input: FaceScanResolutionGuardInput): boolean {
+  return (
+    !input.aborted &&
+    input.isCurrentController &&
+    input.isMounted &&
+    !input.hasDetectedMember &&
+    !input.hasDuplicateCandidates &&
+    !input.isAuthConfirmed
+  );
+}
+
+export interface SmartTagTriggerGuardInput {
+  isSearching: boolean;
+  hasDetectedMember: boolean;
+  hasDuplicateCandidates: boolean;
+  isAuthConfirmed: boolean;
+}
+
+export function shouldAcceptSmartTagTrigger(input: SmartTagTriggerGuardInput): boolean {
+  return (
+    !input.isSearching &&
+    !input.hasDetectedMember &&
+    !input.hasDuplicateCandidates &&
+    !input.isAuthConfirmed
+  );
+}
+
+export function confirmDetectedMemberOnce<T>(
+  lockRef: { current: boolean },
+  target: T | null,
+  onConfirm: (member: T) => void
+): boolean {
+  if (!target || lockRef.current) {
+    return false;
+  }
+  lockRef.current = true;
+  onConfirm(target);
+  return true;
+}
+
 interface MemberAuthProps {
   initialAuthMode?: AuthMode;
   faceTerminalEnabled?: boolean;
@@ -117,6 +166,15 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   const faceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const faceAbortControllerRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+  const authConfirmedRef = useRef<boolean>(false);
+  const isSearchingRef = useRef<boolean>(false);
+  const detectedMemberRef = useRef<Member | null>(null);
+  const duplicateCandidatesCountRef = useRef<number>(0);
+  isSearchingRef.current = isSearching;
+  detectedMemberRef.current = detectedMember;
+  duplicateCandidatesCountRef.current = duplicateCandidates.length;
+
   // 키오스크 ↔ 로컬 하드웨어 브릿지 NFC/BLE 시퀀스 및 WebSocket 연결 ref
   const nfcBleWsRef = useRef<WebSocket | null>(null);
   const lastHandledBleSeqRef = useRef<number>(_lastGlobalHandledBleSeq);
@@ -125,7 +183,10 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
 
   // [H-4] 인증 화면 언마운트(뒤로가기/홈/인증완료) 시 로컬 BLE 잔류 캐시 즉시 클리어
   useEffect(() => {
+    isMountedRef.current = true;
+    authConfirmedRef.current = false;
     return () => {
+      isMountedRef.current = false;
       api.clearLocalBleCache();
     };
   }, []);
@@ -158,6 +219,28 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     rssi?: number,
     authType?: 'BLE' | 'NFC' | 'QR'
   ) => {
+    if (
+      !shouldAcceptSmartTagTrigger({
+        isSearching: isSearchingRef.current,
+        hasDetectedMember: detectedMemberRef.current !== null,
+        hasDuplicateCandidates: duplicateCandidatesCountRef.current > 0,
+        isAuthConfirmed: authConfirmedRef.current,
+      })
+    ) {
+      return;
+    }
+    // 교차 채널 충돌 방어: 스마트태그/QR/전화번호 조회 진입 시 진행 중이던 안면 스캔 즉시 중단
+    if (faceAbortControllerRef.current) {
+      faceAbortControllerRef.current.abort();
+      faceAbortControllerRef.current = null;
+    }
+    if (faceTimerRef.current) {
+      clearInterval(faceTimerRef.current);
+      faceTimerRef.current = null;
+    }
+    setFaceScanning(false);
+
+    isSearchingRef.current = true;
     setIsSearching(true);
     setErrorMsg('');
     setDuplicateCandidates([]);
@@ -216,6 +299,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         setErrorMsg('스마트 인증 처리 중 서버 통신 에러가 발생했습니다.');
       }
     } finally {
+      isSearchingRef.current = false;
       setIsSearching(false);
     }
   }, []);
@@ -413,6 +497,19 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         faceTimerRef.current = null;
       }
 
+      const canApply = shouldAcceptFaceScanResolution({
+        aborted: newController.signal.aborted,
+        isCurrentController: faceAbortControllerRef.current === newController,
+        isMounted: isMountedRef.current,
+        hasDetectedMember: detectedMemberRef.current !== null,
+        hasDuplicateCandidates: duplicateCandidatesCountRef.current > 0,
+        isAuthConfirmed: authConfirmedRef.current,
+      });
+
+      if (!canApply) {
+        return;
+      }
+
       if (member) {
         if (!member.masked_name && member.member_name) {
           member.masked_name = buildMaskedName(member.member_name);
@@ -420,19 +517,23 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         // 🛡️ BUG-M06 & 즉시 반응 최적화(0ms): 안면 인식 완료 시 700ms 중간 대기 배너를 생략하고 2차 본인 확인 모달(detectedMember)을 즉각 팝업
         setFaceMatchResult(null);
         setFaceScanning(false);
+        detectedMemberRef.current = member;
         setDetectedMember(member);
       } else {
-        if (!newController.signal.aborted) {
-          setErrorMsg('등록된 안면 정보가 없습니다. 다른 인증 수단(전화번호·스마트태그 등)을 이용해 주세요.');
-          setFaceScanning(false);
-        }
+        setErrorMsg('등록된 안면 정보가 없습니다. 다른 인증 수단(전화번호·스마트태그 등)을 이용해 주세요.');
+        setFaceScanning(false);
       }
     } catch {
       if (faceTimerRef.current) {
         clearInterval(faceTimerRef.current);
         faceTimerRef.current = null;
       }
-      if (!newController.signal.aborted) {
+      if (
+        !newController.signal.aborted &&
+        faceAbortControllerRef.current === newController &&
+        isMountedRef.current &&
+        !authConfirmedRef.current
+      ) {
         setErrorMsg('안면인식 장치 응답 지연이 발생했습니다.');
         setFaceScanning(false);
         if (onAuthErrorRef.current) {
@@ -1287,6 +1388,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   key={cand.member_no}
                   type="button"
                   onClick={() => {
+                    duplicateCandidatesCountRef.current = 0;
                     setDuplicateCandidates([]);
                     handleSmartTagDetected(cand.member_no, cand);
                   }}
@@ -1457,8 +1559,9 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                 onClick={() => {
                   const target = detectedMember;
                   api.clearLocalBleCache();
+                  detectedMemberRef.current = null;
                   setDetectedMember(null);
-                  onAuthSuccess(target);
+                  confirmDetectedMemberOnce(authConfirmedRef, target, onAuthSuccess);
                 }}
                 style={{
                   height: '68px',

@@ -3917,6 +3917,8 @@ class HybridAPIClient {
   }
 
   // 13. 안면인식 스캔 API (실시간 백엔드 단말기 API GET /v1/face-terminal/scan-identity 연동)
+  private activeFaceScanController: AbortController | null = null;
+
   async scanFace(deviceIp?: string, externalSignal?: AbortSignal): Promise<Member | null> {
     const ip = deviceIp || this.resolveKioskFaceTerminalIp();
     const storeCd = this.getStoreCd();
@@ -3925,7 +3927,14 @@ class HybridAPIClient {
       return null;
     }
 
+    // 동시 중복 호출 시 선행 인플라이트 안면 스캔을 즉시 중단하여 중복 이벤트 소비/레이스 차단
+    if (this.activeFaceScanController) {
+      this.activeFaceScanController.abort();
+      this.activeFaceScanController = null;
+    }
+
     const controller = new AbortController();
+    this.activeFaceScanController = controller;
     const onExternalAbort = () => controller.abort();
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15초 타임아웃
 
@@ -3941,11 +3950,17 @@ class HybridAPIClient {
         signal: controller.signal
       });
 
-      if (res.ok) {
+      if (res.ok && !controller.signal.aborted && !externalSignal?.aborted) {
         const data = await res.json();
+        if (controller.signal.aborted || externalSignal?.aborted) {
+          return null;
+        }
         if (data && data.success && data.member_id && data.member_id !== 'UNREGISTERED_FACE') {
           console.log(`[Kiosk Face Auth] 안면 식별 성공: member_id=${data.member_id}`);
           const member = await this.getMember(data.member_id);
+          if (controller.signal.aborted || externalSignal?.aborted) {
+            return null;
+          }
           return member;
         }
       }
@@ -3958,6 +3973,9 @@ class HybridAPIClient {
       }
     } finally {
       clearTimeout(timeoutId);
+      if (this.activeFaceScanController === controller) {
+        this.activeFaceScanController = null;
+      }
       if (externalSignal) {
         externalSignal.removeEventListener('abort', onExternalAbort);
       }
