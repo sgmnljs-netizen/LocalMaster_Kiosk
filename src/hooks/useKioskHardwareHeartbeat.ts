@@ -7,6 +7,7 @@ import {
 } from '../stores/kioskSettings';
 import { getIsMockHardware } from '../services/hardware/adapters/HardwareAdapterFactory';
 import { api } from '../services/api';
+import { sanitizeVanPort } from './useKioskVanPayment';
 
 const HEARTBEAT_INTERVAL_MS = 30000;
 const PING_TIMEOUT_MS = 1500;
@@ -20,8 +21,8 @@ export interface HardwareProbeResult {
 
 export async function probeKioskHardwareHealthOnce(): Promise<HardwareProbeResult> {
     const currentSettings = getKioskSettings();
-    const defaultPort = parseInt(resolveDefaultVanPort(currentSettings.providerType), 10) || 9099;
-    const port = parseInt(currentSettings.vcatPort, 10) || defaultPort;
+    const defaultPort = sanitizeVanPort(resolveDefaultVanPort(currentSettings.providerType), 9099);
+    const port = sanitizeVanPort(currentSettings.vcatPort, defaultPort);
     const statusPath = resolveVanStatusEndpointPath(currentSettings.providerType);
     const isMock = getIsMockHardware();
 

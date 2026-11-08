@@ -25,6 +25,18 @@ interface UseKioskVanPaymentReturn {
   reset: () => void;
 }
 
+export function sanitizeVanPort(rawPort: unknown, defaultPort = 9099): number {
+  const fallback =
+    Number.isInteger(defaultPort) && defaultPort >= 1 && defaultPort <= 65535
+      ? defaultPort
+      : 9099;
+  const parsed = Number.parseInt(String(rawPort ?? '').trim(), 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    return fallback;
+  }
+  return parsed;
+}
+
 export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const { settings } = useKioskSettings();
   const [state, setState] = useState<VanPaymentState>('IDLE');
@@ -36,10 +48,13 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const isTimeoutRef = useRef<boolean>(false);
   const stateRef = useRef<VanPaymentState>('IDLE');
   const inFlightRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
 
   const updateVanState = useCallback((next: VanPaymentState) => {
     stateRef.current = next;
-    setState(next);
+    if (isMountedRef.current) {
+      setState(next);
+    }
   }, []);
 
   // 키오스크 로컬 설정이 변경되면 vanClient 설정도 동기화
@@ -47,7 +62,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
     kioskVanClient.setConfig({
       provider: normalizeVanProvider(settings.providerType),
       terminalId: settings.terminalId || '88010003',
-      vcatPort: parseInt(settings.vcatPort, 10) || 9099,
+      vcatPort: sanitizeVanPort(settings.vcatPort, 9099),
     });
   }, [settings.terminalId, settings.vcatPort, settings.providerType]);
 
@@ -120,6 +135,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
       try {
         const res = await kioskVanClient.requestCardPayment(params, (newState) => {
+          if (!isMountedRef.current) return;
           if (newState === 'CANCELLED' && isTimeoutRef.current) {
             updateVanState('TIMEOUT');
           } else {
@@ -128,6 +144,9 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         });
 
         clearTimer();
+        if (!isMountedRef.current) {
+          return res;
+        }
 
         if (res.success) {
           updateVanState('APPROVED');
@@ -158,9 +177,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         return res;
       } catch (err: unknown) {
         clearTimer();
-        updateVanState('ERROR');
         const errMsg = err instanceof Error ? err.message : '단말기 통신 중 오류가 발생했습니다.';
-        setError(errMsg);
         const failResult: CardApprovalResult = {
           success: false,
           auth_code: '',
@@ -174,7 +191,11 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
           error_code: 'E_UNKNOWN',
           error_message: errMsg,
         };
-        setResult(failResult);
+        if (isMountedRef.current) {
+          updateVanState('ERROR');
+          setError(errMsg);
+          setResult(failResult);
+        }
         return failResult;
       } finally {
         inFlightRef.current = false;
@@ -186,7 +207,10 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const isProcessing = state === 'READY' || state === 'WAITING_CARD' || state === 'REQUESTING';
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
+      inFlightRef.current = false;
       const current = stateRef.current;
       if (current === 'READY' || current === 'WAITING_CARD' || current === 'REQUESTING') {
         kioskVanClient.cancelCurrentRequest();
