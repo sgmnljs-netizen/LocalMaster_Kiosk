@@ -32,6 +32,26 @@ const formatEndTime = (timeStr?: string | null): string => {
   return TimeMaster.formatEndTime(timeStr);
 };
 
+// 🛡️ [W3P2] 선점 타석 해제 네트워크/만료 에러 시에도 로컬 선택 상태를 반드시 정화하는 안전 래퍼
+export const safeReleaseSelectedBay = async (
+  bayNo: number | null,
+  releaseFn: (targetBayNo: number) => Promise<unknown>,
+  onCleaned?: () => void
+): Promise<boolean> => {
+  if (bayNo === null || !Number.isFinite(bayNo) || bayNo <= 0) {
+    return false;
+  }
+  try {
+    await releaseFn(bayNo);
+    return true;
+  } catch (err) {
+    console.warn(`[TeeboxMap] releaseBay(${bayNo}) fallback cleanup after error:`, err);
+    return false;
+  } finally {
+    onCleaned?.();
+  }
+};
+
 export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   member,
   memberNo,
@@ -236,12 +256,17 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     onRefreshBays();
   }, [onRefreshBays]);
 
-  // 선점 수동 해제 (useCallback 가딩)
+  // 선점 수동 해제 (네트워크 일시 장애나 만료 404 발생 시에도 선택 고착 방지)
   const handleRelease = useCallback(async () => {
     if (selectedBayNo !== null) {
-      await api.releaseBay(selectedBayNo);
-      setSelectedBayNo(null);
-      onRefreshBays();
+      await safeReleaseSelectedBay(
+        selectedBayNo,
+        (no) => api.releaseBay(no),
+        () => {
+          setSelectedBayNo(null);
+          onRefreshBays();
+        }
+      );
     }
   }, [selectedBayNo, onRefreshBays]);
 
@@ -264,8 +289,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           return prev;
         }
         if (prev <= 1) {
-          // 선점 시간 초과 -> 자동 락 해제
-          handleRelease();
+          // 선점 시간 초과 -> 자동 락 해제 (unhandled rejection 원천 차단)
+          void handleRelease();
           setErrorMsg(lang === 'KO' ? '선점 유효 시간이 초과되어 타석 선택이 자동 취소되었습니다.' : 'Pre-occupation lock expired.');
           return 60;
         }
@@ -338,9 +363,9 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         return;
       }
 
-      // 기존에 선택했던 타석이 있었다면 해제
+      // 기존에 선택했던 타석이 있었다면 안전 해제 (만료/일시 장애 시에도 신규 타석 선점 진행 보장)
       if (selectedBayNo !== null) {
-        await api.releaseBay(selectedBayNo);
+        await safeReleaseSelectedBay(selectedBayNo, (no) => api.releaseBay(no));
       }
 
       isConfirmedRef.current = false;

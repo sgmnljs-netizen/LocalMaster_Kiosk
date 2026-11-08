@@ -365,10 +365,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         return;
       }
       
-      // 이미 선택된 타석이면 선택 해제
+      // 이미 선택된 타석이면 선택 해제 (네트워크/만료 예외 발생 시에도 로컬 선택 해제 보장)
       if (selectedBayNos.includes(bayNo)) {
         const nextList = selectedBayNos.filter(n => n !== bayNo);
-        await api.releaseBay(bayNo);
+        await api.releaseBay(bayNo).catch(err => console.warn('[PracticeSelect] companion releaseBay fallback:', err));
         setSelectedBayNos(nextList);
         onRefreshBays();
         return;
