@@ -10,7 +10,7 @@ import {
   isBayTrulyAvailableForKiosk,
   resolveCanonicalBayStatus,
 } from '../utils/bayStatusGuard';
-import { sortBaysByNumber, formatFloorDisplayLabel } from '../utils/floorUtils';
+import { sortBaysByNumber, formatFloorDisplayLabel, parseNullableFloorNumber } from '../utils/floorUtils';
 
 interface TeeboxMapProps {
   member?: Member | null;
@@ -264,7 +264,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     selectedBayNoRef.current = selectedBayNo;
   }, [selectedBayNo]);
 
-  // 선점 락 제한시간 1초 간격 갱신
+  // 선점 락 제한시간 1초 간격 갱신 (state updater 내부 부작용 제거)
   useEffect(() => {
     if (selectedBayNo === null || isConfirmedRef.current) return;
     
@@ -275,18 +275,19 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           clearInterval(timer);
           return prev;
         }
-        if (prev <= 1) {
-          // 선점 시간 초과 -> 자동 락 해제 (unhandled rejection 원천 차단)
-          void handleRelease();
-          setErrorMsg(lang === 'KO' ? '선점 유효 시간이 초과되어 타석 선택이 자동 취소되었습니다.' : 'Pre-occupation lock expired.');
-          return 60;
-        }
-        return prev - 1;
+        return prev <= 1 ? 0 : prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [selectedBayNo, handleRelease, lang]);
+  }, [selectedBayNo]);
+
+  useEffect(() => {
+    if (countdown > 0 || selectedBayNo === null || isConfirmedRef.current) return;
+    void handleRelease();
+    setErrorMsg(lang === 'KO' ? '선점 유효 시간이 초과되어 타석 선택이 자동 취소되었습니다.' : 'Pre-occupation lock expired.');
+    setCountdown(60);
+  }, [countdown, selectedBayNo, handleRelease, lang]);
 
   // 컴포넌트 실제 언마운트 시에만 미확정 선점 타석 자동 해제 Cleanup Guard
   useEffect(() => {
@@ -390,14 +391,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     }
   }, [selectedBayNo, onBaySelected, currentBay?.bay_no]);
 
-  const getBayFloorNo = (b: Bay): number => {
-    if (b.floor_no && !isNaN(b.floor_no)) return b.floor_no;
-    if (b.floor) {
-      const parsed = parseInt(String(b.floor).replace(/[^0-9]/g, ''), 10);
-      if (!isNaN(parsed) && parsed > 0) return parsed;
-    }
-    return 1;
-  };
+  const getBayFloorNo = (b: Bay): number => parseNullableFloorNumber(b.floor_no ?? b.floor) ?? 1;
 
   // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출 및 타석 번호 오름차순 정렬
   const floorBays = sortBaysByNumber(
@@ -964,7 +958,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
           ⛳ 층별 장비 스펙:{' '}
           <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>
             {(() => {
-              if (!floorBays || floorBays.length === 0) return `${activeFloor}층 타석 정보 없음`;
+              const floorLabel = formatFloorDisplayLabel(activeFloor);
+              if (!floorBays || floorBays.length === 0) return `${floorLabel} 타석 정보 없음`;
               const minBay = Math.min(...floorBays.map((b) => b.bay_no));
               const maxBay = Math.max(...floorBays.map((b) => b.bay_no));
               const availCnt = floorBays.filter((b) => isBayTrulyAvailableForKiosk(b)).length;
@@ -980,7 +975,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                 )
               );
               const simLabel = sims.length > 0 ? sims.join(' / ') : '타석 센서';
-              return `${activeFloor}층 ${simLabel} (${minBay}~${maxBay}번 · 빈 타석 ${availCnt}석)`;
+              return `${floorLabel} ${simLabel} (${minBay}~${maxBay}번 · 빈 타석 ${availCnt}석)`;
             })()}
           </strong>
         </span>
@@ -1002,7 +997,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       >
         {floorBays.length === 0 ? (
           <div style={{ gridColumn: "span 5", display: "flex", justifyContent: "center", alignItems: "center", height: "240px", color: "#9ca3af", fontSize: "18px", fontWeight: 700 }}>
-            {lang === "KO" ? `${activeFloor}층에 가용한 타석 정보가 없습니다.` : `No teebox information available on floor ${activeFloor}.`}
+            {lang === "KO" ? `${formatFloorDisplayLabel(activeFloor)}에 가용한 타석 정보가 없습니다.` : `No teebox information available on floor ${formatFloorDisplayLabel(activeFloor)}.`}
           </div>
         ) : (
           floorBays.map((bay) => {

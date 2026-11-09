@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ChevronRight, Hand, Play, ShieldAlert, Sparkles, Tv } from 'lucide-react';
 import { api, type Bay } from '../services/api';
 import { isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
+import { normalizeFloorZoneToken, sortFloorsAscending } from '../utils/floorUtils';
 import { KioskLiveClock } from './KioskLiveClock';
 
 interface IntroScreenProps {
@@ -330,17 +331,13 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
 
           const floorMap: { [key: string]: { total: number; avail: number } } = {};
           practiceBays.forEach(b => {
-            const fKey = b.floor ? String(b.floor) : (b.floor_no ? `${b.floor_no}F` : '1F');
+            const fKey = normalizeFloorZoneToken(b.floor ?? b.floor_no) || (b.floor ? String(b.floor).trim() : '1F');
             if (!floorMap[fKey]) floorMap[fKey] = { total: 0, avail: 0 };
             floorMap[fKey].total += 1;
             if (isBayAvailable(b)) floorMap[fKey].avail += 1;
           });
 
-          const sortedFloorKeys = Object.keys(floorMap).sort((a, b) => {
-            const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
-            const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
-            return numA - numB;
-          });
+          const sortedFloorKeys = sortFloorsAscending(Object.keys(floorMap));
 
           const totalAvail = practiceBays.filter(isBayAvailable).length;
 

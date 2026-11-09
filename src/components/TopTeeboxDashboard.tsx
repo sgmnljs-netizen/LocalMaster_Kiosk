@@ -6,7 +6,7 @@ import {
   isBayTrulyAvailableForKiosk,
   resolveCanonicalBayStatus,
 } from '../utils/bayStatusGuard';
-import { sortFloorsDescending, sortBaysByNumber } from '../utils/floorUtils';
+import { sortFloorsDescending, sortBaysByNumber, normalizeFloorZoneToken } from '../utils/floorUtils';
 import { useKioskSettings, KioskTopDashboardMode } from '../stores/kioskSettings';
 import { KioskLiveClock } from './KioskLiveClock';
 
@@ -45,12 +45,9 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   // 층별 동적 그룹핑 (floor 문자열 필드 기준, 없을 시 floor_no 백업)
   const floorsMap: { [key: string]: Bay[] } = {};
   practiceBays.forEach(bay => {
-    let floorKey = '1F';
-    if (bay.floor) {
-      floorKey = String(bay.floor);
-    } else if (bay.floor_no) {
-      floorKey = `${bay.floor_no}F`;
-    }
+    const floorKey =
+      normalizeFloorZoneToken(bay.floor ?? bay.floor_no) ||
+      (bay.floor ? String(bay.floor).trim() : '1F');
     
     if (!floorsMap[floorKey]) {
       floorsMap[floorKey] = [];

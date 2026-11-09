@@ -849,7 +849,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       (vanResult.amount !== undefined && vanResult.amount <= 0)
     ) {
       if (authCodeStr) {
-        PaymentOutboxManager.removeByAuthCode(authCodeStr);
+        PaymentOutboxManager.removeByAuthCode(authCodeStr, api.getStoreCd());
       }
       return null;
     }
@@ -892,7 +892,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
         });
         return false;
       } else {
-        PaymentOutboxManager.removeByAuthCode(authCodeStr);
+        PaymentOutboxManager.removeByAuthCode(authCodeStr, api.getStoreCd());
         return true;
       }
     } catch (cancelErr: unknown) {
@@ -955,7 +955,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
 
       if (isSuccess) {
         if (authNo && amount > 0) {
-          PaymentOutboxManager.removeByAuthCode(authNo);
+          PaymentOutboxManager.removeByAuthCode(authNo, api.getStoreCd());
         }
         currentHoldResIdRef.current = null;
         const selectedZoneName = zones.find(z => z.zone_code === course)?.zone_name || course;

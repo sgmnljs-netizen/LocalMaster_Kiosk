@@ -256,16 +256,12 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
     };
   }, [effectiveDurationMin, defaultDailyPrice]);
 
-  // 120초 타이머 및 30초 주기 Heartbeat 락 갱신
+  const hasAutoCancelledRef = React.useRef(false);
+
+  // 120초 타이머 및 30초 주기 Heartbeat 락 갱신 (state updater 내부 부작용 제거)
   useEffect(() => {
     const timer = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          onCancel();
-          return 0;
-        }
-        return prev - 1;
-      });
+      setCountdown(prev => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
 
     // 30초마다 preoccupyBays Heartbeat 백그라운드 갱신 (BUG-P08: false 반환 감지 보강)
@@ -286,7 +282,14 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       clearInterval(timer);
       clearInterval(hbInterval);
     };
-  }, [selectedBayNos, onCancel, lang]);
+  }, [selectedBayNos, lang]);
+
+  useEffect(() => {
+    if (countdown <= 0 && !hasAutoCancelledRef.current) {
+      hasAutoCancelledRef.current = true;
+      onCancel();
+    }
+  }, [countdown, onCancel]);
 
   // 특정 타석의 설정 값 업데이트
   const updateTarget = (idx: number, patch: Partial<CompanionTargetItem>) => {

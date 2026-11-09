@@ -22,6 +22,47 @@ import {
 export const MIN_INSTALLMENT_AMOUNT = 50000;
 export const INSTALLMENT_MONTH_OPTIONS = [0, 2, 3, 4, 5, 6, 12] as const;
 
+export function computeKioskDiscountBreakdown(params: {
+  amount: number;
+  discountableAmount?: number;
+  discountRate?: number;
+  appliedCoupon?: KioskCouponItem | null;
+}): { gradeDiscountAmt: number; couponDiscountAmt: number; targetPayAmt: number } {
+  const safeAmount = Number.isFinite(params.amount) ? Math.max(0, params.amount) : 0;
+  const rawBase =
+    params.discountableAmount !== undefined && Number.isFinite(params.discountableAmount)
+      ? Math.min(safeAmount, Math.max(0, params.discountableAmount))
+      : safeAmount;
+  const safeRate =
+    typeof params.discountRate === 'number' && Number.isFinite(params.discountRate)
+      ? Math.min(100, Math.max(0, params.discountRate))
+      : 0;
+  const gradeDiscountAmt = safeRate > 0 ? Math.min(rawBase, Math.max(0, Math.round(rawBase * (safeRate / 100)))) : 0;
+
+  const coupon = params.appliedCoupon ?? null;
+  const isPercentCoupon = Boolean(coupon && (coupon.benefit_type === 'RATE' || coupon.coupon_type === 'PERCENT'));
+  const rawBenefitVal = coupon
+    ? Number(coupon.benefit_val ?? (isPercentCoupon ? coupon.discount_rate : coupon.discount_amount) ?? 0)
+    : 0;
+  const safeBenefitVal = Number.isFinite(rawBenefitVal) ? Math.max(0, rawBenefitVal) : 0;
+  const rawMaxCap = coupon && coupon.max_discount_amt ? Number(coupon.max_discount_amt) : 0;
+  const maxCap = Number.isFinite(rawMaxCap) && rawMaxCap > 0 ? rawMaxCap : safeAmount;
+
+  const remainingAfterGrade = Math.max(0, safeAmount - gradeDiscountAmt);
+  const couponDiscountAmt = coupon
+    ? isPercentCoupon
+      ? Math.min(
+          remainingAfterGrade,
+          Math.max(0, Math.round(safeAmount * (Math.min(100, safeBenefitVal) / 100))),
+          maxCap
+        )
+      : Math.min(safeBenefitVal, remainingAfterGrade)
+    : 0;
+
+  const targetPayAmt = Math.max(0, safeAmount - gradeDiscountAmt - couponDiscountAmt);
+  return { gradeDiscountAmt, couponDiscountAmt, targetPayAmt };
+}
+
 interface PaymentTerminalProps {
   productName: string;
   productSpecSummary?: string;
@@ -249,25 +290,16 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     setIsReadyToPay(false);
   };
 
-  // 등급 할인 및 쿠폰 할인 실시간 산출 (BUG-02: 동반자 그룹배정 시 회원 본인 슬롯 금액 기준 할인)
-  const baseForGradeDiscount = discountableAmount !== undefined ? discountableAmount : amount;
-  const gradeDiscountAmt = discountRate > 0 ? Math.round(baseForGradeDiscount * (discountRate / 100)) : 0;
-  
-  const isPercentCoupon = appliedCoupon && (appliedCoupon.benefit_type === 'RATE' || appliedCoupon.coupon_type === 'PERCENT');
-  const couponBenefitVal = appliedCoupon ? (appliedCoupon.benefit_val ?? (isPercentCoupon ? appliedCoupon.discount_rate : appliedCoupon.discount_amount) ?? 0) : 0;
-
-  const couponDiscountAmt = appliedCoupon ? (
-    isPercentCoupon
-      ? Math.min(
-          Math.round(amount * (couponBenefitVal / 100)),
-          appliedCoupon.max_discount_amt && appliedCoupon.max_discount_amt > 0 ? appliedCoupon.max_discount_amt : 999999999
-        )
-      : Math.min(couponBenefitVal, amount)
-  ) : 0;
+  // 등급 할인 및 쿠폰 할인 실시간 산출 (BUG-02: 동반자 그룹배정 시 회원 본인 슬롯 금액 기준 할인 + 음수/NaN 역전 차단)
+  const { gradeDiscountAmt, couponDiscountAmt, targetPayAmt } = computeKioskDiscountBreakdown({
+    amount,
+    discountableAmount,
+    discountRate,
+    appliedCoupon,
+  });
 
   const POINT_USE_UNIT = 1000;
-  const targetPayAmt = Math.max(0, amount - gradeDiscountAmt - couponDiscountAmt);
-  const maxUsablePoints = Math.floor(Math.min(memberPoint, targetPayAmt) / POINT_USE_UNIT) * POINT_USE_UNIT;
+  const maxUsablePoints = Math.floor(Math.min(Math.max(0, memberPoint), targetPayAmt) / POINT_USE_UNIT) * POINT_USE_UNIT;
   const clampedUsedPoints = Math.floor(Math.min(usedPoints, maxUsablePoints) / POINT_USE_UNIT) * POINT_USE_UNIT;
   const finalCardAmt = Math.max(0, targetPayAmt - clampedUsedPoints);
   const canSelectInstallment = finalCardAmt >= MIN_INSTALLMENT_AMOUNT;
@@ -432,9 +464,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
 
     if (actualPayAmt === 0) {
       setPayStep('PRINT_RECEIPT');
-      const now = new Date();
-      const generatedTradeDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ` +
-        `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      const generatedTradeDate = TimeMaster.formatKstDateTime(TimeMaster.getSyncedDate());
       const generatedAppNo = ptsUsed > 0 && !appliedCoupon
         ? `POINT-${String(Math.floor(10000000 + Math.random() * 90000000))}`
         : `FREE-${String(Math.floor(10000000 + Math.random() * 90000000))}`;
@@ -582,7 +612,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
           if (!webhookRes.success) {
             throw new Error(webhookRes.message);
           }
-          PaymentOutboxManager.removeByAuthCode(res.auth_code);
+          PaymentOutboxManager.removeByAuthCode(res.auth_code, api.getStoreCd());
         } else {
           await new Promise((resolve) => setTimeout(resolve, 800));
         }
@@ -638,7 +668,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             });
             setErrorMsg('카드 승인은 완료되었으나 단말기 자동 취소에 실패하여 긴급 환불 접수되었습니다. 승인 영수증 지참 후 프런트에 문의해 주세요.');
           } else {
-            PaymentOutboxManager.removeByAuthCode(res.auth_code);
+            PaymentOutboxManager.removeByAuthCode(res.auth_code, api.getStoreCd());
             setErrorMsg('타석 배정 처리 실패로 카드 결제가 자동 취소(망취소)되었습니다. 카드를 회수해 주세요.');
           }
         } catch (cancelErr: unknown) {

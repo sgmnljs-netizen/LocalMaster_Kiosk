@@ -10,7 +10,10 @@ import {
   isBayTrulyAvailableForKiosk,
   resolveCanonicalBayStatus,
 } from '../utils/bayStatusGuard';
-import { sortFloorsAscending, sortBaysByNumber, formatFloorDisplayLabel } from '../utils/floorUtils';
+import { sortFloorsAscending, sortBaysByNumber, formatFloorDisplayLabel, normalizeFloorZoneToken } from '../utils/floorUtils';
+
+const resolveBayFloorKey = (b?: Bay | null): string =>
+  normalizeFloorZoneToken(b?.floor ?? b?.floor_no) || (b?.floor ? String(b.floor).trim() : '1F');
 
 interface PracticeSelectProps {
   bays: Bay[];
@@ -48,7 +51,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     if (initialSelectedBayNo) {
       const initBay = bays.find(b => b.bay_no === initialSelectedBayNo);
       if (initBay) {
-        return initBay.floor ? String(initBay.floor) : (initBay.floor_no ? `${initBay.floor_no}F` : '1F');
+        return resolveBayFloorKey(initBay);
       }
     }
     return '1F';
@@ -112,7 +115,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       setSelectedBayNos([initialSelectedBayNo]);
       const initBay = bays.find(b => b.bay_no === initialSelectedBayNo);
       if (initBay) {
-        const initFloor = initBay.floor ? String(initBay.floor) : (initBay.floor_no ? `${initBay.floor_no}F` : '1F');
+        const initFloor = resolveBayFloorKey(initBay);
         setActiveFloor(initFloor);
       }
     }
@@ -120,7 +123,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     prevExternalBaysLenRef.current = externalSelectedBayNos?.length || 0;
   }, [initialSelectedBayNo, externalSelectedBayNos]);
 
-  // 선점 락 제한시간 1초 간격 갱신
+  // 선점 락 제한시간 1초 간격 갱신 (state updater 내부 부작용 제거)
   useEffect(() => {
     const activeList = allocMode === 'SINGLE' ? (selectedBayNo !== null ? [selectedBayNo] : []) : selectedBayNos;
     if (activeList.length === 0 || isConfirmedRef.current) return;
@@ -132,17 +135,20 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           clearInterval(timer);
           return prev;
         }
-        if (prev <= 1) {
-          handleReleaseAll();
-          setErrorMsg(lang === 'KO' ? '선점 유효 시간이 초과되어 타석 선택이 자동 취소되었습니다.' : 'Selection timeout. Teebox released.');
-          return 60;
-        }
-        return prev - 1;
+        return prev <= 1 ? 0 : prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [selectedBayNo, selectedBayNos, allocMode, lang]);
+  }, [selectedBayNo, selectedBayNos, allocMode]);
+
+  useEffect(() => {
+    const activeList = allocMode === 'SINGLE' ? (selectedBayNo !== null ? [selectedBayNo] : []) : selectedBayNos;
+    if (countdown > 0 || activeList.length === 0 || isConfirmedRef.current) return;
+    void handleReleaseAll();
+    setErrorMsg(lang === 'KO' ? '선점 유효 시간이 초과되어 타석 선택이 자동 취소되었습니다.' : 'Selection timeout. Teebox released.');
+    setCountdown(60);
+  }, [countdown, allocMode, selectedBayNo, selectedBayNos, lang]);
 
   // 컴포넌트 실제 언마운트 시에만 비정상 이탈(예: 광고 복귀, 홈 이동 등) 선점 락을 자동으로 즉시 해제하는 Cleanup Guard
   useEffect(() => {
@@ -174,7 +180,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // practiceBays 데이터로부터 동적으로 존재하는 층 목록 추출 (가로 탭: B1F -> 1F -> 2F -> 3F 오름차순)
   const floorList = sortFloorsAscending(
-    Array.from(new Set(practiceBays.map(b => b.floor ? String(b.floor) : (b.floor_no ? `${b.floor_no}F` : '1F'))))
+    Array.from(new Set(practiceBays.map(b => resolveBayFloorKey(b))))
   );
 
   // 첫 진입 시 동적으로 추출된 층의 첫 번째 값으로 설정
@@ -313,7 +319,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       setChainedInfo({ startTimeStr, minutesWait: totalWaitMin });
       setSelectedBayNo(bayNo);
       setSelectedBayNos([bayNo]);
-      const bayFloor = bay.floor || (bay.floor_no ? `${bay.floor_no}F` : '1F');
+      const bayFloor = resolveBayFloorKey(bay);
       if (bayFloor !== activeFloor) setActiveFloor(bayFloor);
       setShowDecisionModal(true);
       return;
@@ -345,7 +351,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         if (success) {
           setSelectedBayNo(bayNo);
           setSelectedBayNos([bayNo]);
-          const bayFloor = bay.floor || (bay.floor_no ? `${bay.floor_no}F` : '1F');
+          const bayFloor = resolveBayFloorKey(bay);
           if (bayFloor !== activeFloor) setActiveFloor(bayFloor);
           // 타석 클릭 즉시 배정 방식 선택 모달 팝업
           setShowDecisionModal(true);
@@ -388,8 +394,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       // 층 다름 제약 체크
       if (selectedBayNos.length > 0) {
         const firstBay = bays.find(b => b.bay_no === selectedBayNos[0]);
-        const firstFloor = firstBay?.floor || (firstBay?.floor_no ? `${firstBay.floor_no}F` : '1F');
-        const targetFloor = bay.floor || (bay.floor_no ? `${bay.floor_no}F` : '1F');
+        const firstFloor = resolveBayFloorKey(firstBay);
+        const targetFloor = resolveBayFloorKey(bay);
         if (firstFloor !== targetFloor) {
           setErrorMsg(lang === 'KO' ? `동반자 타석은 동일한 층(${firstFloor})에서만 동시 선택 가능합니다.` : `Group teeboxes must be selected from the same floor (${firstFloor}).`);
           return;
@@ -403,7 +409,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         const success = await api.preoccupyBays(nextList);
         if (success) {
           setSelectedBayNos(nextList);
-          const bayFloor = bay.floor ? String(bay.floor) : (bay.floor_no ? `${bay.floor_no}F` : '1F');
+          const bayFloor = resolveBayFloorKey(bay);
           if (bayFloor !== activeFloor) setActiveFloor(bayFloor);
         } else {
           setErrorMsg(lang === 'KO' ? '선택하신 타석 중 이미 다른 고객님이 선택 중인 타석이 있습니다. 다시 선택해 주세요.' : 'Some selected teeboxes are already being selected. Please choose another teebox.');
@@ -456,7 +462,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 현재 활성 층 타석 필터링 및 타석 번호 오름차순 정렬 (프런트포스와 좌우 위치 1:1 일치)
   const floorBays = sortBaysByNumber(
-    practiceBays.filter(b => (b.floor ? String(b.floor) : (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor)
+    practiceBays.filter(b => resolveBayFloorKey(b) === activeFloor)
   );
   const filteredBays = floorBays.filter(b => {
     const stCode = resolveCanonicalBayStatus(b);
