@@ -519,6 +519,10 @@ export function saveKioskSettings(
         'LM_MEMBERS',
         'LM_PAR3_SLOTS',
         'LM_ZONES',
+        'LM_KIOSK_ZONES',
+        'LM_HOLD_RESERVATIONS',
+        'LM_RESERVATIONS',
+        'face_terminal_ip',
       ]) {
         localStorage.removeItem(cacheKey);
       }
@@ -669,10 +673,10 @@ export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSetti
       patch.adminPin = String(srv.adminPin);
     }
     if (typeof srv.isMaintenanceMode === 'boolean') patch.isMaintenanceMode = srv.isMaintenanceMode;
-    if (srv.menuOverrides && typeof srv.menuOverrides === 'object') {
+    if (srv.menuOverrides && typeof srv.menuOverrides === 'object' && !Array.isArray(srv.menuOverrides)) {
       patch.menuOverrides = srv.menuOverrides;
     }
-    if (srv.authMethods && typeof srv.authMethods === 'object') {
+    if (srv.authMethods && typeof srv.authMethods === 'object' && !Array.isArray(srv.authMethods)) {
       patch.authMethods = {
         ...DEFAULT_AUTH_METHODS,
         ...srv.authMethods,

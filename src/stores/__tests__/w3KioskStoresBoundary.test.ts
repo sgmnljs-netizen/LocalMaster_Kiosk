@@ -41,16 +41,48 @@ describe('W3-KSK-stores: kioskSettings storeCode 공백 트림·캐시 소거 �
     expect(sanitizeMinGapMinutes(null, 5)).toBe(60);
   });
 
-  it('saveKioskSettings는 storeCode 앞뒤 공백을 제거하고 타 지점 전환 시 로컬 도메인 캐시를 즉시 소거한다', () => {
+  it('saveKioskSettings는 storeCode 앞뒤 공백을 제거하고 타 지점 전환 시 로컬 도메인 캐시를 즉시 소거하되 결제 아웃박스는 보존한다', () => {
     saveKioskSettings({ storeCode: 'STORE_A' });
     mockLocalStorage.setItem('LM_BAYS', '[{"bay_no":1}]');
     mockLocalStorage.setItem('LM_PRODUCTS', '[{"prod_cd":"P1"}]');
+    mockLocalStorage.setItem('LM_KIOSK_ZONES', '[{"zone_code":"Z1"}]');
+    mockLocalStorage.setItem('LM_HOLD_RESERVATIONS', '[{"res_id":"H1"}]');
+    mockLocalStorage.setItem('LM_RESERVATIONS', '[{"res_id":"R1"}]');
+    mockLocalStorage.setItem('face_terminal_ip', '192.168.0.50');
+    mockLocalStorage.setItem('LM_PAYMENT_OUTBOX', '[{"id":"WAL_1"}]');
 
     const switched = saveKioskSettings({ storeCode: '  STORE_B  ' });
     expect(switched.storeCode).toBe('STORE_B');
     expect(mockLocalStorage.getItem('LM_STORE_CD')).toBe('STORE_B');
     expect(mockLocalStorage.getItem('LM_BAYS')).toBeNull();
     expect(mockLocalStorage.getItem('LM_PRODUCTS')).toBeNull();
+    expect(mockLocalStorage.getItem('LM_KIOSK_ZONES')).toBeNull();
+    expect(mockLocalStorage.getItem('LM_HOLD_RESERVATIONS')).toBeNull();
+    expect(mockLocalStorage.getItem('LM_RESERVATIONS')).toBeNull();
+    expect(mockLocalStorage.getItem('face_terminal_ip')).toBeNull();
+    expect(mockLocalStorage.getItem('LM_PAYMENT_OUTBOX')).toBe('[{"id":"WAL_1"}]');
+  });
+
+  it('hydrateKioskDeviceSettingsFromServer는 배열형 menuOverrides/authMethods 오염 입력을 무시한다', async () => {
+    saveKioskSettings({ storeCode: 'STORE_ARR' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          has_saved_settings: true,
+          settings: {
+            menuOverrides: ['bad_array'],
+            authMethods: ['bad_auth'],
+          },
+        }),
+      }))
+    );
+
+    const hydrated = await hydrateKioskDeviceSettingsFromServer();
+    expect(hydrated).not.toBeNull();
+    expect(Array.isArray(hydrated?.menuOverrides)).toBe(false);
+    expect(Array.isArray(hydrated?.authMethods)).toBe(false);
   });
 
   it('hydrateKioskDeviceSettingsFromServer 응답 대기 중 지점이 변경되면 구형 지점 설정 덮어쓰기를 차단한다', async () => {
