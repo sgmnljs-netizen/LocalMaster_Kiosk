@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { sanitizeVanPort } from '../useKioskVanPayment';
 import { probeKioskHardwareHealthOnce } from '../useKioskHardwareHeartbeat';
 import { saveKioskSettings } from '../../stores/kioskSettings';
+import { sanitizeScannerOptions, resolveScannerChar } from '../../services/hardware/hooks/useHardwareScanner';
 
 describe('W3-KSK-hooks: VAN 포트 범위(1..65535) 정규화 및 하드웨어 헬스 프로브 방어', () => {
   const storageMap = new Map<string, string>();
@@ -69,5 +70,23 @@ describe('W3-KSK-hooks: VAN 포트 범위(1..65535) 정규화 및 하드웨어 �
     expect(result.nextVcat).toBe('ONLINE');
     expect(result.nextPrinter).toBe('ONLINE');
     expect(requestedUrls[0]).toBe('http://127.0.0.1:8088/nice/status');
+  });
+
+  it('sanitizeScannerOptions는 NaN/0/음수 스캐너 임계치를 안전한 기본값(3자, 50ms)으로 정규화하고 IME 키코드를 복원한다', () => {
+    expect(sanitizeScannerOptions(Number.NaN, -10)).toEqual({ safeMinLen: 3, safeMaxInterval: 50 });
+    expect(sanitizeScannerOptions(0, 0)).toEqual({ safeMinLen: 3, safeMaxInterval: 50 });
+    expect(sanitizeScannerOptions(5.9, 35)).toEqual({ safeMinLen: 5, safeMaxInterval: 35 });
+
+    const imeEvent = {
+      key: 'ㅁ',
+      code: 'KeyA',
+      shiftKey: true,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+      isComposing: false,
+      keyCode: 65,
+    } as unknown as KeyboardEvent;
+    expect(resolveScannerChar(imeEvent, false)).toBe('A');
   });
 });

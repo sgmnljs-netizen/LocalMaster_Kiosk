@@ -53,6 +53,23 @@ export function resolveScannerChar(e: KeyboardEvent, isInputFocused: boolean): s
   return null;
 }
 
+export function sanitizeScannerOptions(
+  minBarcodeLength?: number,
+  maxKeystrokeIntervalMs?: number
+): { safeMinLen: number; safeMaxInterval: number } {
+  const safeMinLen =
+    typeof minBarcodeLength === 'number' && Number.isFinite(minBarcodeLength) && minBarcodeLength >= 1
+      ? Math.floor(minBarcodeLength)
+      : 3;
+  const safeMaxInterval =
+    typeof maxKeystrokeIntervalMs === 'number' &&
+    Number.isFinite(maxKeystrokeIntervalMs) &&
+    maxKeystrokeIntervalMs > 0
+      ? maxKeystrokeIntervalMs
+      : 50;
+  return { safeMinLen, safeMaxInterval };
+}
+
 export function useHardwareScanner({
   onScan,
   enabled = true,
@@ -63,6 +80,7 @@ export function useHardwareScanner({
   const lastKeyTimeRef = useRef<number>(0);
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
+  const { safeMinLen, safeMaxInterval } = sanitizeScannerOptions(minBarcodeLength, maxKeystrokeIntervalMs);
 
   useEffect(() => {
     if (!enabled) {
@@ -71,8 +89,9 @@ export function useHardwareScanner({
     }
 
     const unsubscribeDaemon = kioskHardwareBridge.subscribeScanner((barcode) => {
-      if (barcode && barcode.length >= minBarcodeLength) {
-        onScanRef.current(barcode);
+      const trimmed = typeof barcode === 'string' ? barcode.trim() : '';
+      if (trimmed.length >= safeMinLen) {
+        onScanRef.current(trimmed);
       }
     });
 
@@ -92,14 +111,14 @@ export function useHardwareScanner({
       const now = Date.now();
       const interval = now - lastKeyTimeRef.current;
 
-      if (isInputFocused && interval > maxKeystrokeIntervalMs) {
+      if (isInputFocused && interval > safeMaxInterval) {
         bufferRef.current = '';
       }
 
       if (e.key === 'Enter') {
         lastKeyTimeRef.current = now;
-        if (bufferRef.current.length >= minBarcodeLength && interval <= maxKeystrokeIntervalMs * 3) {
-          const scannedCode = bufferRef.current;
+        const scannedCode = bufferRef.current.trim();
+        if (scannedCode.length >= safeMinLen && interval <= safeMaxInterval * 3) {
           bufferRef.current = '';
           onScanRef.current(scannedCode);
 
@@ -115,7 +134,7 @@ export function useHardwareScanner({
 
       const resolvedChar = resolveScannerChar(e, isInputFocused);
       if (resolvedChar !== null) {
-        if (interval > maxKeystrokeIntervalMs && bufferRef.current.length > 0) {
+        if (interval > safeMaxInterval && bufferRef.current.length > 0) {
           bufferRef.current = '';
         }
         lastKeyTimeRef.current = now;
@@ -126,8 +145,9 @@ export function useHardwareScanner({
     window.addEventListener('keydown', handleKeyDown, true);
 
     return () => {
+      bufferRef.current = '';
       unsubscribeDaemon();
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [enabled, minBarcodeLength, maxKeystrokeIntervalMs]);
+  }, [enabled, safeMinLen, safeMaxInterval]);
 }

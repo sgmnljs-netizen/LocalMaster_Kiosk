@@ -101,9 +101,11 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
     isTimeoutRef.current = false;
     inFlightRef.current = false;
     updateVanState('IDLE');
-    setRemainingSeconds(KIOSK_VAN_APPROVAL_TIMEOUT_SEC);
-    setError(null);
-    setResult(null);
+    if (isMountedRef.current) {
+      setRemainingSeconds(KIOSK_VAN_APPROVAL_TIMEOUT_SEC);
+      setError(null);
+      setResult(null);
+    }
   }, [clearTimer, updateVanState]);
 
   const cancelPayment = useCallback(() => {
@@ -112,7 +114,9 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
     kioskVanClient.cancelCurrentRequest();
     clearTimer();
     updateVanState('CANCELLED');
-    setError('결제가 취소되었습니다.');
+    if (isMountedRef.current) {
+      setError('결제가 취소되었습니다.');
+    }
   }, [clearTimer, updateVanState]);
 
   const startPayment = useCallback(
