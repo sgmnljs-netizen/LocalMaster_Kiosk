@@ -206,6 +206,7 @@ export interface Bay {
   max_assignable_min?: number | null;
   next_limit_res_start_time?: string | null;
   prepare_time_min?: number;
+  has_hardware_control?: boolean;
   hardware_status?: string;
   has_error?: boolean | null;
   error_code?: string | number | null;
@@ -1184,9 +1185,36 @@ class HybridAPIClient {
                       : typeof data.error_code === 'string' || typeof data.error_code === 'number'
                         ? data.error_code
                         : bays[idx].error_code;
+                  const incomingStatusInfo =
+                    (bayObj.status_info as BayStatusInfo | null | undefined) ??
+                    (data.status_info as BayStatusInfo | null | undefined);
+                  const prevStatusCode = bays[idx].status_info?.code
+                    ? String(bays[idx].status_info?.code).trim().toUpperCase()
+                    : '';
+                  const nextStatusInfo =
+                    incomingStatusInfo !== undefined
+                      ? incomingStatusInfo
+                      : prevStatusCode && prevStatusCode === String(newStatus).trim().toUpperCase()
+                        ? bays[idx].status_info
+                        : undefined;
+                  const nextIsActive =
+                    typeof bayObj.is_active === 'boolean'
+                      ? bayObj.is_active
+                      : typeof data.is_active === 'boolean'
+                        ? data.is_active
+                        : bays[idx].is_active;
+                  const nextHasHwControl =
+                    typeof bayObj.has_hardware_control === 'boolean'
+                      ? bayObj.has_hardware_control
+                      : typeof data.has_hardware_control === 'boolean'
+                        ? data.has_hardware_control
+                        : bays[idx].has_hardware_control;
                   bays[idx] = {
                     ...bays[idx],
                     status: newStatus,
+                    status_info: nextStatusInfo,
+                    is_active: nextIsActive,
+                    has_hardware_control: nextHasHwControl,
                     member_no: (bayObj.member_no as string) ?? (data.member_no as string) ?? (newStatus === 'AVAILABLE' ? null : bays[idx].member_no),
                     current_user_name: (bayObj.member_name as string) || (bayObj.user_name as string) || (data.user_name as string) || (newStatus === 'AVAILABLE' ? null : bays[idx].current_user_name),
                     end_time: (bayObj.end_time as string) || (data.end_time as string) || (newStatus === 'AVAILABLE' ? null : bays[idx].end_time),

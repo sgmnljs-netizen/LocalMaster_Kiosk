@@ -5,6 +5,7 @@ import { TimeMaster } from '../utils/timeMaster';
 import {
   evaluateBayHardwareState,
   isBayTrulyAvailableForKiosk,
+  resolveCanonicalBayStatus,
 } from '../utils/bayStatusGuard';
 import { sortFloorsDescending, sortBaysByNumber } from '../utils/floorUtils';
 
@@ -52,7 +53,7 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
   const totalAvailable = practiceBays.filter(b => isBayTrulyAvailableForKiosk(b)).length;
 
   const renderBayIndicator = (bay: Bay) => {
-    const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
+    const canonicalStatus = resolveCanonicalBayStatus(bay);
     const isUnderMaintenance = isBayBlocked(bay);
     const isLessonOnly = Boolean(bay.is_lesson_only);
     const isAvailable = isBayTrulyAvailableForKiosk(bay);

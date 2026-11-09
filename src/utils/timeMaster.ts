@@ -364,14 +364,25 @@ export class TimeMaster {
 
 export interface BayStatusProbe {
   status?: string | null;
+  status_info?: { code?: string | null } | null;
   is_active?: boolean | null;
 }
 
-export const isBayAvailable = (bay?: BayStatusProbe | null): boolean =>
-  Boolean(bay && bay.is_active !== false && (bay.status === 'AVAILABLE' || bay.status === 'OPEN'));
+const resolveProbeStatus = (bay?: BayStatusProbe | null): string => {
+  if (!bay) return '';
+  const infoCode = typeof bay.status_info?.code === 'string' ? bay.status_info.code.trim().toUpperCase() : '';
+  if (infoCode && infoCode !== 'UNKNOWN') return infoCode;
+  return String(bay.status || '').trim().toUpperCase();
+};
+
+export const isBayAvailable = (bay?: BayStatusProbe | null): boolean => {
+  if (!bay || bay.is_active === false) return false;
+  const st = resolveProbeStatus(bay);
+  return st === 'AVAILABLE' || st === 'OPEN';
+};
 
 export const isBayOccupied = (bay?: BayStatusProbe | null): boolean =>
-  Boolean(bay && ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(String(bay.status || '').toUpperCase()));
+  Boolean(bay && ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(resolveProbeStatus(bay)));
 
 export const isBayBlocked = (bay?: BayStatusProbe | null): boolean =>
   Boolean(
@@ -388,7 +399,6 @@ export const isBayBlocked = (bay?: BayStatusProbe | null): boolean =>
         'OUT_OF_SERVICE',
         'HOLD',
         'BUFFER',
-        'RESERVED',
-      ].includes(String(bay.status || '').toUpperCase())
+      ].includes(resolveProbeStatus(bay))
   );
 

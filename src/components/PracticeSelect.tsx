@@ -4,7 +4,12 @@ import { api, Bay } from '../services/api';
 import { TopTeeboxDashboard } from './TopTeeboxDashboard';
 import { TeeboxTileCard } from './TeeboxTileCard';
 import { TimeMaster } from '../utils/timeMaster';
-import { evaluateBayHardwareState, isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
+import {
+  BLOCKED_BAY_STATUSES,
+  evaluateBayHardwareState,
+  isBayTrulyAvailableForKiosk,
+  resolveCanonicalBayStatus,
+} from '../utils/bayStatusGuard';
 import { sortFloorsAscending, sortBaysByNumber, formatFloorDisplayLabel } from '../utils/floorUtils';
 
 interface PracticeSelectProps {
@@ -264,10 +269,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
       return;
     }
 
-    const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
+    const canonicalStatus = resolveCanonicalBayStatus(bay);
     const isBlockedStatus =
       bay.is_active === false ||
-      ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
+      (BLOCKED_BAY_STATUSES as readonly string[]).includes(canonicalStatus);
     if (isBlockedStatus) return;
 
     if (bay.is_paused || bay.is_global_paused) {
@@ -315,7 +320,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     }
     
     // 이미 타인에 의해 선점된 경우
-    if (bay.status === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId()) {
+    if (canonicalStatus === 'PRE_OCCUPIED' && bay.lock_terminal_id !== api.getTerminalId()) {
       setErrorMsg(lang === 'KO' ? '이미 다른 고객님께서 선택 중인 타석입니다.' : 'This teebox is currently being selected by another user.');
       return;
     }
@@ -454,7 +459,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
     practiceBays.filter(b => (b.floor ? String(b.floor) : (b.floor_no ? `${b.floor_no}F` : '1F')) === activeFloor)
   );
   const filteredBays = floorBays.filter(b => {
-    const stCode = String(b.status_info?.code || b.status || '').toUpperCase();
+    const stCode = resolveCanonicalBayStatus(b);
     const h = String(b.handedness || (b.type === 'LEFT' ? 'LEFT' : 'RIGHT')).toUpperCase();
     if (filterChip === 'RIGHT') {
       return h === 'RIGHT' || h === 'BOTH';
@@ -487,7 +492,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
 
   // 모달 표기용 선택 타석 정보 추출
   const selectedBay = selectedBayNo !== null ? bays.find(b => b.bay_no === selectedBayNo) : null;
-  const selectedBayStatus = selectedBay ? String(selectedBay.status_info?.code || selectedBay.status || '').toUpperCase() : '';
+  const selectedBayStatus = selectedBay ? resolveCanonicalBayStatus(selectedBay) : '';
   const isOccupied = !!selectedBay && ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(selectedBayStatus);
 
   return (

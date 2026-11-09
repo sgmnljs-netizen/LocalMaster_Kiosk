@@ -52,7 +52,12 @@ import {
   buildKioskProductSpecSummary,
   evaluateDailyPassEligibility,
 } from './utils/kioskProductSpecSummary';
-import { runWithAllocationMutex } from './utils/bayStatusGuard';
+import {
+  evaluateBayHardwareState,
+  isBayOwnedWithActiveSession,
+  isBayTrulyAvailableForKiosk,
+  runWithAllocationMutex,
+} from './utils/bayStatusGuard';
 
 type KioskStep = 
   | 'INTRO' 
@@ -941,6 +946,19 @@ export default function KioskApp() {
       );
       return;
     }
+    const miniTargetBay = bays.find(b => Number(b.bay_no) === Number(bayNo));
+    if (miniTargetBay && !isBayTrulyAvailableForKiosk(miniTargetBay)) {
+      const hwState = evaluateBayHardwareState(miniTargetBay);
+      showToast(
+        hwState.isBallEmpty
+          ? `${bayNo}번 타석은 볼 공급 부족 상태로 선택할 수 없습니다.`
+          : hwState.isBlocked
+            ? `${bayNo}번 타석은 기기 점검 중으로 선택할 수 없습니다.`
+            : '현재 즉시 배정할 수 없는 타석입니다.',
+        false
+      );
+      return;
+    }
     showToast(lang === 'KO' ? `${bayNo}번 타석 선점 시도 중...` : `Securing teebox ${bayNo}...`);
     try {
       const success = await api.preoccupyBay(bayNo);
@@ -1281,23 +1299,25 @@ export default function KioskApp() {
           if (zoneStr.includes('PAR3') || zoneStr.includes('SCREEN') || zoneStr.includes('ROOM') || zoneStr.includes('파3') || zoneStr.includes('스크린')) return false;
           return true;
         };
-        const activeCurrentBay = bays.find(b => {
-          if (!isPracticeCandidateBay(b)) return false;
-          const st = String(b.status_info?.code || b.status || '').toUpperCase();
-          if (!['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(st)) return false;
-          const bayMemberNo = String(b.current_member_no || b.member_no || '').trim();
-          if (effMemberNo && bayMemberNo !== '') {
-            return bayMemberNo === String(effMemberNo).trim();
+        const targetCheckBay = bays.find(b => Number(b.bay_no) === Number(bayNo));
+        if (targetCheckBay) {
+          const targetHw = evaluateBayHardwareState(targetCheckBay);
+          if (targetHw.isBlocked) {
+            await api.releaseBay(bayNo).catch(() => {});
+            setSelectedBayNo(null);
+            selectedBayNoRef.current = null;
+            await loadBays();
+            showErrorModal(
+              targetHw.isBallEmpty
+                ? `${bayNo}번 타석이 볼 공급 부족 상태로 전환되어 이동할 수 없습니다. 다른 타석을 선택해 주세요.`
+                : `${bayNo}번 타석이 기기 점검/오류 상태로 전환되어 이동할 수 없습니다. 다른 타석을 선택해 주세요.`
+            );
+            return;
           }
-          if (!bayMemberNo && effMemberNo && String(b.current_user_name || '').trim() === String(effMemberNo).trim()) {
-            return true;
-          }
-          const bayUserName = String(b.member_name || b.current_user_name || '').trim();
-          if (!bayMemberNo && effMemberName !== '' && bayUserName !== '' && bayUserName === effMemberName) {
-            return true;
-          }
-          return false;
-        });
+        }
+        const activeCurrentBay = bays.find(
+          b => isPracticeCandidateBay(b) && isBayOwnedWithActiveSession(b, effMemberNo, effMemberName)
+        );
         const nextReservedCurrentBay = !activeCurrentBay
           ? bays.find(b => {
               if (!isPracticeCandidateBay(b)) return false;
@@ -1388,6 +1408,23 @@ export default function KioskApp() {
   const handleAssetSelected = async (memberItemId: number, overrideDurationMin?: number, acceptClosingTruncate?: boolean) => {
     if (isAllocatingRef.current) return;
     if (selectedBayNo !== null && authMember) {
+      const targetCheckBay = bays.find(b => Number(b.bay_no) === Number(selectedBayNo));
+      if (targetCheckBay) {
+        const hwState = evaluateBayHardwareState(targetCheckBay);
+        if (hwState.isBlocked) {
+          await api.releaseBay(selectedBayNo).catch(() => {});
+          setSelectedBayNo(null);
+          selectedBayNoRef.current = null;
+          await loadBays();
+          showErrorModal(
+            hwState.isBallEmpty
+              ? `선택하신 ${selectedBayNo}번 타석이 볼 공급 부족 상태로 전환되어 배정할 수 없습니다. 다른 타석을 선택해 주세요.`
+              : `선택하신 ${selectedBayNo}번 타석이 기기 점검/오류 상태로 전환되어 배정할 수 없습니다. 다른 타석을 선택해 주세요.`
+          );
+          setStep('PRACTICE_SELECT');
+          return;
+        }
+      }
       isAllocatingRef.current = true;
       try {
         const targetAsset = (authMember.assets || []).find(a => String(a.member_item_id) === String(memberItemId));
@@ -1534,6 +1571,30 @@ export default function KioskApp() {
   // 2.7. 동반자 배정 설정 완료 및 일괄 배정/결제 승인
   const handleCompanionConfirm = async (targets: CompanionTargetItem[], acceptClosingTruncate: boolean = false) => {
     setShowCompanionModal(false);
+    for (const t of targets) {
+      const bObj = bays.find(b => Number(b.bay_no) === Number(t.bayNo));
+      if (bObj) {
+        const hwState = evaluateBayHardwareState(bObj);
+        if (hwState.isBlocked) {
+          const baysToRelease = targets.map(item => item.bayNo);
+          if (baysToRelease.length > 0) {
+            api.releaseBays(baysToRelease).catch(console.error);
+          }
+          setSelectedBayNo(null);
+          selectedBayNoRef.current = null;
+          setSelectedBayNos([]);
+          selectedBayNosRef.current = [];
+          setCompanionTargets([]);
+          showErrorModal(
+            hwState.isBallEmpty
+              ? `동반자 선택 타석(${t.bayNo}번)이 볼 공급 부족 상태로 전환되어 배정할 수 없습니다. 다른 타석을 선택해 주세요.`
+              : `동반자 선택 타석(${t.bayNo}번)이 기기 점검/오류 상태로 전환되어 배정할 수 없습니다. 다른 타석을 선택해 주세요.`
+          );
+          setStep('PRACTICE_SELECT');
+          return;
+        }
+      }
+    }
     const totalPrice = targets.reduce((sum, t) => sum + t.price, 0);
 
     if (totalPrice === 0) {
@@ -1769,6 +1830,22 @@ export default function KioskApp() {
 
       // [P0-07 & P2-2] 대기 타석 잔여시간(waitMin) 및 종료 시각 계산: TimeMaster SSOT 파서 사용
       const selectedBay = bays.find(b => b.bay_no === selectedBayNo);
+      if (selectedBay) {
+        const hwState = evaluateBayHardwareState(selectedBay);
+        if (hwState.isBlocked) {
+          await api.releaseBay(selectedBayNo).catch(() => {});
+          setSelectedBayNo(null);
+          selectedBayNoRef.current = null;
+          await loadBays();
+          showErrorModal(
+            hwState.isBallEmpty
+              ? `선택하신 ${selectedBayNo}번 타석이 볼 공급 부족 상태로 전환되어 결제를 진행할 수 없습니다. 다른 타석을 선택해 주세요.`
+              : `선택하신 ${selectedBayNo}번 타석이 기기 점검/오류 상태로 전환되어 결제를 진행할 수 없습니다. 다른 타석을 선택해 주세요.`
+          );
+          setStep('PRACTICE_SELECT');
+          return;
+        }
+      }
       const prodDuration =
         prod.duration_min ??
         prod.time_min ??

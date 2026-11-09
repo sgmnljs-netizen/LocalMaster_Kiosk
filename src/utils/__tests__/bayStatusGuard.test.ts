@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateBayHardwareState, isBayTrulyAvailableForKiosk } from '../bayStatusGuard';
+import {
+  evaluateBayHardwareState,
+  isBayOwnedWithActiveSession,
+  isBayTrulyAvailableForKiosk,
+  resolveCanonicalBayStatus,
+} from '../bayStatusGuard';
+import { isBayAvailable, isBayBlocked } from '../timeMaster';
 import { sortFloorsDescending, sortFloorsAscending, sortBaysByNumber, formatFloorDisplayLabel } from '../floorUtils';
 import type { Bay } from '../../services/api';
 
@@ -140,6 +146,90 @@ describe('evaluateBayHardwareState - Kiosk Hardware Error & Ball Shortage Guard'
         status: 'AVAILABLE',
         is_paused: true,
       })
+    ).toBe(false);
+  });
+
+  it('B08: [Wave 1] has_hardware_control=false(스크린전용) 타석은 볼센서 미감지·장비에러에서 면제되지만 수동 점검 상태(MAINTENANCE)는 차단된다', () => {
+    const screenBay = evaluateBayHardwareState({
+      ...baseBay,
+      status: 'AVAILABLE',
+      has_hardware_control: false,
+      hardware_status: 'ERROR',
+      ball_box_detected: false,
+      config_json: JSON.stringify({ has_error: true, error_code: 'E01', ball_box_status: 'EMPTY' }),
+    });
+    expect(screenBay.isBallEmpty).toBe(false);
+    expect(screenBay.isHwError).toBe(false);
+    expect(screenBay.isBlocked).toBe(false);
+    expect(
+      isBayTrulyAvailableForKiosk({
+        ...baseBay,
+        status: 'AVAILABLE',
+        has_hardware_control: false,
+        hardware_status: 'ERROR',
+        ball_box_detected: false,
+      })
+    ).toBe(true);
+
+    const screenMaint = evaluateBayHardwareState({
+      ...baseBay,
+      status: 'MAINTENANCE',
+      has_hardware_control: false,
+    });
+    expect(screenMaint.isStatusBlocked).toBe(true);
+    expect(screenMaint.isBlocked).toBe(true);
+  });
+
+  it('B09: [Wave 1] status_info.code === "UNKNOWN" 폴백 마스킹 방지, RESERVED 오탐 제외 및 config_json.error_code("E02") 단독 감지 검증', () => {
+    const unknownInfoAvailable: Bay = {
+      ...baseBay,
+      status: 'OPEN',
+      status_info: { code: 'UNKNOWN', label: '알 수 없음' },
+    };
+    expect(resolveCanonicalBayStatus(unknownInfoAvailable)).toBe('OPEN');
+    expect(isBayTrulyAvailableForKiosk(unknownInfoAvailable)).toBe(true);
+    expect(isBayAvailable(unknownInfoAvailable)).toBe(true);
+
+    const unknownInfoFault: Bay = {
+      ...baseBay,
+      status: 'FAULT',
+      status_info: { code: 'UNKNOWN', label: '알 수 없음' },
+    };
+    expect(evaluateBayHardwareState(unknownInfoFault).isStatusBlocked).toBe(true);
+    expect(isBayBlocked(unknownInfoFault)).toBe(true);
+
+    const reservedBay: Bay = {
+      ...baseBay,
+      status: 'RESERVED',
+    };
+    expect(evaluateBayHardwareState(reservedBay).isStatusBlocked).toBe(false);
+    expect(isBayBlocked(reservedBay)).toBe(false);
+
+    const cfgOnlyErr = evaluateBayHardwareState({
+      ...baseBay,
+      status: 'AVAILABLE',
+      config_json: JSON.stringify({ error_code: 'E02' }),
+    });
+    expect(cfgOnlyErr.isHwError).toBe(true);
+    expect(cfgOnlyErr.isBlocked).toBe(true);
+  });
+
+  it('B10: [Wave 1] 이용 중 고장(ERROR/FAULT/MAINTENANCE)으로 전환된 출발 타석에서도 본인 활성 세션이면 셀프 이동 탈출이 허용된다', () => {
+    const brokenActiveBay: Bay = {
+      ...baseBay,
+      bay_no: 5,
+      status: 'ERROR',
+      current_member_no: 'M202601',
+      current_user_name: '홍길동',
+      res_id: 'RES-999',
+      minutes_left: 42,
+    };
+    expect(isBayOwnedWithActiveSession(brokenActiveBay, 'M202601', '홍길동')).toBe(true);
+    // 동명이인(타 member_no) 절대 배제
+    expect(isBayOwnedWithActiveSession(brokenActiveBay, 'M999999', '홍길동')).toBe(false);
+    // 세션 증거 없는 유휴 고장 타석은 소유 타석이 아님
+    expect(
+      isBayOwnedWithActiveSession({ ...baseBay, bay_no: 6, status: 'ERROR' }, 'M202601', '홍길동')
     ).toBe(false);
   });
 });

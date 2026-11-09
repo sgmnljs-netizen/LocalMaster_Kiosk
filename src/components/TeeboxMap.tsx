@@ -3,7 +3,13 @@ import { ArrowLeftRight, Check, Compass, ShieldAlert, Timer } from 'lucide-react
 import { api, Bay, Member } from '../services/api';
 import { TeeboxTileCard } from './TeeboxTileCard';
 import { TimeMaster } from '../utils/timeMaster';
-import { evaluateBayHardwareState } from '../utils/bayStatusGuard';
+import {
+  BLOCKED_BAY_STATUSES,
+  evaluateBayHardwareState,
+  isBayOwnedWithActiveSession,
+  isBayTrulyAvailableForKiosk,
+  resolveCanonicalBayStatus,
+} from '../utils/bayStatusGuard';
 import { sortBaysByNumber, formatFloorDisplayLabel } from '../utils/floorUtils';
 
 interface TeeboxMapProps {
@@ -125,13 +131,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       const activeResBayNo = Number(activeRes?.bay_no ?? activeRes?.resource_no ?? 0);
       if (activeRes && activeResBayNo > 0) {
         const matchedBay = bays.find(b => Number(b.bay_no) === activeResBayNo);
-        const physStatus = String(matchedBay?.status_info?.code || matchedBay?.status || '').toUpperCase();
-        const physMemNo = String(matchedBay?.current_member_no || matchedBay?.member_no || '').trim();
-        const isPhysicallyOwnedByMe =
-          Boolean(matchedBay) &&
-          ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(physStatus) &&
-          Boolean(effMemberNo) &&
-          (physMemNo === String(effMemberNo).trim() || String(matchedBay?.current_user_name || '').trim() === String(effMemberNo).trim());
+        const isPhysicallyOwnedByMe = isBayOwnedWithActiveSession(matchedBay, effMemberNo, effMemberName);
 
         if (isPhysicallyOwnedByMe && matchedBay) {
           setFallbackMoveBay(matchedBay);
@@ -167,22 +167,9 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   }, [isMoveMode, effMemberNo, effMemberName, bays]);
 
   // [BUG-V01] 이동 모드 시 현재 회원이 점유/예약 중인 타석 정밀 검색
-  // 1순위: 본인 member_no(또는 member_no 미존재 시 성명)로 실제 가동 중인 타석 (동명이인 타인 member_no 절대 배제)
+  // 1순위: 본인 member_no(또는 member_no 미존재 시 성명)로 실제 가동 중인 타석 (고장/점검 전환 활성 세션 포함, 동명이인 타인 member_no 절대 배제)
   const activeOwnedBay = isMoveMode
-    ? bays.find(b => {
-        const st = String(b.status_info?.code || b.status || '').toUpperCase();
-        if (!['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(st)) return false;
-
-        const bayMemberNo = String(b.current_member_no || b.member_no || '').trim();
-        if (bayMemberNo !== '') {
-          return Boolean(effMemberNo && bayMemberNo === String(effMemberNo).trim());
-        }
-        if (effMemberNo && String(b.current_user_name || '').trim() === String(effMemberNo).trim()) {
-          return true;
-        }
-        const bayUserName = String(b.member_name || b.current_user_name || '').trim();
-        return effMemberName !== '' && bayUserName === effMemberName;
-      })
+    ? (bays.find(b => isBayOwnedWithActiveSession(b, effMemberNo, effMemberName)) ?? null)
     : null;
 
   // 2순위: 차기 예약(next_res)으로 대기 중인 타석 (앞사람 타석 잔여시간 오염 방지를 위해 CHK 가상 상태로 래핑)
@@ -229,7 +216,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   // minutes_left 정밀 파싱 및 end_time/epoch SSOT fallback 계산
   const calculateRemMin = useCallback((bay: Bay | null | undefined): number => {
     if (!bay) return 0;
-    const st = String(bay.status_info?.code || bay.status || '').toUpperCase();
+    const st = resolveCanonicalBayStatus(bay);
     if (['CHK', 'RSV', 'CONFIRMED', 'RESERVED', 'QUEUE', 'QUEUED', 'WAIT', 'REQ'].includes(st)) {
       const explicitMin = Number(bay.duration_min || bay.minutes_left || 0);
       if (explicitMin > 0) return explicitMin;
@@ -237,7 +224,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     return TimeMaster.getRemainingMinutes(bay);
   }, []);
 
-  const currentBayStatus = String(currentBay?.status_info?.code || currentBay?.status || '').toUpperCase();
+  const currentBayStatus = resolveCanonicalBayStatus(currentBay);
   const isReservedNotStarted = ['CHK', 'RSV', 'CONFIRMED', 'RESERVED', 'QUEUE', 'QUEUED', 'WAIT', 'REQ'].includes(currentBayStatus);
   const currentRemMin = calculateRemMin(currentBay);
   const isGlobalPaused = Boolean(
@@ -337,12 +324,12 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       return;
     }
 
-    const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
+    const canonicalStatus = resolveCanonicalBayStatus(bay);
     const isBlocked =
       bay.is_active === false ||
       bay.is_paused === true ||
       bay.is_global_paused === true ||
-      ['UNDER_MAINTENANCE', 'MAINTENANCE', 'REPAIR', 'ERROR', 'DISABLED', 'OFFLINE', 'FAULT', 'OUT_OF_SERVICE', 'HOLD', 'BUFFER', 'RESERVED'].includes(canonicalStatus);
+      (BLOCKED_BAY_STATUSES as readonly string[]).includes(canonicalStatus);
     if (isBlocked) return;
     if (['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(canonicalStatus)) {
       if (isMoveMode) {
@@ -980,10 +967,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               if (!floorBays || floorBays.length === 0) return `${activeFloor}층 타석 정보 없음`;
               const minBay = Math.min(...floorBays.map((b) => b.bay_no));
               const maxBay = Math.max(...floorBays.map((b) => b.bay_no));
-              const availCnt = floorBays.filter((b) => {
-                const st = String(b.status_info?.code || b.status || '').toUpperCase();
-                return st === 'AVAILABLE' && b.is_active !== false && !isLessonOnlyBay(b) && !evaluateBayHardwareState(b).isBlocked;
-              }).length;
+              const availCnt = floorBays.filter((b) => isBayTrulyAvailableForKiosk(b)).length;
               const sims = Array.from(
                 new Set(
                   floorBays

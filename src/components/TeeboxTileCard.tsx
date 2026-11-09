@@ -2,7 +2,11 @@ import React from 'react';
 import { api, Bay } from '../services/api';
 import { Lock, Wrench, Clock } from 'lucide-react';
 import { TimeMaster } from '../utils/timeMaster';
-import { evaluateBayHardwareState, isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
+import {
+  evaluateBayHardwareState,
+  isBayTrulyAvailableForKiosk,
+  resolveCanonicalBayStatus,
+} from '../utils/bayStatusGuard';
 
 interface TeeboxTileCardProps {
   bay: Bay;
@@ -26,7 +30,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   isMoveMode = false,
 }) => {
   const hwState = evaluateBayHardwareState(bay);
-  const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
+  const canonicalStatus = resolveCanonicalBayStatus(bay);
   const isOccupied = ['OCCUPIED', 'USE', 'IN_USE'].includes(canonicalStatus);
   const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
   const isPrepare = canonicalStatus === 'PREPARE';
@@ -345,7 +349,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
                 <span>{isSelected ? '선택됨' : '가능'}</span>
               </div>
             )}
-            {!isSelected && (isOccupied || isPrepare) && (
+            {!isSelected && !isMaintenance && (isOccupied || isPrepare) && (
               <div
                 style={{
                   display: 'inline-flex',
@@ -377,7 +381,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
                 </span>
               </div>
             )}
-            {!isSelected && isPreOccupied && (
+            {!isSelected && !isMaintenance && isPreOccupied && (
               <div
                 style={{
                   display: 'inline-flex',
@@ -477,7 +481,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
           </div>
         )}
 
-        {!isCurrentMyBay && !isSelected && (isOccupied || isPrepare) && (
+        {!isCurrentMyBay && !isSelected && !isMaintenance && (isOccupied || isPrepare) && (
           <div
             style={{
               backgroundColor: isSelected ? 'rgba(255,255,255,0.14)' : '#ffffff',
@@ -626,7 +630,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
           </div>
         )}
 
-        {!isCurrentMyBay && !isSelected && isPreOccupied && (
+        {!isCurrentMyBay && !isSelected && !isMaintenance && isPreOccupied && (
           <div
             style={{
               height: '38px',

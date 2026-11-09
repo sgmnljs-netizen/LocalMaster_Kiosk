@@ -1,7 +1,11 @@
 import React from 'react';
 import { CornerUpLeft } from 'lucide-react';
 import { Bay } from '../services/api';
-import { evaluateBayHardwareState, isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
+import {
+  evaluateBayHardwareState,
+  isBayTrulyAvailableForKiosk,
+  resolveCanonicalBayStatus,
+} from '../utils/bayStatusGuard';
 import { sortFloorsDescending, sortBaysByNumber } from '../utils/floorUtils';
 import { useKioskSettings, KioskTopDashboardMode } from '../stores/kioskSettings';
 import { KioskLiveClock } from './KioskLiveClock';
@@ -60,13 +64,10 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
     floorsMap[floorKey] = sortBaysByNumber(floorsMap[floorKey]);
   });
 
-  const isBayBlocked = (b: Bay) => {
-    return evaluateBayHardwareState(b).isBlocked;
-  };
-
   const renderBayCard = (bay: Bay, floorBayCount: number) => {
-    const canonicalStatus = String(bay.status_info?.code || bay.status || '').toUpperCase();
-    const isUnderMaintenance = isBayBlocked(bay);
+    const hwState = evaluateBayHardwareState(bay);
+    const canonicalStatus = resolveCanonicalBayStatus(bay);
+    const isUnderMaintenance = hwState.isBlocked;
     const isAvailable = isBayTrulyAvailableForKiosk(bay);
     const isPreOccupied = canonicalStatus === 'PRE_OCCUPIED';
     const isPrepare = canonicalStatus === 'PREPARE';
@@ -147,7 +148,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
             ? 'selectedBayHaloPulse 1.6s infinite ease-in-out'
             : (isPreOccupied ? 'dashboardPulse 1.5s infinite ease-in-out' : 'none')
         }}
-        title={`${bay.bay_no}번 타석: ${isSelected ? '선택됨' : (bay.is_paused || bay.is_global_paused) ? '일시정지' : isAvailable ? '이용가능' : (isOccupied || isPrepare) ? '사용중' : isPreOccupied ? '선점중' : '점검중'}`}
+        title={`${bay.bay_no}번 타석: ${isSelected ? '선택됨' : (bay.is_paused || bay.is_global_paused) ? '일시정지' : isAvailable ? '이용가능' : (isOccupied || isPrepare) ? '사용중' : isPreOccupied ? '선점중' : hwState.isBallEmpty ? '공부족' : (hwState.shortLabel || '점검중')}`}
       >
         {/* 타석 번호 (색상으로만 상태 구분, 글씨 라벨 일절 없음) */}
         <span style={{ fontSize: numFontSize, fontWeight: 800, color: textColor, lineHeight: 1, letterSpacing: '-0.5px' }}>
