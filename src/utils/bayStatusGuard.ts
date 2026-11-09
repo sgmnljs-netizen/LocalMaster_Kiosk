@@ -51,7 +51,9 @@ export function parseBayConfigJson(bay: Bay): BayConfigMeta {
   if (!bay.config_json) return {};
   try {
     const parsed: unknown = typeof bay.config_json === 'string' ? JSON.parse(bay.config_json) : bay.config_json;
-    return typeof parsed === 'object' && parsed !== null ? (parsed as BayConfigMeta) : {};
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as BayConfigMeta)
+      : {};
   } catch {
     return {};
   }
@@ -61,6 +63,8 @@ const NON_ERROR_HW_CODES = new Set([
   '',
   '0',
   '00',
+  '0.0',
+  '-1',
   'NONE',
   'NORMAL',
   'OK',
@@ -70,6 +74,7 @@ const NON_ERROR_HW_CODES = new Set([
 
 export function isNonEmptyHardwareErrorCode(raw: unknown): boolean {
   if (raw === null || raw === undefined || raw === false) return false;
+  if (typeof raw === 'number' && (!Number.isFinite(raw) || raw <= 0)) return false;
   const normalized = String(raw).trim().toUpperCase();
   return !NON_ERROR_HW_CODES.has(normalized);
 }

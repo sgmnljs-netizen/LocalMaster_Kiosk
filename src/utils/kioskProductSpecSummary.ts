@@ -303,12 +303,26 @@ function isHolidayClosedSetting(holidaySchedule: unknown): boolean {
   return false;
 }
 
+function isInvalidDayToken(raw: string): boolean {
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed) return true;
+  if (trimmed === 'nan' || trimmed === 'null' || trimmed === 'undefined' || trimmed === 'none') {
+    return true;
+  }
+  return /^-?\d+(\.\d+)?$/.test(trimmed);
+}
+
 function summarizeDayRestriction(rules: Record<string, unknown>): {
   chipLabel: string | null;
   summaryLabel: string | null;
 } {
   const weeklySchedule = rules.weekly_schedule;
-  const allowedDays = rules.allowed_days ?? rules.days ?? rules.available_days;
+  const fallbackDays =
+    Array.isArray(rules.days) ||
+    (typeof rules.days === 'string' && !isInvalidDayToken(rules.days))
+      ? rules.days
+      : undefined;
+  const allowedDays = rules.allowed_days ?? fallbackDays ?? rules.available_days;
   const holidaySchedule = rules.holiday_schedule;
   const holidayClosed = isHolidayClosedSetting(holidaySchedule);
 
@@ -407,7 +421,7 @@ function summarizeDayRestriction(rules: Record<string, unknown>): {
 
     const mappedKr = strList
       .map((s) => EN_TO_KR_DAY[s] || s.replace(/요일$/, ''))
-      .filter((s) => s !== 'hol' && s !== 'holiday' && s !== '공휴일');
+      .filter((s) => s !== 'hol' && s !== 'holiday' && s !== '공휴일' && !isInvalidDayToken(s));
     const orderedKr = Array.from(new Set(mappedKr)).sort((a, b) => {
       const idxA = CANONICAL_KR_DAYS.indexOf(a as (typeof CANONICAL_KR_DAYS)[number]);
       const idxB = CANONICAL_KR_DAYS.indexOf(b as (typeof CANONICAL_KR_DAYS)[number]);
@@ -420,6 +434,11 @@ function summarizeDayRestriction(rules: Record<string, unknown>): {
   } else if (typeof allowedDays === 'string' && allowedDays.trim()) {
     const raw = allowedDays.trim();
     const lower = raw.toLowerCase();
+    if (isInvalidDayToken(raw)) {
+      return holidayClosed
+        ? { chipLabel: '공휴일 제외', summaryLabel: '공휴일 제외' }
+        : { chipLabel: null, summaryLabel: null };
+    }
     if (lower === 'all' || lower === 'everyday' || raw === '전체' || raw.includes('전요일') || raw === '매일') {
       return holidayClosed
         ? { chipLabel: '공휴일 제외', summaryLabel: '공휴일 제외' }
@@ -682,10 +701,14 @@ export function buildKioskProductSpecSummary(
 
   const isDaily = checkIfKioskDailyProduct(prod);
   const rawLogic = String(prod.logic_type || '').trim().toUpperCase();
+  const toNonNegativeInt = (raw: unknown): number => {
+    const num = Number(raw ?? 0);
+    return Number.isFinite(num) && num > 0 ? Math.floor(num) : 0;
+  };
   const durationMin = resolveKioskProductDurationMin(prod);
-  const totalCount = Math.max(0, Number(prod.total_count ?? rules.total_count ?? detail.total_count ?? 0));
-  const days = Math.max(0, Number(prod.days ?? rules.days ?? detail.days ?? 0));
-  const dailyLimit = Math.max(0, Number(rules.daily_limit_count ?? rules.daily_limit ?? detail.daily_limit ?? 0));
+  const totalCount = toNonNegativeInt(prod.total_count ?? rules.total_count ?? detail.total_count ?? 0);
+  const days = toNonNegativeInt(prod.days ?? rules.days ?? detail.days ?? 0);
+  const dailyLimit = toNonNegativeInt(rules.daily_limit_count ?? rules.daily_limit ?? detail.daily_limit ?? 0);
 
   let resolvedLogicType: ResolvedKioskLogicType = 'PERIOD';
   if (rawLogic === 'RENTAL' || rawLogic === 'LOCKER') {

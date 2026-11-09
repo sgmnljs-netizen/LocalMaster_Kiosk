@@ -10,7 +10,7 @@ export class TimeMaster {
 
   /** 백엔드 server_epoch_ms를 기반으로 클라이언트-서버 시계 오차 동기화 */
   static syncServerTime(serverEpochMs?: number | null): void {
-    if (serverEpochMs && typeof serverEpochMs === 'number') {
+    if (typeof serverEpochMs === 'number' && Number.isFinite(serverEpochMs) && serverEpochMs > 0) {
       TimeMaster.serverOffsetMs = serverEpochMs - Date.now();
     }
   }
@@ -119,14 +119,15 @@ export class TimeMaster {
     bay?: { prepare_remaining_sec?: number | null; prepare_expired_epoch_ms?: number | null; is_paused?: boolean } | null
   ): number {
     if (!bay) return 0;
-    if (bay.is_paused && typeof bay.prepare_remaining_sec === 'number') {
-      return Math.max(0, bay.prepare_remaining_sec);
+    if (bay.is_paused && typeof bay.prepare_remaining_sec === 'number' && Number.isFinite(bay.prepare_remaining_sec)) {
+      return Math.max(0, Math.floor(bay.prepare_remaining_sec));
     }
-    if (bay.prepare_expired_epoch_ms && typeof bay.prepare_expired_epoch_ms === 'number') {
+    if (typeof bay.prepare_expired_epoch_ms === 'number' && Number.isFinite(bay.prepare_expired_epoch_ms) && bay.prepare_expired_epoch_ms > 0) {
       const diffMs = bay.prepare_expired_epoch_ms - TimeMaster.getSyncedNowMs();
       return Math.max(0, Math.ceil(diffMs / 1000));
     }
-    return bay.prepare_remaining_sec ?? 0;
+    const rawSec = bay.prepare_remaining_sec;
+    return typeof rawSec === 'number' && Number.isFinite(rawSec) ? Math.max(0, Math.floor(rawSec)) : 0;
   }
 
   /** 잔여 시간 산출 (실시간 end_epoch_ms 연산 최우선, 볼회수/일시정지 시 카운트다운 동결, Bay 객체 또는 endTime 문자열 모두 지원) */
@@ -137,50 +138,65 @@ export class TimeMaster {
   ): number {
     if (!bayOrEndTime && !endEpochMs) return 0;
     const capByDuration = (rem: number): number => {
-      if (typeof bayOrEndTime === 'object' && bayOrEndTime !== null && typeof bayOrEndTime.duration_min === 'number' && bayOrEndTime.duration_min > 0) {
-        return Math.min(bayOrEndTime.duration_min, rem);
+      const safeRem = Number.isFinite(rem) ? Math.max(0, Math.floor(rem)) : 0;
+      if (
+        typeof bayOrEndTime === 'object' &&
+        bayOrEndTime !== null &&
+        typeof bayOrEndTime.duration_min === 'number' &&
+        Number.isFinite(bayOrEndTime.duration_min) &&
+        bayOrEndTime.duration_min > 0
+      ) {
+        return Math.min(Math.floor(bayOrEndTime.duration_min), safeRem);
       }
-      return rem;
+      return safeRem;
     };
-    if (typeof bayOrEndTime === 'object' && bayOrEndTime !== null && bayOrEndTime.is_paused && typeof bayOrEndTime.minutes_left === 'number') {
+    if (
+      typeof bayOrEndTime === 'object' &&
+      bayOrEndTime !== null &&
+      bayOrEndTime.is_paused &&
+      typeof bayOrEndTime.minutes_left === 'number' &&
+      Number.isFinite(bayOrEndTime.minutes_left)
+    ) {
       return capByDuration(Math.max(0, bayOrEndTime.minutes_left));
     }
-    const refNowMs =
+    const resolvedNowMs =
       now !== undefined
         ? typeof now === 'number'
           ? now
           : now.getTime()
         : TimeMaster.getSyncedNowMs();
+    const refNowMs = Number.isFinite(resolvedNowMs) ? resolvedNowMs : TimeMaster.getSyncedNowMs();
     const refDate = new Date(refNowMs);
 
     if (typeof bayOrEndTime === 'string' || bayOrEndTime === null || bayOrEndTime === undefined) {
-      if (endEpochMs && typeof endEpochMs === 'number') {
+      if (typeof endEpochMs === 'number' && Number.isFinite(endEpochMs) && endEpochMs > 0) {
         const diffMs = endEpochMs - refNowMs;
-        return Math.max(0, Math.ceil(diffMs / 1000 / 60));
+        return Math.max(0, Math.ceil(diffMs / (60 * 1000)));
       }
       if (typeof bayOrEndTime === 'string' && bayOrEndTime) {
         const endDt = TimeMaster.parseSessionEnd(bayOrEndTime, refDate);
         if (endDt) {
           const diffMs = endDt.getTime() - refNowMs;
-          return Math.max(0, Math.ceil(diffMs / 1000 / 60));
+          return Math.max(0, Math.ceil(diffMs / (60 * 1000)));
         }
       }
       return 0;
     }
 
     const epoch = endEpochMs ?? bayOrEndTime.end_epoch_ms;
-    if (epoch && typeof epoch === 'number') {
+    if (typeof epoch === 'number' && Number.isFinite(epoch) && epoch > 0) {
       const diffMs = epoch - refNowMs;
-      return capByDuration(Math.max(0, Math.ceil(diffMs / 1000 / 60)));
+      return capByDuration(Math.max(0, Math.ceil(diffMs / (60 * 1000))));
     }
     if (bayOrEndTime.end_time) {
       const endDt = TimeMaster.parseSessionEnd(bayOrEndTime.end_time, refDate);
       if (endDt) {
         const diffMs = endDt.getTime() - refNowMs;
-        return capByDuration(Math.max(0, Math.ceil(diffMs / 1000 / 60)));
+        return capByDuration(Math.max(0, Math.ceil(diffMs / (60 * 1000))));
       }
     }
-    return capByDuration(bayOrEndTime.minutes_left ?? 0);
+    const rawLeft = bayOrEndTime.minutes_left;
+    return capByDuration(typeof rawLeft === 'number' && Number.isFinite(rawLeft) ? Math.max(0, rawLeft) : 0);
   }
 
   /** 타석 종료 시각 (HH:mm) 안전 포맷팅 (Bay 객체 또는 endTime 문자열 모두 지원) */

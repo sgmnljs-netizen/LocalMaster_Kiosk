@@ -9,6 +9,8 @@
 
 export function parseFloorNumber(floorStr?: string | null): number {
   if (!floorStr) return 1;
+  const nullableParsed = parseNullableFloorNumber(floorStr);
+  if (nullableParsed !== null) return nullableParsed;
   const clean = String(floorStr).trim().toUpperCase();
   if (clean.startsWith('B')) {
     const num = parseInt(clean.replace(/[^0-9]/g, ''), 10) || 1;

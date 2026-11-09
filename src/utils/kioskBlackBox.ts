@@ -165,17 +165,19 @@ export function recordKioskBlackBox(
 }
 
 export function getRecentKioskBlackBoxLogs(count = 15): KioskBlackBoxLogItem[] {
+  const safeCount = typeof count === 'number' && Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 15;
   const source = typeof window !== 'undefined' && window.__KIOSK_BLACKBOX__ ? window.__KIOSK_BLACKBOX__ : memoryBlackBox;
-  return source.slice(0, count);
+  return source.slice(0, safeCount);
 }
 
 export function getFormattedKioskBlackBoxText(count = 15): string {
+  const safeCount = typeof count === 'number' && Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 15;
   const source = typeof window !== 'undefined' && window.__KIOSK_BLACKBOX__ ? window.__KIOSK_BLACKBOX__ : memoryBlackBox;
-  if (!source || source.length === 0) {
+  if (!source || source.length === 0 || safeCount === 0) {
     return '📼 [키오스크 블랙박스] 기록된 동선이 없습니다.';
   }
 
-  const recentLogs = source.slice(0, count);
+  const recentLogs = source.slice(0, safeCount);
   const lines: string[] = [
     `### 📼 [키오스크 블랙박스] 직전 ${recentLogs.length}개 화면/터치/통신 이력`,
     `*수집 시각: ${TimeMaster.formatKstDateTime(new Date())}*`,
