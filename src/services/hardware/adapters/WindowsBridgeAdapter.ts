@@ -201,4 +201,18 @@ export class WindowsBridgeScannerAdapter implements IScannerAdapter {
       }
     };
   }
+
+  public dispose(): void {
+    this.isListening = false;
+    this.handlers.clear();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.close();
+      this.ws = null;
+    }
+  }
 }

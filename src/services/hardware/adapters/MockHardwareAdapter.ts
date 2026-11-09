@@ -34,14 +34,16 @@ export class MockPrinterAdapter implements IPrinterAdapter {
 
 export class MockScannerAdapter implements IScannerAdapter {
   private handlers: Set<BarcodeScanHandler> = new Set();
+  private boundListener: EventListener | null = null;
 
   constructor() {
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-      window.addEventListener('lm-kiosk-mock-barcode-scan', ((e: CustomEvent<{ barcode?: string }>) => {
+      this.boundListener = ((e: CustomEvent<{ barcode?: string }>) => {
         if (e.detail?.barcode) {
           this.handlers.forEach((h) => h(e.detail.barcode as string));
         }
-      }) as EventListener);
+      }) as EventListener;
+      window.addEventListener('lm-kiosk-mock-barcode-scan', this.boundListener);
     }
   }
 
@@ -55,5 +57,17 @@ export class MockScannerAdapter implements IScannerAdapter {
   /** 가상 테스트용 수동 트리거 */
   public emitScan(barcode: string): void {
     this.handlers.forEach((h) => h(barcode));
+  }
+
+  public dispose(): void {
+    if (
+      this.boundListener &&
+      typeof window !== 'undefined' &&
+      typeof window.removeEventListener === 'function'
+    ) {
+      window.removeEventListener('lm-kiosk-mock-barcode-scan', this.boundListener);
+    }
+    this.boundListener = null;
+    this.handlers.clear();
   }
 }

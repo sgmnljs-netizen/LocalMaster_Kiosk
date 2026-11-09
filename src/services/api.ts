@@ -7,6 +7,7 @@
  */
 
 import { TimeMaster } from '../utils/timeMaster';
+import { parseNullableFloorNumber, normalizeFloorZoneToken } from '../utils/floorUtils';
 import { isKioskChannelProduct } from '../utils/kioskPurchaseEligibility';
 import type { CardApprovalResult } from './van/van_types';
 import { getKioskSettings, saveKioskSettings, normalizeApiUrl, hydrateKioskDeviceSettingsFromServer } from '../stores/kioskSettings';
@@ -1896,10 +1897,14 @@ class HybridAPIClient {
         if (res.ok) {
           const rawBays = (await res.json()) as Bay[];
           const bayList: Bay[] = rawBays.map(b => {
-            const parsedFloor = b.floor_no ?? (b.floor ? parseInt(String(b.floor).replace(/[^0-9]/g, ''), 10) : 1);
+            const parsedFloor = parseNullableFloorNumber(b.floor_no ?? b.floor) ?? 1;
+            const resolvedFloor = b.floor
+              ? (normalizeFloorZoneToken(b.floor) || String(b.floor))
+              : normalizeFloorZoneToken(parsedFloor);
             return {
               ...b,
-              floor_no: isNaN(parsedFloor) || parsedFloor <= 0 ? 1 : parsedFloor
+              floor_no: parsedFloor,
+              ...(resolvedFloor ? { floor: resolvedFloor } : {})
             };
           });
           if (bayList && bayList.length > 0 && bayList[0].server_epoch_ms) {
@@ -2074,12 +2079,18 @@ class HybridAPIClient {
         console.warn('Backend getMemberCheckinReservations failed, fallback to local storage:', err);
       }
     }
-    // Local Fallback [BUG-C10: 당일 날짜, 종료 시각 미만료, HOLD 제외 필터링]
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-    const nowHhMm = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    // Local Fallback [BUG-C10: 당일 날짜, 종료 시각 미만료, HOLD 제외 필터링 — KST 동기화 기준]
+    const syncedNow = TimeMaster.getSyncedDate();
+    const todayStr = TimeMaster.getKstYmd(syncedNow).replace(/-/g, '');
+    const nowHhMm = TimeMaster.getKstHhMm(syncedNow).replace(/:/g, '');
     const allowedStatuses = ['RSV', 'CONFIRMED', 'WAIT', 'REQ', 'QUEUE', 'QUEUED', 'CHK', 'PREPARE', 'USE'];
-    const reservations = JSON.parse(localStorage.getItem('LM_RESERVATIONS') || '[]') as KioskCheckinReservation[];
+    let reservations: KioskCheckinReservation[] = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem('LM_RESERVATIONS') || '[]');
+      if (Array.isArray(parsed)) reservations = parsed as KioskCheckinReservation[];
+    } catch {
+      reservations = [];
+    }
     return reservations.filter(r => {
       if (r.member_no !== memberNo) return false;
       if (!allowedStatuses.includes(r.status_cd)) return false;
@@ -2451,7 +2462,7 @@ class HybridAPIClient {
 
         if (res.ok) {
           PaymentOutboxManager.removeEntry(walId);
-          PaymentOutboxManager.removeByAuthCode(effectiveBayAuthCode);
+          PaymentOutboxManager.removeByAuthCode(effectiveBayAuthCode, storeCd);
           const data = await res.json();
           const effDuration = data.duration_min ?? durationMin;
           const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
@@ -2776,7 +2787,7 @@ class HybridAPIClient {
           const data = await res.json();
           if (data.success !== false) {
             PaymentOutboxManager.removeEntry(groupWalId);
-            PaymentOutboxManager.removeByAuthCode(effectiveGroupAuthCode);
+            PaymentOutboxManager.removeByAuthCode(effectiveGroupAuthCode, storeCd);
             return {
               success: true,
               message: data.message || '동반자 타석 배정이 완료되었습니다.',
@@ -3218,7 +3229,7 @@ class HybridAPIClient {
         );
         if (res.ok) {
           PaymentOutboxManager.removeEntry(walId);
-          PaymentOutboxManager.removeByAuthCode(effectiveApprNo);
+          PaymentOutboxManager.removeByAuthCode(effectiveApprNo, storeCd);
           const data = await res.json();
           this.syncLocalMemberProduct(memberNo, effectiveTargetProd, payAmt);
           return {
@@ -3525,7 +3536,7 @@ class HybridAPIClient {
           return { success: false, message: webhookData.message || '라카 연장 처리에 실패했습니다.' };
         }
         PaymentOutboxManager.removeEntry(lockerWalId);
-        PaymentOutboxManager.removeByAuthCode(effectiveApprNo || undefined);
+        PaymentOutboxManager.removeByAuthCode(effectiveApprNo || undefined, this.getStoreCd());
         backendStartDate = webhookData?.start_date || webhookData?.start_dt;
         backendEndDate = webhookData?.end_date || webhookData?.end_dt;
         backendLockerNo = webhookData?.locker_no ? String(webhookData.locker_no) : undefined;
@@ -4384,7 +4395,7 @@ class HybridAPIClient {
         );
         if (res.ok) {
           PaymentOutboxManager.removeEntry(walId);
-          PaymentOutboxManager.removeByAuthCode(resolvedAuthCode ? String(resolvedAuthCode) : null);
+          PaymentOutboxManager.removeByAuthCode(resolvedAuthCode ? String(resolvedAuthCode) : null, storeCd);
           return true;
         }
         if (!isDemoEnvironment()) {
@@ -4619,7 +4630,7 @@ class HybridAPIClient {
           const data = await res.json();
           if (data.success !== false) {
             PaymentOutboxManager.removeEntry(walId);
-            PaymentOutboxManager.removeByAuthCode(resolvedAuthCode);
+            PaymentOutboxManager.removeByAuthCode(resolvedAuthCode, storeCd);
           }
           // 백엔드 처리 성공 시 Edge DB HOLD 캐시 정제
           const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
@@ -4825,7 +4836,7 @@ class HybridAPIClient {
         }
       );
       if (res.ok) {
-        PaymentOutboxManager.removeByAuthCode(authNo);
+        PaymentOutboxManager.removeByAuthCode(authNo, storeCd);
         return await res.json();
       }
     } catch (err) {

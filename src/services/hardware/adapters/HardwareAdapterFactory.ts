@@ -62,18 +62,21 @@ export class HardwareAdapterFactory {
     const cfg = getConfig();
     if (cfg.isMock) {
       if (!this.scannerInstance || !(this.scannerInstance instanceof MockScannerAdapter)) {
+        this.scannerInstance?.dispose?.();
         this.scannerInstance = new MockScannerAdapter();
       }
       return this.scannerInstance;
     }
 
     if (!this.scannerInstance || !(this.scannerInstance instanceof WindowsBridgeScannerAdapter)) {
+      this.scannerInstance?.dispose?.();
       this.scannerInstance = new WindowsBridgeScannerAdapter(getConfig);
     }
     return this.scannerInstance;
   }
 
   public static clearInstances(): void {
+    this.scannerInstance?.dispose?.();
     this.printerInstance = null;
     this.scannerInstance = null;
   }

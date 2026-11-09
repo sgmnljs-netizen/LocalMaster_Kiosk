@@ -114,6 +114,7 @@ export type BarcodeScanHandler = (barcode: string) => void;
 
 export interface IScannerAdapter {
   onScan(handler: BarcodeScanHandler): () => void;
+  dispose?(): void;
 }
 
 export interface IHardwareBridgeClient {
