@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  PAYMENT_RESILIENCE_CONFIG,
   PaymentOutboxManager,
   fetchWithPaymentRetry,
 } from '../paymentResilience';
@@ -152,5 +153,49 @@ describe('Wave 3 Kiosk Services — PaymentOutbox Multi-Store & Idempotency Head
     const remaining = PaymentOutboxManager.getEntries();
     expect(remaining).toHaveLength(1);
     expect(remaining[0].storeCd).toBe('STORE_B');
+  });
+
+  it('flushPendingDlq는 손상된 createdAt 타임스탬프나 60초 경과 WAL_IN_FLIGHT를 PENDING_DLQ로 승격·재전송하고 동시 호출을 단일 병합한다', async () => {
+    localStorage.setItem(
+      PAYMENT_RESILIENCE_CONFIG.OUTBOX_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 'WAL_CORRUPTED_TS',
+          kind: 'WAL_IN_FLIGHT',
+          createdAt: 'INVALID_ISO_DATE',
+          updatedAt: 'INVALID_ISO_DATE',
+          retryCount: Number.NaN,
+          storeCd: 'H01-SE-001',
+          terminalId: 'KIOSK-01',
+          authCode: '  77889900  ',
+          amount: 25000.9,
+          purpose: 'ALLOCATE_BAY',
+          payload: { issuer_name: '현대카드' },
+        },
+      ])
+    );
+
+    const failOnceFn = vi.fn().mockResolvedValueOnce(false);
+    const firstTry = await PaymentOutboxManager.flushPendingDlq(failOnceFn);
+    expect(firstTry.flushed).toBe(0);
+    expect(firstTry.remaining).toBe(1);
+
+    const promoted = PaymentOutboxManager.getEntries()[0];
+    expect(promoted.kind).toBe('PENDING_DLQ');
+    expect(promoted.retryCount).toBe(1);
+    expect(promoted.payload.auth_no).toBe('77889900');
+    expect(promoted.payload.amount).toBe(25000);
+
+    const successFn = vi.fn().mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+      return true;
+    });
+    const [resA, resB] = await Promise.all([
+      PaymentOutboxManager.flushPendingDlq(successFn),
+      PaymentOutboxManager.flushPendingDlq(successFn),
+    ]);
+    expect(successFn).toHaveBeenCalledTimes(1);
+    expect(resA).toEqual({ flushed: 1, remaining: 0 });
+    expect(resB).toEqual({ flushed: 1, remaining: 0 });
   });
 });

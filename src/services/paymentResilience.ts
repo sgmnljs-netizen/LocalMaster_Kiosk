@@ -447,12 +447,13 @@ export class PaymentOutboxManager {
 
       for (const item of snapshot) {
         const createdMs = Date.parse(item.createdAt);
+        const safeAmount = Number.isFinite(Number(item.amount)) ? Math.floor(Number(item.amount)) : 0;
+        const safeRetryCount = Number.isFinite(Number(item.retryCount)) ? Math.max(0, Math.floor(Number(item.retryCount))) : 0;
         const isStaleWal =
           item.kind === 'WAL_IN_FLIGHT' &&
-          Boolean(item.authCode) &&
-          item.amount > 0 &&
-          !Number.isNaN(createdMs) &&
-          nowMs - createdMs >= PAYMENT_RESILIENCE_CONFIG.STALE_WAL_MS;
+          Boolean(String(item.authCode || '').trim()) &&
+          safeAmount > 0 &&
+          (Number.isNaN(createdMs) || nowMs - createdMs >= PAYMENT_RESILIENCE_CONFIG.STALE_WAL_MS);
 
         if (item.kind !== 'PENDING_DLQ' && !isStaleWal) {
           continue;
@@ -466,12 +467,14 @@ export class PaymentOutboxManager {
                 store_cd: item.storeCd,
                 terminal_id: item.terminalId || 'KIOSK-01',
                 device_type: 'KIOSK',
-                auth_no: item.authCode,
-                amount: item.amount,
+                auth_no: String(item.authCode || '').trim(),
+                amount: safeAmount,
                 card_name: item.payload?.issuer_name || item.payload?.cardName || '',
                 card_no_masked: item.payload?.card_no_masked || item.payload?.cardNoMasked || '',
                 van_tr_no: item.vanTrNo,
-                approved_at: item.payload?.approved_at || item.createdAt,
+                approved_at:
+                  item.payload?.approved_at ||
+                  (!Number.isNaN(createdMs) ? item.createdAt : new Date(nowMs).toISOString()),
                 backend_error_reason: `키오스크 비정상 종료/정전 복구 감지 (${item.purpose || item.endpoint || 'WAL_IN_FLIGHT'})`,
                 reversal_error_reason: '전원 차단 또는 프로세스 강제 종료로 현장 망취소 미수행',
               };
@@ -486,7 +489,7 @@ export class PaymentOutboxManager {
               ...item,
               kind: 'PENDING_DLQ',
               payload: dlqPayload,
-              retryCount: item.retryCount + 1,
+              retryCount: safeRetryCount + 1,
               updatedAt: new Date().toISOString(),
             });
           }
@@ -495,7 +498,7 @@ export class PaymentOutboxManager {
             ...item,
             kind: 'PENDING_DLQ',
             payload: dlqPayload,
-            retryCount: item.retryCount + 1,
+            retryCount: safeRetryCount + 1,
             updatedAt: new Date().toISOString(),
           });
         }
