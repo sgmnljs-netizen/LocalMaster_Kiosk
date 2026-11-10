@@ -41,6 +41,10 @@ function resetDatabaseForTests() {
       UPDATE products SET access_rules = json_set(COALESCE(access_rules, '{}'), '$.display_channel', json_array('POS', 'KIOSK', 'MOBILE')), meta_data = json_set(COALESCE(meta_data, '{}'), '$.sales_channels', json_array('POS', 'KIOSK', 'MOBILE')) WHERE store_cd = 'H01-SE-001' AND logic_type = 'DAILY' AND duration_min >= 30 AND deleted_at = 0;
       UPDATE lockers SET member_no = 'M260501', status = 'OCCUPIED', start_dt = '2026-01-01', end_dt = '2026-12-31' WHERE locker_no = 3;
       UPDATE store_info SET close_time = '05:00', meta_data = json_set(meta_data, '$.break_start', '', '$.break_end', '', '$.operation.break_start', '', '$.operation.break_end', '') WHERE store_cd = 'H01-SE-001';
+      DELETE FROM sale_payments WHERE sale_log_id IN (SELECT id FROM sale_logs WHERE payment_details_json LIKE '%MOCK_TR_%');
+      DELETE FROM sale_items WHERE sale_log_id IN (SELECT id FROM sale_logs WHERE payment_details_json LIKE '%MOCK_TR_%');
+      DELETE FROM sale_logs WHERE payment_details_json LIKE '%MOCK_TR_%';
+      UPDATE sale_logs SET status = 'COMPLETED', cancelled_at = NULL, sale_dt = strftime('%Y%m%d', 'now', 'localtime'), sale_time = strftime('%H%M%S', 'now', 'localtime') WHERE sale_id = (SELECT MAX(sale_id) FROM sale_logs WHERE pay_method = 'CASH' AND member_name LIKE 'QA테스터_%');
     `.replace(/\n/g, ' ').trim();
     execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "${sql}"`);
   } catch (e) {
