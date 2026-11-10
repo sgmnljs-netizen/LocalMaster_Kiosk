@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { assembleHangul, Hangul, computeVirtualKeyboardTop } from '../VirtualKeyboard';
+import {
+  buildMaskedName,
+  confirmDetectedMemberOnce,
+  shouldAcceptFaceScanResolution,
+  shouldAcceptSmartTagTrigger,
+} from '../MemberAuth';
 import { isBayTrulyAvailableForKiosk } from '../../utils/bayStatusGuard';
 import { sortFloorsDescending } from '../../utils/floorUtils';
 import type { Bay } from '../../services/api';
@@ -54,5 +60,41 @@ describe('[Wave 3][Kiosk/Components] 타석 가용 판별 4대 뷰 일원화, UI
         minGapPx: 0,
       })
     ).toBe(16);
+  });
+
+  it('MemberAuth buildMaskedName이 앞뒤 공백·단자/2자/다자 성명·유니코드 서로게이트(이모지) 경계를 안전하게 마스킹하고 더블탭 확인 가드를 보장한다', () => {
+    expect(buildMaskedName(undefined)).toBe('');
+    expect(buildMaskedName('   ')).toBe('');
+    expect(buildMaskedName(' 김 ')).toBe('김');
+    expect(buildMaskedName(' 김철 ')).toBe('김*');
+    expect(buildMaskedName('  김골프  ')).toBe('김*프');
+    expect(buildMaskedName('남궁민수')).toBe('남**수');
+    expect(buildMaskedName('홍😀동')).toBe('홍*동');
+    expect(buildMaskedName('김⛳')).toBe('김*');
+
+    const lockRef = { current: false };
+    const onConfirm = vi.fn();
+    expect(confirmDetectedMemberOnce(lockRef, { member_no: 'M260501' }, onConfirm)).toBe(true);
+    expect(confirmDetectedMemberOnce(lockRef, { member_no: 'M260501' }, onConfirm)).toBe(false);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+
+    expect(
+      shouldAcceptFaceScanResolution({
+        aborted: false,
+        isCurrentController: true,
+        isMounted: true,
+        hasDetectedMember: false,
+        hasDuplicateCandidates: false,
+        isAuthConfirmed: false,
+      })
+    ).toBe(true);
+    expect(
+      shouldAcceptSmartTagTrigger({
+        isSearching: false,
+        hasDetectedMember: false,
+        hasDuplicateCandidates: true,
+        isAuthConfirmed: false,
+      })
+    ).toBe(false);
   });
 });

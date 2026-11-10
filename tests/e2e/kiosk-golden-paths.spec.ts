@@ -190,10 +190,17 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
   });
 
   test('Pass 3: 회원 타석 이동 플로우 검증 (Bay Move Flow)', async ({ page }) => {
-    // 0. 타석 11번 김골프 이용 중 상태로 설정 (타석 이동 사전 조건)
+    // 0. 타석 11번 김골프 이용 중 상태로 설정 (자정 임박 23:00~23:59 구간에서도 당일 23:59 종료로 안전 보장)
+    const nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+    const todayYmd = `${nowKst.getUTCFullYear()}${String(nowKst.getUTCMonth() + 1).padStart(2, '0')}${String(nowKst.getUTCDate()).padStart(2, '0')}`;
+    const curHour = nowKst.getUTCHours();
+    const curMin = nowKst.getUTCMinutes();
+    const startHm = curHour >= 23 ? '2259' : `${String(curHour).padStart(2, '0')}${String(curMin).padStart(2, '0')}`;
+    const endKst = new Date(nowKst.getTime() + 60 * 60 * 1000);
+    const endHm = curHour >= 23 ? '2359' : `${String(endKst.getUTCHours()).padStart(2, '0')}${String(endKst.getUTCMinutes()).padStart(2, '0')}`;
     execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "
-      UPDATE bays SET status = 'OCCUPIED', current_member_no = 'M260501', member_name = '김골프', start_time = datetime('now'), end_time = datetime('now', '+60 minutes') WHERE bay_no = 11;
-      INSERT OR REPLACE INTO reservation_master (res_id, store_cd, resource_type, resource_no, member_no, guest_nm, hp_no, res_date, start_time, end_time, duration_min, prepare_min, lesson_type, max_capacity, res_type, status_cd, payment_status, payment_mode, companion_count, transfer_cnt, created_at, updated_at) VALUES ('KSK_MOVE_001', 'H01-SE-001', 'BAY', '11', 'M260501', '김골프', '010-1234-5678', strftime('%Y%m%d', 'now', 'localtime'), strftime('%H%M', 'now', 'localtime'), strftime('%H%M', 'now', '+60 minutes', 'localtime'), 60, 0, 'PRIVATE', 1, 'SLOT', 'USE', 'PAID', 'OFFLINE', 0, 0, datetime('now'), datetime('now'));
+      UPDATE bays SET status = 'OCCUPIED', current_member_no = 'M260501', member_name = '김골프', start_time = datetime('now', 'localtime'), end_time = datetime('now', '+60 minutes', 'localtime') WHERE bay_no = 11;
+      INSERT OR REPLACE INTO reservation_master (res_id, store_cd, resource_type, resource_no, member_no, guest_nm, hp_no, res_date, start_time, end_time, duration_min, prepare_min, lesson_type, max_capacity, res_type, status_cd, payment_status, payment_mode, companion_count, transfer_cnt, created_at, updated_at) VALUES ('KSK_MOVE_001', 'H01-SE-001', 'BAY', '11', 'M260501', '김골프', '010-1234-5678', '${todayYmd}', '${startHm}', '${endHm}', 60, 0, 'PRIVATE', 1, 'SLOT', 'USE', 'PAID', 'OFFLINE', 0, 0, datetime('now'), datetime('now'));
     "`);
 
     // 1. 대기 화면 진입
@@ -377,7 +384,7 @@ test.describe('Layer 2: 키오스크 P0 8대 골든 패스 (Golden Paths E2E)', 
       DELETE FROM checkin_master WHERE res_id LIKE 'KSK_%' OR resource_no IN ('11', '14', '15', '18');
       UPDATE usage_master SET status_cd = 'FINISHED' WHERE facility_type = 'BAY' AND facility_no IN (11, 14, 15, 18) AND status_cd IN ('RUN', 'ACTIVE', 'IN_USE');
       UPDATE bays SET status = 'AVAILABLE', current_member_no = NULL, lock_terminal_id = NULL, lock_expired_at = NULL, prepare_started_at = NULL, prepare_expired_at = NULL, start_time = NULL, end_time = NULL WHERE bay_no IN (11, 14, 15, 18);
-      INSERT INTO reservation_master (res_id, store_cd, resource_type, resource_no, member_no, guest_nm, hp_no, res_date, start_time, end_time, duration_min, prepare_min, lesson_type, max_capacity, res_type, status_cd, payment_status, payment_mode, companion_count, transfer_cnt, created_at, updated_at) VALUES ('KSK_CHK_001', 'H01-SE-001', 'BAY', '11', 'M260501', '김골프', '010-1234-5678', '${todayKst}', '2300', '2350', 50, 0, 'PRIVATE', 1, 'SLOT', 'RSV', 'PAID', 'OFFLINE', 0, 0, datetime('now'), datetime('now'));
+      INSERT INTO reservation_master (res_id, store_cd, resource_type, resource_no, member_no, guest_nm, hp_no, res_date, start_time, end_time, duration_min, prepare_min, lesson_type, max_capacity, res_type, status_cd, payment_status, payment_mode, companion_count, transfer_cnt, created_at, updated_at) VALUES ('KSK_CHK_001', 'H01-SE-001', 'BAY', '11', 'M260501', '김골프', '010-1234-5678', '${todayKst}', '2300', '2359', 50, 0, 'PRIVATE', 1, 'SLOT', 'RSV', 'PAID', 'OFFLINE', 0, 0, datetime('now'), datetime('now'));
     "`);
 
     // 1. 대기 화면 진입

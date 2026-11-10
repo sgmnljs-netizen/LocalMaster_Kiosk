@@ -48,11 +48,13 @@ const AUTH_MODE_SHORT_LABELS: Record<AuthMode, string> = {
   FACE: '안면 인식',
 };
 
-function buildMaskedName(name?: string): string {
-  if (!name) return '';
-  if (name.length < 2) return name;
-  if (name.length === 2) return `${name[0]}*`;
-  return `${name[0]}${'*'.repeat(name.length - 2)}${name[name.length - 1]}`;
+export function buildMaskedName(name?: string | null): string {
+  const trimmed = String(name ?? '').trim();
+  if (!trimmed) return '';
+  const chars = Array.from(trimmed);
+  if (chars.length < 2) return chars[0] || '';
+  if (chars.length === 2) return `${chars[0]}*`;
+  return `${chars[0]}${'*'.repeat(chars.length - 2)}${chars[chars.length - 1]}`;
 }
 
 export interface FaceScanResolutionGuardInput {
@@ -1496,7 +1498,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
             <div>
               <h3 style={{ fontSize: '38px', fontWeight: 900, color: '#0f172a', marginBottom: '10px', letterSpacing: '-0.6px' }}>
                 <span style={{ color: '#059669', fontWeight: 900 }}>
-                  [{detectedMember.masked_name || detectedMember.member_name}]
+                  [{detectedMember.masked_name || buildMaskedName(detectedMember.member_name) || detectedMember.member_name}]
                 </span> 회원님
               </h3>
               <p style={{ fontSize: '24px', color: '#334155', fontWeight: 800, margin: 0 }}>
