@@ -44,7 +44,7 @@ function resetDatabaseForTests() {
       DELETE FROM sale_payments WHERE sale_log_id IN (SELECT id FROM sale_logs WHERE payment_details_json LIKE '%MOCK_TR_%');
       DELETE FROM sale_items WHERE sale_log_id IN (SELECT id FROM sale_logs WHERE payment_details_json LIKE '%MOCK_TR_%');
       DELETE FROM sale_logs WHERE payment_details_json LIKE '%MOCK_TR_%';
-      UPDATE sale_logs SET status = 'COMPLETED', cancelled_at = NULL, sale_dt = strftime('%Y%m%d', 'now', 'localtime'), sale_time = strftime('%H%M%S', 'now', 'localtime') WHERE sale_id = (SELECT MAX(sale_id) FROM sale_logs WHERE pay_method = 'CASH' AND member_name LIKE 'QA테스터_%');
+      UPDATE sale_logs SET status = 'COMPLETED', cancelled_at = NULL WHERE pay_method = 'CASH' AND member_name LIKE 'QA테스터_%';
     `.replace(/\n/g, ' ').trim();
     execSync(`sqlite3 -cmd ".timeout 5000" "${DB_PATH}" "${sql}"`);
   } catch (e) {
