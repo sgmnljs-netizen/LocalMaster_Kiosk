@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { sanitizeVanPort } from '../useKioskVanPayment';
 import { probeKioskHardwareHealthOnce } from '../useKioskHardwareHeartbeat';
+import { sanitizeHiddenAdminTriggerConfig } from '../useHiddenAdminTrigger';
 import { saveKioskSettings } from '../../stores/kioskSettings';
 import { sanitizeScannerOptions, resolveScannerChar } from '../../services/hardware/hooks/useHardwareScanner';
 
@@ -88,5 +89,17 @@ describe('W3-KSK-hooks: VAN 포트 범위(1..65535) 정규화 및 하드웨어 �
       keyCode: 65,
     } as unknown as KeyboardEvent;
     expect(resolveScannerChar(imeEvent, false)).toBe('A');
+  });
+
+  it('sanitizeHiddenAdminTriggerConfig는 0/음수/NaN/불리언 입력 시 1회 오작동 대신 안전 기본값(5회, 3000ms)으로 폴백한다', () => {
+    expect(sanitizeHiddenAdminTriggerConfig(0, 0)).toEqual({ safeRequiredTaps: 5, safeTimeoutMs: 3000 });
+    expect(sanitizeHiddenAdminTriggerConfig(-3, -500)).toEqual({ safeRequiredTaps: 5, safeTimeoutMs: 3000 });
+    expect(sanitizeHiddenAdminTriggerConfig(Number.NaN, Number.POSITIVE_INFINITY)).toEqual({
+      safeRequiredTaps: 5,
+      safeTimeoutMs: 3000,
+    });
+    expect(sanitizeHiddenAdminTriggerConfig(true, false)).toEqual({ safeRequiredTaps: 5, safeTimeoutMs: 3000 });
+    expect(sanitizeHiddenAdminTriggerConfig(7.8, 2500.9)).toEqual({ safeRequiredTaps: 7, safeTimeoutMs: 2500 });
+    expect(sanitizeHiddenAdminTriggerConfig(99, 999999)).toEqual({ safeRequiredTaps: 20, safeTimeoutMs: 60000 });
   });
 });
