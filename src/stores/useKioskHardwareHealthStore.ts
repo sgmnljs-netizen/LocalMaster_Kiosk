@@ -28,16 +28,43 @@ export function getKioskHardwareHealth(): KioskHardwareHealthState {
   return { ...healthState };
 }
 
+export function normalizeDeviceHealthStatus(
+  raw: unknown,
+  fallback: DeviceHealthStatus = 'ONLINE'
+): DeviceHealthStatus {
+  const token = String(raw ?? '').trim().toUpperCase();
+  if (token === 'ONLINE' || token === 'OFFLINE' || token === 'CHECKING') {
+    return token;
+  }
+  return fallback;
+}
+
 export function setKioskHardwareHealth(partial: Partial<KioskHardwareHealthState>) {
+  const sanitized: Partial<KioskHardwareHealthState> = { ...partial };
+  if (sanitized.vcatStatus !== undefined) {
+    sanitized.vcatStatus = normalizeDeviceHealthStatus(sanitized.vcatStatus, healthState.vcatStatus);
+  }
+  if (sanitized.printerStatus !== undefined) {
+    sanitized.printerStatus = normalizeDeviceHealthStatus(sanitized.printerStatus, healthState.printerStatus);
+  }
+  if (sanitized.lastCheckedAt !== undefined && sanitized.lastCheckedAt !== null) {
+    sanitized.lastCheckedAt =
+      typeof sanitized.lastCheckedAt === 'number' &&
+      Number.isFinite(sanitized.lastCheckedAt) &&
+      sanitized.lastCheckedAt > 0
+        ? Math.floor(sanitized.lastCheckedAt)
+        : Date.now();
+  }
+
   let changed = false;
-  for (const key of Object.keys(partial) as (keyof KioskHardwareHealthState)[]) {
-    if (healthState[key] !== partial[key]) {
+  for (const key of Object.keys(sanitized) as (keyof KioskHardwareHealthState)[]) {
+    if (healthState[key] !== sanitized[key]) {
       changed = true;
       break;
     }
   }
   if (changed) {
-    healthState = { ...healthState, ...partial };
+    healthState = { ...healthState, ...sanitized };
     notify();
   }
 }

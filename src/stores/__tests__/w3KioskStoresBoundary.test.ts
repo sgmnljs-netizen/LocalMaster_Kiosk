@@ -5,6 +5,11 @@ import {
   sanitizeMinGapMinutes,
   saveKioskSettings,
 } from '../kioskSettings';
+import {
+  getKioskHardwareHealth,
+  normalizeDeviceHealthStatus,
+  setKioskHardwareHealth,
+} from '../useKioskHardwareHealthStore';
 
 describe('W3-KSK-stores: kioskSettings storeCode 공백 트림·캐시 소거 및 서버 하이드레이션 레이스 가드', () => {
   const storageMap = new Map<string, string>();
@@ -119,5 +124,22 @@ describe('W3-KSK-stores: kioskSettings storeCode 공백 트림·캐시 소거 �
     expect(hydrated).toBeNull();
     expect(getKioskSettings().storeCode).toBe('STORE_B');
     expect(getKioskSettings().terminalId).toBe('TID-STORE-B');
+  });
+
+  it('setKioskHardwareHealth 직접 호출 시에도 vcatStatus·printerStatus 열거형과 lastCheckedAt NaN/소수점을 정규화한다', () => {
+    expect(normalizeDeviceHealthStatus(' offline ')).toBe('OFFLINE');
+    expect(normalizeDeviceHealthStatus(' checking ')).toBe('CHECKING');
+    expect(normalizeDeviceHealthStatus('CORRUPTED_STATE', 'ONLINE')).toBe('ONLINE');
+
+    setKioskHardwareHealth({
+      vcatStatus: ' offline ' as 'OFFLINE',
+      printerStatus: 'INVALID_STATUS' as 'ONLINE',
+      lastCheckedAt: Number.NaN,
+    });
+    const state = getKioskHardwareHealth();
+    expect(state.vcatStatus).toBe('OFFLINE');
+    expect(state.printerStatus).toBe('ONLINE');
+    expect(Number.isFinite(state.lastCheckedAt)).toBe(true);
+    expect((state.lastCheckedAt ?? 0) > 0).toBe(true);
   });
 });
