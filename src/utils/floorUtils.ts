@@ -46,10 +46,16 @@ export function sortBaysByNumber<T extends { bay_no?: number | string | null }>(
   return [...bays].sort((a, b) => (Number(a.bay_no) || 0) - (Number(b.bay_no) || 0));
 }
 
-export function formatFloorDisplayLabel(floorInput: string | number): string {
+export function formatFloorDisplayLabel(floorInput?: string | number | null): string {
   const normalized = normalizeFloorZoneToken(floorInput);
   if (normalized) return normalized;
-  const raw = String(floorInput ?? '1F').trim().toUpperCase();
+  if (typeof floorInput === 'number') {
+    return '1F';
+  }
+  const raw = String(floorInput ?? '').trim().toUpperCase();
+  if (!raw || raw === '0' || raw === '0F' || raw === 'NAN' || raw === 'NULL' || raw === 'UNDEFINED') {
+    return '1F';
+  }
   return raw.endsWith('F') ? raw : `${raw}F`;
 }
 
