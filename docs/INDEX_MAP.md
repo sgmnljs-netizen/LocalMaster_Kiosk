@@ -1,8 +1,8 @@
 # 🗺️ LocalMaster Kiosk (`LocalMaster_Kiosk`) 단일 진실 공급원(SSOT) 맵
 
-> **최종 동기화 일자**: 2026-11-10
+> **최종 동기화 일자**: 2026-11-11
 > **포트 규약**: `Port 5179` (Vite React + TypeScript + Electron/Windows Hardware Bridge)
-> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 562개 / 8대 골든 패스 E2E 100% 통과)
+> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 89개 파일 551 passed / 8대 골든 패스 E2E 100% 통과)
 
 ---
 
@@ -39,5 +39,5 @@
 - **`components/PaymentTerminal.tsx` & `services/paymentResilience.ts`**: 2-Step 결제 시트, 5만원 이상 할부, 서브 TID 라우팅, 시도별 멱등키(`buildAttemptIdempotencyKey`), Outbox WAL/DLQ
 - **`components/AllocationCompleteModal.tsx` & `PurchaseCompleteModal.tsx` & `ReceiptPrinter.tsx`**: 영수증/타석배정표/라카확인증 3단 분리 서멀 인쇄 (`kioskSlipPrinter.ts`, FIFO 큐)
 - **`utils/kioskProductSpecSummary.ts` & `utils/kioskPurchaseEligibility.ts` & `utils/code128Barcode.ts` & `utils/kioskBlackBox.ts`**: 상품 스펙 요약·자격 판정 엔진, ISO Code128B 바코드, PAN 마스킹 블랙박스 로거
-- **`components/AdminPinModal.tsx` & `KioskSettingsModal.tsx` & `MaintenanceOverlay.tsx` & `stores/kioskSettings.ts`**: 서버 검증 관리자/엔지니어 PIN, 호기별 설정 분리, 2-Tier LAN 부트스트랩, 전 채널 `X-Device-Key`·WS `device_key` 기기인증 바인딩 및 앱 종료/재실행 제어
-- **`hooks/useKioskHardwareHeartbeat.ts` & `hooks/useKioskVanPayment.ts` & `services/hardware/hooks/useHardwareScanner.ts`**: 멀티 VAN·프린터 헬스 하트비트, VAN 결제 `E_BUSY` 잠금, 한글 IME 복원 QR 스캐너 훅
+- **`components/AdminPinModal.tsx` & `KioskSettingsModal.tsx` & `hooks/useHiddenAdminTrigger.ts` & `stores/kioskSettings.ts`**: 서버 검증 관리자/엔지니어 PIN, 5-Tap 히든 트리거, 호기별 설정 분리, `X-Device-Key` 기기인증 및 앱 제어
+- **`hooks/useKioskHardwareHeartbeat.ts` & `stores/useKioskHardwareHealthStore.ts` & `hooks/useKioskVanPayment.ts`**: 멀티 VAN·프린터 헬스 하트비트 스토어, VAN 결제 `E_BUSY` 잠금 및 QR 스캐너(`useHardwareScanner.ts`) 훅
