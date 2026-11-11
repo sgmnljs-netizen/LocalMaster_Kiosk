@@ -292,8 +292,17 @@ export class PaymentOutboxManager {
     try {
       const raw = localStorage.getItem(PAYMENT_RESILIENCE_CONFIG.OUTBOX_STORAGE_KEY);
       if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (item): item is PaymentOutboxEntry =>
+          Boolean(
+            item &&
+              typeof item === 'object' &&
+              !Array.isArray(item) &&
+              typeof (item as Record<string, unknown>).id === 'string'
+          )
+      );
     } catch {
       return [];
     }

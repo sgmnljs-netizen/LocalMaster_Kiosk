@@ -3,7 +3,7 @@ import { CreditCard, Printer, ShieldAlert, Sparkles, ShieldCheck, RefreshCw, Tic
 import { api, type KioskCouponItem } from '../services/api';
 import { recordKioskBlackBox } from '../utils/kioskBlackBox';
 import { useKioskSettings } from '../stores/kioskSettings';
-import { useKioskVanPayment } from '../hooks/useKioskVanPayment';
+import { useKioskVanPayment, sanitizeVanPort } from '../hooks/useKioskVanPayment';
 import { kioskVanClient } from '../services/van/van_client';
 import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC, extractKstYyyyMmDd } from '../services/van/adapters/BaseVanAdapter';
 import { normalizeVanProvider, type CardApprovalResult } from '../services/van/van_types';
@@ -158,7 +158,7 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
       kioskVanClient.setConfig({
         provider: normalizeVanProvider(settings.providerType),
         terminalId: settings.terminalId || '88010003',
-        vcatPort: parseInt(settings.vcatPort, 10) || 9099,
+        vcatPort: sanitizeVanPort(settings.vcatPort, 9099),
       });
     };
   }, [settings.terminalId, settings.vcatPort, settings.providerType]);
