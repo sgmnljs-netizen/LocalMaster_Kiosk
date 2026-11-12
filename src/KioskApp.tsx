@@ -32,6 +32,8 @@ import {
   hydrateKioskDeviceSettingsFromServer,
   bootstrapLocalKioskSettings,
   getKioskSettings,
+  isQrDisallowedForPurpose,
+  resolveEnabledAuthModesForPurpose,
 } from './stores/kioskSettings';
 import { useHiddenAdminTrigger } from './hooks/useHiddenAdminTrigger';
 import { AdminPinModal } from './components/AdminPinModal';
@@ -1131,26 +1133,51 @@ export default function KioskApp() {
 
   // 1. 회원인증 성공 시 핸들러
   const handleAuthSuccess = async (member: Member) => {
+    // 🛡️ [QR Purpose Guard] 라카 연장·회원권/일일권 구매 퍼널에서는 QR 인증 진입을 원천 차단 (이중 방어)
+    if (member.auth_channel === 'QR' && isQrDisallowedForPurpose(purpose)) {
+      const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;
+      if (bayToRelease !== null) {
+        api.releaseBay(bayToRelease).catch(console.error);
+        setSelectedBayNo(null);
+        selectedBayNoRef.current = null;
+      }
+      setAuthMember(null);
+      showErrorModal(
+        '라카 이용·회원권/일일권 구매 메뉴에서는 QR 인증을 사용할 수 없습니다. [AI 안면인식], [앱 스마트 체크인] 또는 [전화번호] 인증을 이용해 주세요.',
+        'QR 인증 제한 메뉴 안내'
+      );
+      if (purpose === 'ALLOCATE_DAILY') {
+        setStep('PRACTICE_SELECT');
+      } else {
+        setStep('MAIN_DASHBOARD');
+      }
+      return;
+    }
+
     setAuthMember(member);
     showToast(lang === 'KO' ? `${member.member_name} 님 인증되었습니다.` : `${member.member_name} verified.`);
     
     // 감사 로그 적재
-    await api.writeKioskLog('AUTH_SUCCESS', `${member.member_name} 회원 인증 성공 (${member.hp})`, member.member_no);
+    await api.writeKioskLog('AUTH_SUCCESS', `${member.member_name} 회원 인증 성공 (${member.hp}, ch=${member.auth_channel || 'STD'})`, member.member_no);
 
     // 회원인증의 목적에 따라 다음 단계로 지능형 라우팅
     if (purpose === 'ALLOCATE_MEMBERSHIP') {
+      const isQrCouponOnly = member.auth_channel === 'QR' && settings.qrCouponOnlyMode !== false;
       // [P1-1] 회원권 타석 배정 검증: 유효 기간(remain_days >= 0) 또는 기간제/횟수제 유효 이용권 존재 시 허용
-      const hasValidDays = Boolean(member.expiry_date && member.remain_days !== undefined && member.remain_days >= 0);
+      // 단, QR 쿠폰 전용 모드에서는 일반 기간권 잔여일(hasValidDays)만으로 통과시키지 않고 실제 사용 가능한 횟수/시간권 존재 여부를 검증
+      const hasValidDays = !isQrCouponOnly && Boolean(member.expiry_date && member.remain_days !== undefined && member.remain_days >= 0);
       const hasValidAsset = Boolean(
         member.assets && member.assets.length > 0 && member.assets.some(a => {
           if (a.is_assignable === false) return false;
           const logicType = (a.logic_type || '').toUpperCase();
           if (logicType === 'PERIOD' || logicType === 'MEMBERSHIP') {
+            if (isQrCouponOnly) return false;
             return (a.remain_days === undefined || a.remain_days >= 0) && (member.remain_days === undefined || member.remain_days >= 0);
           }
           return (
             (a.rem_count !== undefined && a.rem_count > 0) ||
             (a.remain_cnt !== undefined && a.remain_cnt > 0) ||
+            (a.remain_min !== undefined && a.remain_min > 0) ||
             (a.remain_days !== undefined && a.remain_days > 0)
           );
         })
@@ -1159,15 +1186,24 @@ export default function KioskApp() {
       const hasPreselectedBay = (selectedBayNo ?? selectedBayNoRef.current) !== null || selectedBayNos.length > 0 || selectedBayNosRef.current.length > 0;
 
       if (!hasValidDays && !hasValidAsset && !hasPreselectedBay) {
-        // [ErrorMaster-First 예시] 타석 미선택 상태에서 회원권 만료 에러
+        // [ErrorMaster-First 예시] 타석 미선택 상태에서 회원권 만료 또는 QR 정기권 차단 안내
         const trace = `TR-${Math.floor(100000 + Math.random() * 900000)}`;
-        await api.writeKioskLog('AUTH_ERROR', `회원권 만료 제약 차단 (Trace ID: ${trace})`, member.member_no);
+        const hasRestrictedPeriodOnly = isQrCouponOnly && (member.qr_restricted_period_count || 0) > 0;
+        await api.writeKioskLog(
+          'AUTH_ERROR',
+          hasRestrictedPeriodOnly
+            ? `QR 인증 정기권 노출 차단 안내 (Trace ID: ${trace})`
+            : `회원권 만료 제약 차단 (Trace ID: ${trace})`,
+          member.member_no
+        );
         
         setErrorMasterCard({
-          code: 'ERR_MEMBERSHIP_EXPIRED',
-          detail: lang === 'KO' 
-            ? '고객님의 회원권 기간이 만료되었거나 보유하신 유효 이용권이 없습니다.' 
-            : 'Your membership pass has expired or you do not have any valid teebox tickets.',
+          code: hasRestrictedPeriodOnly ? 'ERR_QR_COUPON_ONLY' : 'ERR_MEMBERSHIP_EXPIRED',
+          detail: hasRestrictedPeriodOnly
+            ? 'QR 인증은 쿠폰(횟수권·시간권) 전용입니다. 본인 전용 일반 정기권은 [AI 안면인식] 또는 [앱 스마트 체크인]을 이용해 주세요.'
+            : (lang === 'KO' 
+                ? '고객님의 회원권 기간이 만료되었거나 보유하신 유효 이용권이 없습니다.' 
+                : 'Your membership pass has expired or you do not have any valid teebox tickets.'),
           traceId: trace
         });
         setAuthMember(null); // [Security Patch] 에러 발생 시 강제 세션 파기
@@ -1333,7 +1369,7 @@ export default function KioskApp() {
           : undefined;
         const currentBay = activeCurrentBay || nextReservedCurrentBay;
         const resolvedSourceBayNo = sourceBayNo ?? currentBay?.bay_no;
-        const res = await api.moveBay(authMember.member_no, bayNo, resolvedSourceBayNo);
+        const res = await api.moveBay(authMember.member_no, bayNo, resolvedSourceBayNo, authMember.auth_channel);
         if (res.success) {
           const resolvedOldBayNo = res.old_bay_no ?? resolvedSourceBayNo;
           const resolvedMoveResId = res.res_id || currentBay?.res_id || '';
@@ -1434,7 +1470,7 @@ export default function KioskApp() {
           undefined, undefined, memberItemId,
           'TICKET', 0,
           undefined, undefined, undefined,
-          { acceptClosingTruncate }
+          { acceptClosingTruncate, authChannel: authMember.auth_channel }
         );
         if (res.success) {
           const confirmedMemberName = authMember.member_name;
@@ -1614,7 +1650,7 @@ export default function KioskApp() {
               amount: 0
             })),
             undefined,
-            { acceptClosingTruncate }
+            { acceptClosingTruncate, authChannel: authMember?.auth_channel }
           );
           if (!groupRes.success) {
             if (groupRes.closingPrompt && groupRes.closingPrompt.max_available_min >= 10) {
@@ -2050,7 +2086,8 @@ export default function KioskApp() {
               usedPoints: payResult?.usedPoints || 0,
               gradeDiscountAmount: gradeDiscount,
               prodCd: selectedProduct.prod_cd,
-              acceptClosingTruncate: true
+              acceptClosingTruncate: true,
+              authChannel: authMember?.auth_channel,
             }
           );
           if (allocResult) {
@@ -2158,7 +2195,8 @@ export default function KioskApp() {
               couponNo: payResult?.couponNo,
               discountAmount: groupCouponDiscount,
               usedPoints: payResult?.usedPoints || 0,
-              gradeDiscountAmount: groupGradeDiscount
+              gradeDiscountAmount: groupGradeDiscount,
+              authChannel: authMember?.auth_channel,
             }
           );
           if (!groupRes.success) {
@@ -2824,6 +2862,7 @@ export default function KioskApp() {
                 <CheckinSelect
                   memberNo={authMember.member_no}
                   memberName={authMember.member_name}
+                  authChannel={authMember.auth_channel}
                   lang={lang}
                   onCheckinSuccess={(
                     bayNo: number | string,
@@ -2894,6 +2933,12 @@ export default function KioskApp() {
                 <MemberAuth
                   initialAuthMode={initialAuthMode}
                   faceTerminalEnabled={effectiveFaceTerminalEnabled}
+                  enabledAuthModes={resolveEnabledAuthModesForPurpose(
+                    settings.authMethods,
+                    effectiveFaceTerminalEnabled,
+                    purpose
+                  )}
+                  disallowQrScan={isQrDisallowedForPurpose(purpose)}
                   selectedBayNo={
                     (purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY'
                       ? selectedBayNo
@@ -3034,6 +3079,7 @@ export default function KioskApp() {
                 <TeeboxMap
                   memberNo={authMember?.member_no}
                   memberName={authMember?.member_name}
+                  authChannel={authMember?.auth_channel}
                   isMoveMode={purpose === 'MOVE_BAY'}
                   lang={lang}
                   justAllocatedBayNo={justAllocatedBayNo}
@@ -3194,6 +3240,7 @@ export default function KioskApp() {
               <Par3Allocation
                 memberNo={authMember?.member_no}
                 memberName={authMember?.member_name}
+                authenticatedMember={authMember}
                 faceTerminalEnabled={effectiveFaceTerminalEnabled}
                 selectedZoneIds={selectedZoneIds}
                 lang={lang}
@@ -3242,8 +3289,16 @@ export default function KioskApp() {
                 resId={purpose === 'EXTEND_LOCKER' ? null : (currentHoldResId || checkinResId)}
                 memberName={authMember?.member_name}
                 memberNo={authMember?.member_no}
-                memberPoint={authMember?.total_point || 0}
-                discountRate={authMember?.discount_rate || 0}
+                memberPoint={
+                  authMember?.auth_channel === 'QR' && settings.qrCouponOnlyMode !== false
+                    ? 0
+                    : (authMember?.total_point || 0)
+                }
+                discountRate={
+                  authMember?.auth_channel === 'QR' && settings.qrCouponOnlyMode !== false
+                    ? 0
+                    : (authMember?.discount_rate || 0)
+                }
                 discountableAmount={
                   companionTargets.length > 0
                     ? companionTargets
@@ -3297,6 +3352,10 @@ export default function KioskApp() {
                 }}
                 onSwitchToDaily={() => {
                   keepAuthAfterPurchaseRef.current = false;
+                  if (authMember?.auth_channel === 'QR' && settings.qrCouponOnlyMode !== false) {
+                    // 🛡️ QR 공유 인증 상태에서 일일권 결제로 전환 시 본회원 개인 혜택(포인트·쿠폰·등급할인) 노출 차단
+                    setAuthMember(null);
+                  }
                   setPurpose('ALLOCATE_DAILY');
                   setStep('PRODUCT_SHOP');
                 }}

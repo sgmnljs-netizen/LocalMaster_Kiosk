@@ -111,6 +111,72 @@ export interface Member {
   grade_cd?: string;
   use_yn?: string;
   deleted_at?: number | string | null;
+  auth_channel?: 'QR' | 'FACE' | 'SMART_TAG' | 'PHONE_KEYPAD' | 'BLE' | 'NFC' | string | null;
+  qr_restricted_period_count?: number;
+}
+
+export function isPeriodMembershipAsset(asset: MemberAsset): boolean {
+  const lu = String(asset.logic_type || asset.pass_type || '').trim().toUpperCase();
+  if (lu === 'COUNT' || lu === 'COUPON' || lu === 'TICKET' || lu === 'TIME') {
+    return false;
+  }
+  if (lu === 'PERIOD' || lu === 'MEMBERSHIP') {
+    return true;
+  }
+  const totalCnt = Number(asset.total_count ?? 0);
+  const remCnt = Number(asset.rem_count ?? asset.remain_cnt ?? 0);
+  if (totalCnt > 0 || remCnt > 0) {
+    return false;
+  }
+  return true;
+}
+
+export function applyQrCouponOnlyMemberFilter(
+  member: Member,
+  authChannelOrMode: boolean | string = true,
+  maybeQrCouponOnlyMode?: boolean
+): Member {
+  let effectiveChannel = 'QR';
+  let qrCouponOnlyMode = true;
+  if (typeof authChannelOrMode === 'string') {
+    effectiveChannel = authChannelOrMode.trim().toUpperCase() || 'QR';
+    if (effectiveChannel !== 'QR') {
+      return {
+        ...member,
+        auth_channel: effectiveChannel,
+      };
+    }
+    qrCouponOnlyMode = maybeQrCouponOnlyMode ?? true;
+  } else if (typeof authChannelOrMode === 'boolean') {
+    qrCouponOnlyMode = authChannelOrMode;
+  }
+
+  if (!qrCouponOnlyMode) {
+    return {
+      ...member,
+      auth_channel: effectiveChannel,
+    };
+  }
+  const origAssets = Array.isArray(member.assets) ? member.assets : [];
+  let restrictedCount = Number(member.qr_restricted_period_count || 0);
+  const couponAssets: MemberAsset[] = [];
+  for (const a of origAssets) {
+    if (isPeriodMembershipAsset(a)) {
+      restrictedCount += 1;
+    } else {
+      couponAssets.push(a);
+    }
+  }
+  return {
+    ...member,
+    assets: couponAssets,
+    total_point: 0,
+    discount_rate: 0,
+    locker_info: null,
+    locker_no: null,
+    auth_channel: effectiveChannel,
+    qr_restricted_period_count: restrictedCount,
+  };
 }
 
 export interface KioskZone {
@@ -871,27 +937,35 @@ class HybridAPIClient {
     rssi?: number,
     authType?: 'BLE' | 'NFC' | 'QR'
   ): Promise<Member | null> {
+    const upper = tagUid.trim().toUpperCase();
+    const resolvedAuthType =
+      authType ||
+      (upper.startsWith('QR') || upper.startsWith('GOLFOS_QR') || upper.startsWith('GOLFOS-QR')
+        ? 'QR'
+        : upper.startsWith('GOLFOS_MEMBER')
+          ? 'BLE'
+          : 'NFC');
+    const kioskCfg = getKioskSettings();
+    const qrCouponOnly = kioskCfg.qrCouponOnlyMode !== false;
+
     const strictOnline = isStrictOnlineStoreRuntime();
     const isConnected = strictOnline ? true : await this.checkConnection();
     if (!isConnected) {
-      return this.getMember(tagUid);
+      const offlineMem = await this.getMember(tagUid);
+      if (!offlineMem) return null;
+      return resolvedAuthType === 'QR'
+        ? applyQrCouponOnlyMemberFilter(offlineMem, qrCouponOnly)
+        : offlineMem;
     }
     let httpErr: Error | null = null;
     try {
-      const upper = tagUid.trim().toUpperCase();
-      const resolvedAuthType =
-        authType ||
-        (upper.startsWith('QR') || upper.startsWith('GOLFOS_QR')
-          ? 'QR'
-          : upper.startsWith('GOLFOS_MEMBER')
-            ? 'BLE'
-            : 'NFC');
       const payload: Record<string, unknown> = {
         store_cd: this.getStoreCd(),
         auth_type: resolvedAuthType,
         token_or_uid: tagUid,
         tag_uid: tagUid,
         token: tagUid,
+        device_id: kioskCfg.deviceId || undefined,
       };
       if (typeof rssi === 'number' && !Number.isNaN(rssi)) {
         payload.rssi = rssi;
@@ -927,7 +1001,9 @@ class HybridAPIClient {
               is_assignable: true,
             }] : [];
           }
-          return resolved;
+          return resolvedAuthType === 'QR'
+            ? applyQrCouponOnlyMemberFilter(resolved, qrCouponOnly)
+            : resolved;
         }
         return null;
       } else if (res.status === 409) {
@@ -981,7 +1057,11 @@ class HybridAPIClient {
     if (httpErr) {
       throw httpErr;
     }
-    return this.getMember(tagUid);
+    const fallbackMem = await this.getMember(tagUid);
+    if (!fallbackMem) return null;
+    return resolvedAuthType === 'QR'
+      ? applyQrCouponOnlyMemberFilter(fallbackMem, qrCouponOnly)
+      : fallbackMem;
   }
 
   /**
@@ -1683,12 +1763,15 @@ class HybridAPIClient {
     const isConnected = strictOnline ? true : await this.checkConnection();
     console.log(`[LM_KIOSK] Auth Query: "${query}". Network Connection: ${isConnected ? 'ONLINE' : 'OFFLINE(EdgeDB)'}`);
     
-    // Normalize QR/NFC/BLE prefix if present (e.g. GOLFOS_MEMBER_M260501 / QR-M260501 -> M260501)
-    const normalizedQuery = query
-      .trim()
-      .replace(/^(GOLFOS[-_]?MEMBER[-_:]?|GOLFOS[-_]?QR[-_:]?|QR[-_:]|MEMBER[-_:]|NFC[-_:]|UID[-_:])/i, '')
-      .trim();
-    const searchTarget = normalizedQuery || query.trim();
+    // Normalize QR/NFC/BLE prefix if present (e.g. GOLFOS_MEMBER_M260501 / GOLFOS-QR:M260501:A7K9M2 / QR-M260501 -> M260501)
+    const rawTrimmed = query.trim();
+    const seededQrMatch = rawTrimmed.match(/^(?:GOLFOS[-_]?QR|QR):(.+):([A-Za-z0-9]{4,16})$/i);
+    const normalizedQuery = seededQrMatch
+      ? seededQrMatch[1].trim()
+      : rawTrimmed
+          .replace(/^(GOLFOS[-_]?MEMBER[-_:]?|GOLFOS[-_]?QR[-_:]?|QR[-_:]|MEMBER[-_:]|NFC[-_:]|UID[-_:])/i, '')
+          .trim();
+    const searchTarget = normalizedQuery || rawTrimmed;
 
     if (isConnected) {
       let duplicateErr: Error | null = null;
@@ -2065,11 +2148,19 @@ class HybridAPIClient {
   }
 
   // 5. 키오스크 전용 예약 타석 체크인 API
-  async getMemberCheckinReservations(memberNo: string): Promise<KioskCheckinReservation[]> {
+  async getMemberCheckinReservations(
+    memberNo: string,
+    authChannel?: string | null
+  ): Promise<KioskCheckinReservation[]> {
     const isConnected = await this.checkConnection();
     if (isConnected) {
       try {
-        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/checkin/reservations?store_cd=${encodeURIComponent(this.getStoreCd())}&member_no=${encodeURIComponent(memberNo)}`, {
+        const cfg = getKioskSettings();
+        const extraParams = [
+          authChannel ? `&auth_channel=${encodeURIComponent(authChannel)}` : '',
+          cfg.deviceId ? `&device_id=${encodeURIComponent(cfg.deviceId)}` : '',
+        ].join('');
+        const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/checkin/reservations?store_cd=${encodeURIComponent(this.getStoreCd())}&member_no=${encodeURIComponent(memberNo)}${extraParams}`, {
           headers: this.getSecureHeaders()
         });
         if (res.ok) {
@@ -2105,7 +2196,11 @@ class HybridAPIClient {
     });
   }
 
-  async verifyKioskCheckin(memberNo: string, resId?: string): Promise<{
+  async verifyKioskCheckin(
+    memberNo: string,
+    resId?: string,
+    authChannel?: string | null
+  ): Promise<{
     success: boolean;
     message: string;
     checkin_mode?: string;
@@ -2117,6 +2212,7 @@ class HybridAPIClient {
     hardware_success?: boolean;
   }> {
     const storeCd = this.getStoreCd();
+    const cfg = getKioskSettings();
     const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
     if (isConnected) {
       try {
@@ -2128,7 +2224,9 @@ class HybridAPIClient {
             body: JSON.stringify({
               store_cd: storeCd,
               member_no: memberNo,
-              res_id: resId,
+              ...(resId ? { res_id: resId } : {}),
+              ...(authChannel ? { auth_channel: authChannel } : {}),
+              ...(cfg.deviceId ? { device_id: cfg.deviceId } : {}),
             }),
           },
           {
@@ -2354,6 +2452,7 @@ class HybridAPIClient {
       gradeDiscountAmount?: number;
       prodCd?: string;
       acceptClosingTruncate?: boolean;
+      authChannel?: string | null;
     } | number,
     gradeDiscountAmount?: number,
     prodCd?: string,
@@ -2445,6 +2544,12 @@ class HybridAPIClient {
               used_points: extraOptions?.usedPoints ?? 0,
               grade_discount_amount: extraOptions?.gradeDiscountAmount ?? 0,
               ...(extraOptions?.acceptClosingTruncate !== undefined ? { accept_closing_truncate: extraOptions.acceptClosingTruncate } : {}),
+              ...(extraOptions?.authChannel
+                ? {
+                    auth_channel: extraOptions.authChannel,
+                    ...(getKioskSettings().deviceId ? { device_id: getKioskSettings().deviceId } : {}),
+                  }
+                : {}),
               approval_no: effectiveBayAuthCode,
               issuer_name: paymentApproval?.issuer_name || null,
               acquirer_name: paymentApproval?.acquirer_name || null,
@@ -2644,6 +2749,7 @@ class HybridAPIClient {
       discountAmount?: number;
       usedPoints?: number;
       gradeDiscountAmount?: number;
+      authChannel?: string | null;
     }
   ): Promise<{
     success: boolean;
@@ -2769,6 +2875,12 @@ class HybridAPIClient {
               discount_amount: options?.discountAmount ?? 0,
               grade_discount_amount: options?.gradeDiscountAmount ?? 0,
               accept_closing_truncate: Boolean(options?.acceptClosingTruncate),
+              ...(options?.authChannel
+                ? {
+                    auth_channel: options.authChannel,
+                    ...(getKioskSettings().deviceId ? { device_id: getKioskSettings().deviceId } : {}),
+                  }
+                : {}),
               items,
               slots: items,
               targets: items,
@@ -2894,6 +3006,7 @@ class HybridAPIClient {
           gradeDiscountAmount: isFirstPaid ? (options?.gradeDiscountAmount ?? 0) : 0,
           prodCd: t.prodCd,
           acceptClosingTruncate: options?.acceptClosingTruncate,
+          authChannel: options?.authChannel,
         }
       );
 
@@ -3013,7 +3126,8 @@ class HybridAPIClient {
   async moveBay(
     memberNo: string,
     targetBayNo: number,
-    oldBayNo?: number
+    oldBayNo?: number,
+    authChannel?: string | null
   ): Promise<{
     success: boolean;
     message: string;
@@ -3040,6 +3154,12 @@ class HybridAPIClient {
             old_bay_no: oldBayNo ?? null,
             new_bay_no: targetBayNo,
             terminal_id: this.getTerminalId(),
+            ...(authChannel
+              ? {
+                  auth_channel: authChannel,
+                  ...(getKioskSettings().deviceId ? { device_id: getKioskSettings().deviceId } : {}),
+                }
+              : {}),
           }),
         },
         {

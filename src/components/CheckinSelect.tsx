@@ -21,6 +21,7 @@ interface CheckinReservationItem {
 interface CheckinSelectProps {
   memberNo: string;
   memberName?: string;
+  authChannel?: string | null;
   lang?: 'KO' | 'EN';
   onCheckinSuccess: (
     bayNo: number | string,
@@ -38,6 +39,7 @@ interface CheckinSelectProps {
 export const CheckinSelect: React.FC<CheckinSelectProps> = ({
   memberNo,
   memberName,
+  authChannel,
   lang = 'KO',
   onCheckinSuccess,
   onCancel,
@@ -53,7 +55,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
     setLoading(true);
     setErrorMsg('');
     try {
-      const items = await api.getMemberCheckinReservations(memberNo);
+      const items = await api.getMemberCheckinReservations(memberNo, authChannel);
       setReservations(items);
       recordKioskBlackBox('CHECKIN', 'CHECKIN_START', {
         memberNo,
@@ -70,7 +72,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
 
   useEffect(() => {
     loadReservations();
-  }, [memberNo]);
+  }, [memberNo, authChannel]);
 
   const formatResTime = (t?: string) => {
     if (!t) return '';
@@ -114,7 +116,7 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
       startTime: targetRes?.start_time,
     });
     try {
-      const res = await api.verifyKioskCheckin(memberNo, resId);
+      const res = await api.verifyKioskCheckin(memberNo, resId, authChannel);
       if (res.success) {
         const rawNo = String(targetRes?.resource_no || '1').trim();
         const numericNo = parseInt(rawNo.replace(/[^0-9]/g, ''), 10);

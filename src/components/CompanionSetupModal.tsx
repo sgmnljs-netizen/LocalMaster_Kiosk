@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserPlus, Timer, X, AlertCircle, UserCheck } from 'lucide-react';
-import { api, Member, MemberAsset, Bay } from '../services/api';
+import { api, Member, MemberAsset, Bay, isPeriodMembershipAsset } from '../services/api';
+import { getKioskSettings } from '../stores/kioskSettings';
 import { TimeMaster } from '../utils/timeMaster';
 import { parseNullableFloorNumber } from '../utils/floorUtils';
 import { isKioskChannelProduct, normalizeYmdDigits } from '../utils/kioskPurchaseEligibility';
@@ -115,13 +116,27 @@ export const filterCompanionAssignableAssets = (
   });
 };
 
-const getAssignableAssets = (member?: Member | null, bay?: Bay | null) => {
+export const getAssignableAssets = (
+  member?: Member | null,
+  bay?: Bay | null,
+  isQrSessionRestricted = false
+) => {
   const bayFloor = bay?.floor_no ?? bay?.floor;
-  return filterCompanionAssignableAssets(member?.assets || [], bay?.zone_code, undefined, bayFloor);
+  const qrRestricted =
+    (isQrSessionRestricted || member?.auth_channel === 'QR') &&
+    getKioskSettings().qrCouponOnlyMode !== false;
+  const sourceAssets = qrRestricted
+    ? (member?.assets || []).filter((a) => !isPeriodMembershipAsset(a))
+    : (member?.assets || []);
+  return filterCompanionAssignableAssets(sourceAssets, bay?.zone_code, undefined, bayFloor);
 };
 
-const getFirstAssignableAsset = (member?: Member | null, bay?: Bay | null) => {
-  return getAssignableAssets(member, bay)[0];
+const getFirstAssignableAsset = (
+  member?: Member | null,
+  bay?: Bay | null,
+  isQrSessionRestricted = false
+) => {
+  return getAssignableAssets(member, bay, isQrSessionRestricted)[0];
 };
 
 const resolveAssetTicketName = (
@@ -151,9 +166,12 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   const [dailyVatYn, setDailyVatYn] = useState<string>('Y');
   const [companionMembers, setCompanionMembers] = useState<Record<number, Member>>({});
 
+  const isLeaderQrRestricted =
+    leaderMember?.auth_channel === 'QR' && getKioskSettings().qrCouponOnlyMode !== false;
+
   // 🛡️ [BUG-P02 Fix] selectedDurationMin이 0으로 전달되더라도 대표자 유효 이용권 시간 또는 60분으로 안전 폴백
   const leaderFirstBay = bays.find(b => b.bay_no === selectedBayNos[0]);
-  const leaderDefaultAsset = getFirstAssignableAsset(leaderMember, leaderFirstBay);
+  const leaderDefaultAsset = getFirstAssignableAsset(leaderMember, leaderFirstBay, isLeaderQrRestricted);
   const effectiveDurationMin =
     selectedDurationMin && selectedDurationMin > 0
       ? selectedDurationMin
@@ -168,7 +186,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
       const targetBay = bays.find(b => b.bay_no === bayNo);
       if (idx === 0) {
         // 대표자 타석
-        const validAsset = getFirstAssignableAsset(leaderMember, targetBay);
+        const validAsset = getFirstAssignableAsset(leaderMember, targetBay, isLeaderQrRestricted);
         const assetDur = Number(validAsset?.duration_min);
         const durMin = assetDur > 0 ? assetDur : effectiveDurationMin;
         const parsedId = validAsset ? Number(validAsset.member_item_id || validAsset.id) : undefined;
@@ -326,7 +344,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
         (t.memberNo === member.member_no ||
           (!t.memberNo && memberHpClean && (t.hp || '').replace(/[^0-9]/g, '') === memberHpClean))
     );
-    const validAsset = getFirstAssignableAsset(member, targetBay);
+    const validAsset = getFirstAssignableAsset(member, targetBay, isLeaderQrRestricted);
     const parsedId = validAsset ? Number(validAsset.member_item_id || validAsset.id) : undefined;
     const assetLogic = String(validAsset?.logic_type || '').toUpperCase();
     const assetRemCnt = Number(validAsset?.rem_count ?? validAsset?.remain_cnt ?? 0);
@@ -476,7 +494,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
   const currentSlotBay = currentTarget
     ? bays.find(b => b.bay_no === currentTarget.bayNo)
     : undefined;
-  const currentAssignableAssets = getAssignableAssets(currentSlotMember, currentSlotBay);
+  const currentAssignableAssets = getAssignableAssets(currentSlotMember, currentSlotBay, isLeaderQrRestricted);
   const selectedAsset = currentAssignableAssets.find(
     a => Number(a.member_item_id || a.id) === Number(currentTarget?.memberItemId)
   ) || currentAssignableAssets[0];

@@ -16,6 +16,7 @@ interface TeeboxMapProps {
   member?: Member | null;
   memberNo?: string;
   memberName?: string;
+  authChannel?: string | null;
   isMoveMode?: boolean; // 타석 이동 모드 여부
   lang?: 'KO' | 'EN';
   justAllocatedBayNo?: number | null;
@@ -62,6 +63,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   member,
   memberNo,
   memberName,
+  authChannel,
   isMoveMode = false,
   lang = 'KO',
   justAllocatedBayNo = null,
@@ -84,6 +86,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
 
   const effMemberNo = member?.member_no || memberNo;
   const effMemberName = (member?.member_name || memberName || '').trim();
+  const effAuthChannel = member?.auth_channel || authChannel;
 
   const [fallbackMoveBay, setFallbackMoveBay] = useState<Bay | null>(null);
 
@@ -93,7 +96,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       return;
     }
     let mounted = true;
-    api.getMemberCheckinReservations(effMemberNo).then((resList) => {
+    api.getMemberCheckinReservations(effMemberNo, effAuthChannel).then((resList) => {
       if (!mounted || !Array.isArray(resList)) return;
       const statusPriority: Record<string, number> = {
         USE: 1,
@@ -164,7 +167,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
     return () => {
       mounted = false;
     };
-  }, [isMoveMode, effMemberNo, effMemberName, bays]);
+  }, [isMoveMode, effMemberNo, effMemberName, effAuthChannel, bays]);
 
   // [BUG-V01] 이동 모드 시 현재 회원이 점유/예약 중인 타석 정밀 검색
   // 1순위: 본인 member_no(또는 member_no 미존재 시 성명)로 실제 가동 중인 타석 (고장/점검 전환 활성 세션 포함, 동명이인 타인 member_no 절대 배제)

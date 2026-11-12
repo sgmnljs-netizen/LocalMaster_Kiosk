@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Calendar, User, Users, Clock, ArrowLeft, CreditCard, Check, HelpCircle, CreditCard as CardIcon, Loader2, RefreshCw, X, Plus, Ticket, UserCheck, UserPlus } from 'lucide-react';
-import { api, isDemoEnvironment, Par3Slot, Product, KioskZone, Member, MemberAsset, KioskCompanionItem } from '../services/api';
+import { api, isDemoEnvironment, Par3Slot, Product, KioskZone, Member, MemberAsset, KioskCompanionItem, isPeriodMembershipAsset } from '../services/api';
 import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
 import { MemberAuth } from './MemberAuth';
 import { TimeMaster } from '../utils/timeMaster';
@@ -8,12 +8,13 @@ import { kioskVanClient } from '../services/van/van_client';
 import { normalizeVanProvider, type CardApprovalResult } from '../services/van/van_types';
 import { KIOSK_VAN_APPROVAL_TIMEOUT_SEC, extractKstYyyyMmDd } from '../services/van/adapters/BaseVanAdapter';
 import { PaymentOutboxManager } from '../services/paymentResilience';
-import { useKioskSettings } from '../stores/kioskSettings';
+import { useKioskSettings, resolveEnabledAuthModesForPurpose } from '../stores/kioskSettings';
 import { isKioskChannelProduct } from '../utils/kioskPurchaseEligibility';
 
 interface Par3AllocationProps {
   memberNo?: string;
   memberName?: string;
+  authenticatedMember?: Member | null;
   faceTerminalEnabled?: boolean;
   selectedZoneIds?: (string | number)[];
   lang?: 'KO' | 'EN';
@@ -43,6 +44,7 @@ interface PlayerSlot {
 export const Par3Allocation: React.FC<Par3AllocationProps> = ({
   memberNo,
   memberName,
+  authenticatedMember,
   faceTerminalEnabled = true,
   selectedZoneIds = [],
   lang = 'KO',
@@ -249,8 +251,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     });
 
     const curZoneUpper = (course || 'PAR3').toUpperCase();
+    const isQrRestricted = m?.auth_channel === 'QR' && settings.qrCouponOnlyMode !== false;
 
     return (m?.assets || []).filter((a) => {
+      if (isQrRestricted && isPeriodMembershipAsset(a)) return false;
       if (a.is_assignable === false) return false;
       if (typeof a.remain_days === 'number' && a.remain_days < 0) return false;
 
@@ -282,7 +286,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       }
       return rawRem - alreadyUsed > 0;
     });
-  }, [players, course]);
+  }, [players, course, settings.qrCouponOnlyMode]);
 
   // 3. 대표자 마운트 세팅
   useEffect(() => {
@@ -292,15 +296,24 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
       if (memberNo && memberName) {
         setLoading(true);
         try {
-          const detail = await api.getMember(memberNo);
+          // 🛡️ QR 쿠폰 전용 인증으로 진입한 경우 api.getMember()로 재조회하면 필터링된 일반 정기권이 복원될 수 있으므로
+          // KioskApp에서 전달한 인증 완료 회원 객체(authenticatedMember)를 그대로 신뢰 사용
+          const detail =
+            authenticatedMember &&
+            authenticatedMember.member_no === memberNo &&
+            authenticatedMember.auth_channel === 'QR'
+              ? authenticatedMember
+              : await api.getMember(memberNo);
           if (cancelled) return;
+          const isLeaderQrRestricted =
+            detail?.auth_channel === 'QR' && settings.qrCouponOnlyMode !== false;
           const leaderSlot: PlayerSlot = {
             id: 'LEADER',
             member_no: memberNo,
             guest_nm: memberName,
             hp_no: detail?.hp || '',
             is_member: true,
-            discount_rate: detail?.discount_rate || 0,
+            discount_rate: isLeaderQrRestricted ? 0 : (detail?.discount_rate || 0),
             use_ticket_id: undefined,
             use_ticket_name: undefined
           };
@@ -335,7 +348,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [memberNo, memberName]);
+  }, [memberNo, memberName, authenticatedMember, settings.qrCouponOnlyMode]);
 
   // 휴대폰 번호 포맷팅 (010-1234-5678)
   const formatHp = (num: string) => {
@@ -1608,6 +1621,11 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               isSubModal={true}
               initialAuthMode="SMART_TAG"
               faceTerminalEnabled={faceTerminalEnabled}
+              enabledAuthModes={resolveEnabledAuthModesForPurpose(
+                settings.authMethods,
+                faceTerminalEnabled,
+                'BOOK_PAR3'
+              )}
               onAuthSuccess={handleMemberAuthSuccess}
               onCancel={closeModal}
             />

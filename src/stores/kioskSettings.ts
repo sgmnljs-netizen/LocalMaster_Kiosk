@@ -36,6 +36,8 @@ export interface KioskSettings {
   minGapMinutes?: number;
   /** 상단 실시간 타석 현황판 표시 모드: AUTO(타석수 감지 자동 1~2줄 대형화), COMPACT_1ROW(1줄 고정), HIDDEN(숨김) */
   topDashboardMode?: KioskTopDashboardMode;
+  /** QR 인증 시 개인 전용 정기권(PERIOD/MEMBERSHIP)·포인트·등급할인 노출 차단 여부 (기본값: true = 쿠폰/횟수권 전용) */
+  qrCouponOnlyMode?: boolean;
 }
 
 export const DEFAULT_AUTH_METHODS: KioskAuthMethodsConfig = {
@@ -131,6 +133,35 @@ export function resolveEnabledAuthModes(
   return enabled.length > 0 ? enabled : ['PHONE_KEYPAD'];
 }
 
+export const QR_DISALLOWED_KIOSK_PURPOSES = new Set([
+  'EXTEND_LOCKER',
+  'LOCKER_EXTEND',
+  'LOCKER',
+  'PURCHASE_PRODUCT',
+  'ALLOCATE_DAILY',
+]);
+
+export function isQrDisallowedForPurpose(purpose?: string | null): boolean {
+  if (!purpose) return false;
+  return QR_DISALLOWED_KIOSK_PURPOSES.has(String(purpose).trim().toUpperCase());
+}
+
+export function resolveEnabledAuthModesForPurpose(
+  authMethods?: Partial<KioskAuthMethodsConfig>,
+  faceTerminalEnabled: boolean = true,
+  purpose?: string | null
+): KioskAuthModeKey[] {
+  const base = resolveEnabledAuthModes(authMethods, faceTerminalEnabled);
+  if (!isQrDisallowedForPurpose(purpose)) {
+    return base;
+  }
+  const withoutQr = base.filter((m) => m !== 'QR_SCAN');
+  if (withoutQr.length > 0) {
+    return withoutQr;
+  }
+  return faceTerminalEnabled !== false ? ['SMART_TAG', 'FACE'] : ['SMART_TAG'];
+}
+
 export function resolveEffectiveAuthMode(
   requestedMode: KioskAuthModeKey | undefined,
   defaultAuthMode: KioskAuthModeKey | undefined,
@@ -169,6 +200,7 @@ export const DEFAULT_KIOSK_SETTINGS: KioskSettings = {
   defaultAuthMode: 'SMART_TAG',
   minGapMinutes: 60,
   topDashboardMode: 'AUTO',
+  qrCouponOnlyMode: true,
 };
 
 const STORAGE_KEY = 'lm-kiosk-settings';
@@ -281,6 +313,10 @@ export function getKioskSettings(): KioskSettings {
         parsed.topDashboardMode,
         DEFAULT_KIOSK_SETTINGS.topDashboardMode
       ),
+      qrCouponOnlyMode:
+        typeof parsed.qrCouponOnlyMode === 'boolean'
+          ? parsed.qrCouponOnlyMode
+          : DEFAULT_KIOSK_SETTINGS.qrCouponOnlyMode ?? true,
     };
   } catch {
     return cloneDefaultKioskSettings();
@@ -610,6 +646,7 @@ export async function pushKioskDeviceSettingsToServer(
       default_auth_mode: settings.defaultAuthMode || 'SMART_TAG',
       min_gap_minutes: settings.minGapMinutes ?? 60,
       top_dashboard_mode: settings.topDashboardMode || 'AUTO',
+      qr_coupon_only_mode: settings.qrCouponOnlyMode !== false,
     };
     if (newAdminPin && /^\d{4}$/.test(newAdminPin)) {
       payloadBody.admin_pin = newAdminPin;
@@ -690,6 +727,11 @@ export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSetti
     }
     if (srv.topDashboardMode) {
       patch.topDashboardMode = normalizeTopDashboardMode(srv.topDashboardMode, current.topDashboardMode);
+    }
+    if (typeof srv.qrCouponOnlyMode === 'boolean') {
+      patch.qrCouponOnlyMode = srv.qrCouponOnlyMode;
+    } else if (typeof srv.qr_coupon_only_mode === 'boolean') {
+      patch.qrCouponOnlyMode = srv.qr_coupon_only_mode;
     }
 
     return saveKioskSettings(patch, { syncRemote: false });

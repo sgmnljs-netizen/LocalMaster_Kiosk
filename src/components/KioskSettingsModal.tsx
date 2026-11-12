@@ -101,6 +101,9 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const [formTopDashboardMode, setFormTopDashboardMode] = useState<KioskTopDashboardMode>(
     settings.topDashboardMode || 'AUTO'
   );
+  const [formQrCouponOnlyMode, setFormQrCouponOnlyMode] = useState<boolean>(
+    settings.qrCouponOnlyMode !== false
+  );
   const [policyGuardMsg, setPolicyGuardMsg] = useState<string | null>(null);
 
   const [isPinging, setIsPinging] = useState(false);
@@ -178,6 +181,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       setFormDefaultAuthMode(settings.defaultAuthMode || 'SMART_TAG');
       setFormMinGapMinutes(settings.minGapMinutes ?? 60);
       setFormTopDashboardMode(settings.topDashboardMode || 'AUTO');
+      setFormQrCouponOnlyMode(settings.qrCouponOnlyMode !== false);
       setPolicyGuardMsg(null);
       setPingStatus(null);
       setSaveSuccess(false);
@@ -372,6 +376,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       defaultAuthMode: formDefaultAuthMode,
       minGapMinutes: formMinGapMinutes,
       topDashboardMode: formTopDashboardMode,
+      qrCouponOnlyMode: formQrCouponOnlyMode,
     };
 
     try {
@@ -994,6 +999,62 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                       </div>
                     );
                   })}
+                </div>
+
+                {/* QR 인증 시 정기권 허용/차단 정책 스위치 */}
+                <div
+                  style={{
+                    marginTop: '12px',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    background: formQrCouponOnlyMode ? '#ecfdf5' : '#fff7ed',
+                    border: formQrCouponOnlyMode ? '1.5px solid #10b981' : '1.5px solid #fdba74',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>🔒 QR 인증 시 일반 정기권 노출 차단 (쿠폰·횟수권 전용)</span>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          padding: '2px 7px',
+                          borderRadius: '999px',
+                          fontWeight: 800,
+                          background: formQrCouponOnlyMode ? '#059669' : '#ea580c',
+                          color: '#ffffff',
+                        }}
+                      >
+                        {formQrCouponOnlyMode ? '차단 중 (권장)' : '정기권 허용'}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '11px', color: '#475569', margin: '3px 0 0 0', fontWeight: 500, lineHeight: 1.4 }}>
+                      {formQrCouponOnlyMode
+                        ? 'QR 사진 공유 시 본인 전용 기간제 정기권·포인트·등급할인은 자동 숨김 처리되고 쿠폰(횟수권/시간권)만 배정 가능합니다. (라카·상품구매는 QR 미노출)'
+                        : '주의: QR 스캔 시 기간제 정기권도 함께 노출됩니다. QR 사진 양도 남용 우려가 없는 매장에서만 허용하세요.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="toggle-qr-coupon-only-mode"
+                    onClick={() => setFormQrCouponOnlyMode((prev) => !prev)}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: '10px',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      border: formQrCouponOnlyMode ? '1px solid #059669' : '1px solid #cbd5e1',
+                      background: formQrCouponOnlyMode ? '#059669' : '#ffffff',
+                      color: formQrCouponOnlyMode ? '#ffffff' : '#334155',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {formQrCouponOnlyMode ? '쿠폰 전용 ON' : '정기권 허용됨'}
+                  </button>
                 </div>
               </div>
 

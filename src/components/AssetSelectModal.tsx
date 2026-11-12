@@ -1,6 +1,7 @@
 import React from 'react';
-import { UserCheck, Check, X, AlertTriangle, CreditCard, Hand, Clock, Calendar, RefreshCw } from 'lucide-react';
-import { Member, MemberAsset, Bay } from '../services/api';
+import { UserCheck, Check, X, AlertTriangle, CreditCard, Hand, Clock, Calendar, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Member, MemberAsset, Bay, isPeriodMembershipAsset } from '../services/api';
+import { useKioskSettings } from '../stores/kioskSettings';
 import { TimeMaster } from '../utils/timeMaster';
 import { parseNullableFloorNumber } from '../utils/floorUtils';
 import { normalizeYmdDigits } from '../utils/kioskPurchaseEligibility';
@@ -66,6 +67,8 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
   onSwitchToDaily,
   onChangeBay
 }) => {
+  const { settings } = useKioskSettings();
+  const isQrCouponOnly = authMember.auth_channel === 'QR' && settings.qrCouponOnlyMode !== false;
   const currentBayObj = bays.find(b => b.bay_no === selectedBayNo);
   const targetZoneCode = currentBayObj?.zone_code?.toUpperCase() || 'BAY';
   const rawFloor = currentBayObj?.floor_no ?? currentBayObj?.floor;
@@ -77,8 +80,9 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
   const getFloorMismatchReason = (asset: MemberAsset): string | null =>
     evaluateAssetFloorMismatchReason(asset, rawFloor);
 
-  // 1. 유효 배정 가능 이용권 필터링 (SSOT logic_type / access_rules / 미래 개시일 이중 방어)
+  // 1. 유효 배정 가능 이용권 필터링 (SSOT logic_type / access_rules / 미래 개시일 / QR 쿠폰 전용 이중 방어)
   const validAssets = (authMember.assets || []).filter(asset => {
+    if (isQrCouponOnly && isPeriodMembershipAsset(asset)) return false;
     if (asset.is_assignable === false) return false;
     const startDigits = normalizeYmdDigits(asset.start_date);
     if (todayDigits && startDigits && startDigits > todayDigits) return false;
@@ -317,10 +321,38 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
             >
               <CreditCard size={48} strokeWidth={1.8} style={{ color: '#cbd5e1' }} />
               <div>
-                {lang === 'KO' 
-                  ? '해당 타석에서 사용할 수 있는 이용권이 없습니다.' 
-                  : 'No active pass items found for this zone.'}
+                {isQrCouponOnly && (authMember.qr_restricted_period_count || 0) > 0
+                  ? '사용 가능한 쿠폰(횟수권·시간권)이 없습니다.'
+                  : (lang === 'KO' 
+                      ? '해당 타석에서 사용할 수 있는 이용권이 없습니다.' 
+                      : 'No active pass items found for this zone.')}
               </div>
+              {isQrCouponOnly && (authMember.qr_restricted_period_count || 0) > 0 && (
+                <div
+                  data-testid="qr-period-pass-restricted-banner"
+                  style={{
+                    fontSize: '15px',
+                    color: '#92400e',
+                    background: '#fffbeb',
+                    border: '1.5px solid #fcd34d',
+                    padding: '14px 20px',
+                    borderRadius: '16px',
+                    textAlign: 'left',
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <ShieldAlert size={24} style={{ color: '#d97706', flexShrink: 0 }} />
+                  <div>
+                    <strong>QR 인증은 쿠폰(횟수권·시간권) 전용입니다.</strong><br />
+                    본인 전용 일반 정기권({authMember.qr_restricted_period_count}건)은 <strong>[AI 안면인식]</strong> 또는 <strong>[앱 스마트 체크인]</strong>으로 인증해 주세요.
+                  </div>
+                </div>
+              )}
               {(() => {
                 const unassignableReasons = (authMember.assets || [])
                   .filter(a => a.is_assignable === false && a.unassignable_reason)

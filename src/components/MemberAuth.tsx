@@ -111,6 +111,7 @@ interface MemberAuthProps {
   faceTerminalEnabled?: boolean;
   enabledAuthModes?: AuthMode[];
   defaultAuthMode?: AuthMode;
+  disallowQrScan?: boolean;
   isSubModal?: boolean;
   selectedBayNo?: number | null;
   selectedBayNos?: number[];
@@ -125,6 +126,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   faceTerminalEnabled = true,
   enabledAuthModes,
   defaultAuthMode,
+  disallowQrScan = false,
   isSubModal = false,
   selectedBayNo,
   selectedBayNos,
@@ -134,10 +136,17 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   onAuthError
 }) => {
   const { settings } = useKioskSettings();
-  const activeAuthModes: AuthMode[] =
+  const baseAuthModes: AuthMode[] =
     enabledAuthModes && enabledAuthModes.length > 0
       ? enabledAuthModes
       : resolveEnabledAuthModes(settings.authMethods, faceTerminalEnabled);
+  const filteredAuthModes: AuthMode[] = disallowQrScan
+    ? baseAuthModes.filter((m) => m !== 'QR_SCAN')
+    : baseAuthModes;
+  const activeAuthModes: AuthMode[] =
+    filteredAuthModes.length > 0
+      ? filteredAuthModes
+      : (faceTerminalEnabled !== false ? ['SMART_TAG', 'FACE'] : ['SMART_TAG']);
 
   const effectiveInitialMode: AuthMode = resolveEffectiveAuthMode(
     initialAuthMode,
@@ -267,6 +276,9 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         if (!resolved.masked_name && resolved.member_name) {
           resolved.masked_name = buildMaskedName(resolved.member_name);
         }
+        if (authType === 'QR' && !resolved.auth_channel) {
+          resolved.auth_channel = 'QR';
+        }
         setDetectedMember(resolved);
       } else if (fallbackMember) {
         setDetectedMember(fallbackMember);
@@ -307,18 +319,26 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   }, []);
 
   const isSmartTagEnabled = activeAuthModes.includes('SMART_TAG');
-  const isQrScanEnabled = activeAuthModes.includes('QR_SCAN');
+  const isQrScanEnabled = !disallowQrScan && activeAuthModes.includes('QR_SCAN');
 
   // 🛡️ E2E 테스트 및 외부 하드웨어 브릿지용 전역 헬퍼 및 이벤트 리스너 (BUG-M05)
   useEffect(() => {
-    window.__LM_TRIGGER_SMART_AUTH__ = (
+    window.__LM_TRIGGER_SMART_AUTH__ = async (
       tokenOrUid: string,
       rssi?: number,
       authType?: 'BLE' | 'NFC' | 'QR'
-    ) => handleSmartTagDetected(tokenOrUid, undefined, rssi, authType);
+    ) => {
+      if (authType === 'QR' && !isQrScanEnabled) return;
+      await handleSmartTagDetected(tokenOrUid, undefined, rssi, authType);
+    };
     const handleCustomTagEvent = (e: Event) => {
-      if (!isSmartTagEnabled) return;
       const detail = (e as CustomEvent<LmNfcTagEventDetail>).detail;
+      const authType = detail?.auth_type;
+      if (authType === 'QR') {
+        if (!isQrScanEnabled) return;
+      } else if (!isSmartTagEnabled) {
+        return;
+      }
       const target =
         detail?.member_no ||
         detail?.token_or_uid ||
@@ -326,7 +346,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         detail?.query ||
         detail?.hp;
       const rssi = typeof detail?.rssi === 'number' ? detail.rssi : undefined;
-      const authType = detail?.auth_type;
       if (target) {
         handleSmartTagDetected(String(target), undefined, rssi, authType);
       }
@@ -336,15 +355,15 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       delete window.__LM_TRIGGER_SMART_AUTH__;
       window.removeEventListener('lm-nfc-tag', handleCustomTagEvent);
     };
-  }, [handleSmartTagDetected, isSmartTagEnabled]);
+  }, [handleSmartTagDetected, isSmartTagEnabled, isQrScanEnabled]);
 
-  // 🛡️ 바코드/QR 하드웨어 스캐너 전역 자동 감지 (QR_SCAN 또는 SMART_TAG 활성 시 상시 동작, 모달/검색 중 차단)
+  // 🛡️ 바코드/QR 하드웨어 스캐너 전역 자동 감지 (QR_SCAN 활성 및 목적 허용 시에만 동작, 모달/검색/라카/상품구매 중 차단)
   useHardwareScanner({
     onScan: (scanned) => {
       console.log('[MemberAuth] Hardware QR/Barcode scanned:', scanned);
       handleSmartTagDetected(scanned, undefined, undefined, 'QR');
     },
-    enabled: (isQrScanEnabled || isSmartTagEnabled) && !isSearching && !detectedMember && !faceMatchResult && duplicateCandidates.length === 0,
+    enabled: isQrScanEnabled && !isSearching && !detectedMember && !faceMatchResult && duplicateCandidates.length === 0,
   });
 
   // 📡 로컬 하드웨어 브릿지(:18080/api/v1/ble/poll) WinRT BLE 근접 태그 실시간 감지 폴링

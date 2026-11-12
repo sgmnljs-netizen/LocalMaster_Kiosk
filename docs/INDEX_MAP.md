@@ -1,8 +1,8 @@
 # 🗺️ LocalMaster Kiosk (`LocalMaster_Kiosk`) 단일 진실 공급원(SSOT) 맵
 
-> **최종 동기화 일자**: 2026-11-11
+> **최종 동기화 일자**: 2026-11-12
 > **포트 규약**: `Port 5179` (Vite React + TypeScript + Electron/Windows Hardware Bridge)
-> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 89개 파일 551 passed / 8대 골든 패스 E2E 100% 통과)
+> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 91개 파일 559 passed / 8대 골든 패스 E2E 100% 통과)
 
 ---
 
@@ -27,7 +27,7 @@
 - **`components/IntroScreen.tsx`**: 메인 대기 화면 (실시간 층별 타석 현황 위젯 및 터치 진입)
 - **`components/MainPage/KioskMainDashboard.tsx`**: 7대 표준 기능(체크인·타석배정·파3·상품구매·라카연장·타석이동·회원가입) 27인치 메인 허브
 - **`components/TopTeeboxDashboard.tsx` & `MiniTeeboxMonitor.tsx` & `KioskLiveClock.tsx` & `utils/floorUtils.ts`**: 물리 층 내림차순(`sortFloorsDescending`, 지하층 정규화) 타석 현황판 및 KST 실시간 시계
-- **`components/MemberAuth.tsx`**: 휴대폰 뒷 8자리(`010-` 고정) / QR·바코드 / 무선 스마트 체크인 / 안면인식 회원 인증
+- **`components/MemberAuth.tsx`**: 휴대폰 뒷 8자리(`010-` 고정) / 쿠폰전용 QR(`qrCouponOnlyMode` & 라카·구매 비노출) / 무선 스마트 체크인 / 안면인식 회원 인증
 - **`components/MemberRegister.tsx` & `VirtualKeyboard.tsx`**: 30초 즉석 회원가입 및 4대 모드(`HANGUL_NAME`·`COUPON_CODE`·`ASCII_TEXT`·`NUMERIC`) 가상 키보드
 - **`components/CheckinSelect.tsx`**: 당일 예약 조회 및 2-Track 상시 체크인(얼리 체크인 `CHK` & 정시 물리 타석 기동)
 - **`components/PracticeSelect.tsx` & `TeeboxMap.tsx` & `TeeboxTileCard.tsx` & `utils/bayStatusGuard.ts`**: 층별 타석 배정 및 셀프 이동 맵, `isBayTrulyAvailableForKiosk` 순수 가용 필터
