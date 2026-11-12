@@ -470,9 +470,10 @@ export class TimeMaster {
     lang: 'KO' | 'EN' = 'KO'
   ): { title: string; message: string } {
     if (lang !== 'KO') {
+      const enRange = windowStatus.rangeLabel.replace('익일 ', 'next day ');
       return {
         title: windowStatus.phase === 'AFTER_CLOSE' ? 'Store Closed for Today' : 'Outside Operating Hours',
-        message: `Current time (${windowStatus.currentHhmm}) is outside store operating hours (${windowStatus.rangeLabel}).`,
+        message: `Current time (${windowStatus.currentHhmm}) is outside store operating hours (${enRange}).`,
       };
     }
 

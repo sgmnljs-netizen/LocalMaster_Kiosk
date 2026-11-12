@@ -2085,8 +2085,18 @@ class HybridAPIClient {
       }
     }
     if (rec.detail && typeof rec.detail === 'object') {
-      const nestedMsg = (rec.detail as Record<string, unknown>).message;
-      if (typeof nestedMsg === 'string' && nestedMsg.trim()) return nestedMsg.trim();
+      const detailObj = rec.detail as Record<string, unknown>;
+      for (const key of ['message', 'detail', 'reason']) {
+        const val = detailObj[key];
+        if (typeof val === 'string' && val.trim()) return val.trim();
+      }
+    }
+    if (rec.error && typeof rec.error === 'object') {
+      const errObj = rec.error as Record<string, unknown>;
+      for (const key of ['message', 'detail', 'reason']) {
+        const val = errObj[key];
+        if (typeof val === 'string' && val.trim()) return val.trim();
+      }
     }
     if (typeof rec.message === 'string' && rec.message.trim()) {
       return rec.message.trim();
