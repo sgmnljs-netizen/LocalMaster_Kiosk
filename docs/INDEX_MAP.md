@@ -2,7 +2,7 @@
 
 > **최종 동기화 일자**: 2026-11-12
 > **포트 규약**: `Port 5179` (Vite React + TypeScript + Electron/Windows Hardware Bridge)
-> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 91개 파일 559 passed / 8대 골든 패스 E2E 100% 통과)
+> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 92개 파일 565 passed / 8대 골든 패스 E2E 100% 통과)
 
 ---
 
@@ -11,7 +11,7 @@
 | 문서명 | 위치 | 설명 |
 | :--- | :--- | :--- |
 | 🤖 **무인 키오스크 총괄 허브** | [kiosk_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk_master.md) | 키오스크 전체 아키텍처, 6대 서브 마스터 색인, API 카탈로그, 8대 골든 패스 E2E 규약 |
-| ⛳ **1. 타석 배정 & 이동 마스터** | [kiosk_allocation_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk/kiosk_allocation_master.md) | 비관적 선점 락, 단일/연쇄 배정, 순수 컬러 코딩 현황표, 마감 단축, 동반자, 파3, 셀프 이동 |
+| ⛳ **1. 타석 배정 & 이동 마스터** | [kiosk_allocation_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk/kiosk_allocation_master.md) | 비관적 선점 락·거절사유 원문, 단일/연쇄 배정, 운영시간 사전가드·마감 단축, 동반자, 파3, 셀프 이동 |
 | 👤 **2. 회원 인증 & 신규가입 마스터** | [kiosk_auth_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk/kiosk_auth_master.md) | 4대 인증 채널(스마트태그/안면/키패드/QR), 30초 신규가입, 한글 오토마타, 가상 키보드 |
 | 🎟️ **3. 당일 상시 체크인 마스터** | [kiosk_checkin_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk/kiosk_checkin_master.md) | 사전예약 당일 체크인 2-Track(얼리/정시 가동), 미결제 배제, 배정표 재출력, 대기 보호 |
 | 💳 **4. VAN 결제 & 매대 마스터** | [kiosk_payment_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk/kiosk_payment_master.md) | 다중 TID 라우팅, 할부 개월, 0원 무카드, Exception-Only 상품 매대·일일권 사전 가드, 라카 연장, 2PC 망취소/DLQ |
@@ -26,11 +26,11 @@
 - **`KioskApp.tsx`**: 최상위 상태 머신 오케스트레이터 (세션/네트워크 자동 복구, VAN 2PC 망취소·DLQ, 배정·구매·라카연장 제어)
 - **`components/IntroScreen.tsx`**: 메인 대기 화면 (실시간 층별 타석 현황 위젯 및 터치 진입)
 - **`components/MainPage/KioskMainDashboard.tsx`**: 7대 표준 기능(체크인·타석배정·파3·상품구매·라카연장·타석이동·회원가입) 27인치 메인 허브
-- **`components/TopTeeboxDashboard.tsx` & `MiniTeeboxMonitor.tsx` & `KioskLiveClock.tsx` & `utils/floorUtils.ts`**: 물리 층 내림차순(`sortFloorsDescending`, 지하층 정규화) 타석 현황판 및 KST 실시간 시계
+- **`components/TopTeeboxDashboard.tsx` & `MiniTeeboxMonitor.tsx` & `KioskLiveClock.tsx` & `utils/floorUtils.ts` & `utils/timeMaster.ts`**: 물리 층 내림차순 타석 현황판, KST 시계 및 운영시간·마감 잔여분(`evaluateStoreOperatingWindow`) 산출
 - **`components/MemberAuth.tsx`**: 휴대폰 뒷 8자리(`010-` 고정) / 쿠폰전용 QR(`qrCouponOnlyMode` & 라카·구매 비노출) / 무선 스마트 체크인 / 안면인식 회원 인증
 - **`components/MemberRegister.tsx` & `VirtualKeyboard.tsx`**: 30초 즉석 회원가입 및 4대 모드(`HANGUL_NAME`·`COUPON_CODE`·`ASCII_TEXT`·`NUMERIC`) 가상 키보드
 - **`components/CheckinSelect.tsx`**: 당일 예약 조회 및 2-Track 상시 체크인(얼리 체크인 `CHK` & 정시 물리 타석 기동)
-- **`components/PracticeSelect.tsx` & `TeeboxMap.tsx` & `TeeboxTileCard.tsx` & `utils/bayStatusGuard.ts`**: 층별 타석 배정 및 셀프 이동 맵, `isBayTrulyAvailableForKiosk` 순수 가용 필터
+- **`components/PracticeSelect.tsx` & `TeeboxMap.tsx` & `TeeboxTileCard.tsx` & `utils/bayStatusGuard.ts`**: 층별 타석 배정 및 셀프 이동 맵, `isBayTrulyAvailableForKiosk` 가용 필터 및 선점 거절 원문(`resolvePreoccupyFailureMessage`) 표출
 - **`components/AssetSelectModal.tsx`**: 보유 이용권 선택 모달 (1.58:1 2열 카드 덱, `evaluateAssetFloorMismatchReason` 층 제한 안내)
 - **`components/CompanionSetupModal.tsx` & `ChainedBookingModal.tsx`**: 동반자 다중 타석(최대 4석, 횟수권/일일권) 설정 및 연쇄 대기 예약
 - **`components/Par3Allocation.tsx`**: 파3 코스/티타임 선택, 보유 이용권 차감, 서브 사업자 TID 라우팅 및 WAL/망취소/DLQ 연동

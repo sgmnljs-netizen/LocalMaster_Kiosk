@@ -2036,11 +2036,70 @@ class HybridAPIClient {
   }
 
   // 3. 타석 선점 (Pre-emption) - 단일 및 다중 타석 지원
+  private lastPreoccupyError: string | null = null;
+
+  getLastPreoccupyError(): string | null {
+    return this.lastPreoccupyError;
+  }
+
+  consumeLastPreoccupyError(): string | null {
+    const msg = this.lastPreoccupyError;
+    this.lastPreoccupyError = null;
+    return msg;
+  }
+
+  /**
+   * 타석 선점(preoccupyBay / preoccupyBays) 실패 시 백엔드 HTTP 409/400/403/422 detail 원문을 우선 반환하고,
+   * 일반적인 타 단말기 선점 경합('이미 다른 고객님이 선택 중인 타석입니다.')이나 무응답 시에만 화면별 기본 안내문을 반환합니다.
+   */
+  resolvePreoccupyFailureMessage(
+    fallbackKo: string,
+    fallbackEn: string,
+    lang: 'KO' | 'EN' = 'KO'
+  ): string {
+    const serverReason = this.consumeLastPreoccupyError();
+    if (serverReason) {
+      const normalized = serverReason.trim();
+      const isGenericConflict =
+        normalized === '이미 다른 고객님이 선택 중인 타석입니다.' ||
+        normalized === '이미 다른 고객님께서 선택 중인 타석입니다.';
+      if (!isGenericConflict) {
+        return normalized;
+      }
+    }
+    return lang === 'KO' ? fallbackKo : fallbackEn;
+  }
+
+  private extractPreoccupyErrorDetail(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object') return null;
+    const rec = payload as Record<string, unknown>;
+    if (typeof rec.detail === 'string' && rec.detail.trim()) {
+      return rec.detail.trim();
+    }
+    if (Array.isArray(rec.detail) && rec.detail.length > 0) {
+      const first = rec.detail[0];
+      if (typeof first === 'string' && first.trim()) return first.trim();
+      if (first && typeof first === 'object') {
+        const msg = (first as Record<string, unknown>).msg;
+        if (typeof msg === 'string' && msg.trim()) return msg.trim();
+      }
+    }
+    if (rec.detail && typeof rec.detail === 'object') {
+      const nestedMsg = (rec.detail as Record<string, unknown>).message;
+      if (typeof nestedMsg === 'string' && nestedMsg.trim()) return nestedMsg.trim();
+    }
+    if (typeof rec.message === 'string' && rec.message.trim()) {
+      return rec.message.trim();
+    }
+    return null;
+  }
+
   async preoccupyBay(bayNo: number): Promise<boolean> {
     return this.preoccupyBays([bayNo]);
   }
 
   async preoccupyBays(bayNos: number[]): Promise<boolean> {
+    this.lastPreoccupyError = null;
     if (!bayNos || bayNos.length === 0) return false;
     const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
     const storeCd = this.getStoreCd();
@@ -2065,6 +2124,7 @@ class HybridAPIClient {
           }
         );
         if (res.ok) {
+          this.lastPreoccupyError = null;
           try {
             const cachedBays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
             if (Array.isArray(cachedBays) && cachedBays.length > 0) {
@@ -2084,8 +2144,14 @@ class HybridAPIClient {
           }
           return true;
         }
-        if (res.status === 409 || res.status === 400 || res.status === 422) {
-          console.warn(`[Preoccupy] 서버에서 타석 선점 거절 (HTTP ${res.status})`);
+        try {
+          const errPayload: unknown = await res.json();
+          this.lastPreoccupyError = this.extractPreoccupyErrorDetail(errPayload);
+        } catch {
+          this.lastPreoccupyError = null;
+        }
+        if (res.status === 409 || res.status === 400 || res.status === 422 || res.status === 403 || res.status === 401) {
+          console.warn(`[Preoccupy] 서버에서 타석 선점 거절 (HTTP ${res.status}): ${this.lastPreoccupyError || 'no-detail'}`);
           return false;
         }
         if (!isDemoEnvironment()) {

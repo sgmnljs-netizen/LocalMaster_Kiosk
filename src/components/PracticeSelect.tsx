@@ -356,10 +356,22 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           // 타석 클릭 즉시 배정 방식 선택 모달 팝업
           setShowDecisionModal(true);
         } else {
-          setErrorMsg(lang === 'KO' ? '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.' : 'This teebox is already being selected by another customer. Please choose another teebox.');
+          setErrorMsg(
+            api.resolvePreoccupyFailureMessage(
+              '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.',
+              'This teebox is already being selected by another customer. Please choose another teebox.',
+              lang
+            )
+          );
         }
       } catch {
-        setErrorMsg(lang === 'KO' ? '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.' : 'This teebox is already being selected by another customer. Please choose another teebox.');
+        setErrorMsg(
+          api.resolvePreoccupyFailureMessage(
+            '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.',
+            'This teebox is already being selected by another customer. Please choose another teebox.',
+            lang
+          )
+        );
       } finally {
         isLockingRef.current = false;
         setPreoccupyLoading(false);
@@ -412,10 +424,22 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           const bayFloor = resolveBayFloorKey(bay);
           if (bayFloor !== activeFloor) setActiveFloor(bayFloor);
         } else {
-          setErrorMsg(lang === 'KO' ? '선택하신 타석 중 이미 다른 고객님이 선택 중인 타석이 있습니다. 다시 선택해 주세요.' : 'Some selected teeboxes are already being selected. Please choose another teebox.');
+          setErrorMsg(
+            api.resolvePreoccupyFailureMessage(
+              '선택하신 타석 중 이미 다른 고객님이 선택 중인 타석이 있습니다. 다시 선택해 주세요.',
+              'Some selected teeboxes are already being selected. Please choose another teebox.',
+              lang
+            )
+          );
         }
       } catch {
-        setErrorMsg(lang === 'KO' ? '선택하신 타석 중 이미 다른 고객님이 선택 중인 타석이 있습니다. 다시 선택해 주세요.' : 'Error securing group teeboxes. Please choose another teebox.');
+        setErrorMsg(
+          api.resolvePreoccupyFailureMessage(
+            '선택하신 타석 중 이미 다른 고객님이 선택 중인 타석이 있습니다. 다시 선택해 주세요.',
+            'Error securing group teeboxes. Please choose another teebox.',
+            lang
+          )
+        );
       } finally {
         isLockingRef.current = false;
         setPreoccupyLoading(false);

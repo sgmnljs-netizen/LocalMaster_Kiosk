@@ -937,15 +937,44 @@ export default function KioskApp() {
     resetKioskSessionState('MAIN_DASHBOARD');
   };
 
-  // 실시간 미니 모니터 타석 클릭 단축키
-  const handleMiniBayClick = async (bayNo: number) => {
+  // 매장 휴무일 및 당일 운영시간(open_time ~ close_time) 통합 사전 진입 가드
+  const guardStoreOperatingHours = (actionLabel: string): boolean => {
     if (isStoreClosed) {
+      const actionWithParticle =
+        actionLabel.endsWith('배정') || actionLabel.endsWith('이동') || actionLabel.endsWith('체크인')
+          ? `${actionLabel}을`
+          : `${actionLabel}을(를)`;
       showErrorModal(
         storeClosedReason
-          ? `오늘은 매장 휴무일(${storeClosedReason})로 타석 배정을 진행할 수 없습니다.`
-          : '오늘은 매장 휴무일로 타석 배정을 진행할 수 없습니다.',
+          ? `오늘은 매장 휴무일(${storeClosedReason})로 ${actionWithParticle} 진행할 수 없습니다.`
+          : `오늘은 매장 휴무일로 ${actionWithParticle} 진행할 수 없습니다.`,
         '매장 휴무일 안내'
       );
+      return false;
+    }
+
+    const hasSyncedStoreHours =
+      storeInfoSyncedRef.current ||
+      (typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('LM_STORE_INFO')));
+    if (hasSyncedStoreHours) {
+      const opWindow = TimeMaster.evaluateStoreOperatingWindow(
+        storeOpenTime,
+        storeCloseTime,
+        TimeMaster.getSyncedDate(),
+        { is24h: isStore24h }
+      );
+      if (!opWindow.isOpen) {
+        const blockNotice = TimeMaster.buildOperatingHoursBlockMessage(opWindow, actionLabel, lang);
+        showErrorModal(blockNotice.message, blockNotice.title);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // 실시간 미니 모니터 타석 클릭 단축키
+  const handleMiniBayClick = async (bayNo: number) => {
+    if (!guardStoreOperatingHours('타석 배정')) {
       return;
     }
     const miniTargetBay = bays.find(b => Number(b.bay_no) === Number(bayNo));
@@ -970,10 +999,24 @@ export default function KioskApp() {
         // 타석이 선점된 상태로 연습타석 분기 선택으로 직행
         setStep('PRACTICE_SELECT');
       } else {
-        showToast(lang === 'KO' ? '이미 다른 고객님께서 선택 중이거나 예약 불가능한 타석입니다.' : 'Failed to secure teebox.', false);
+        showToast(
+          api.resolvePreoccupyFailureMessage(
+            '이미 다른 고객님께서 선택 중이거나 예약 불가능한 타석입니다.',
+            'Failed to secure teebox.',
+            lang
+          ),
+          false
+        );
       }
     } catch {
-      showToast(lang === 'KO' ? '타석 선점 처리 중 오류가 발생했습니다.' : 'Failed to preoccupy teebox.', false);
+      showToast(
+        api.resolvePreoccupyFailureMessage(
+          '타석 선점 처리 중 오류가 발생했습니다.',
+          'Failed to preoccupy teebox.',
+          lang
+        ),
+        false
+      );
     }
   };
 
@@ -2760,25 +2803,13 @@ export default function KioskApp() {
                 lang={lang}
                 kioskMenuConfigs={kioskMenuConfigs}
                 onPracticeTeebox={() => {
-                  if (isStoreClosed) {
-                    showErrorModal(
-                      storeClosedReason
-                        ? `오늘은 매장 휴무일(${storeClosedReason})로 타석 배정을 진행할 수 없습니다.`
-                        : '오늘은 매장 휴무일로 타석 배정을 진행할 수 없습니다.',
-                      '매장 휴무일 안내'
-                    );
+                  if (!guardStoreOperatingHours('타석 배정')) {
                     return;
                   }
                   setStep('PRACTICE_SELECT');
                 }}
                 onPar3Allocation={() => {
-                  if (isStoreClosed) {
-                    showErrorModal(
-                      storeClosedReason
-                        ? `오늘은 매장 휴무일(${storeClosedReason})로 파3 배정을 진행할 수 없습니다.`
-                        : '오늘은 매장 휴무일로 파3 배정을 진행할 수 없습니다.',
-                      '매장 휴무일 안내'
-                    );
+                  if (!guardStoreOperatingHours('파3 배정')) {
                     return;
                   }
                   setPurpose('BOOK_PAR3');
@@ -2794,6 +2825,9 @@ export default function KioskApp() {
                   }
                 }}
                 onMoveBay={() => {
+                  if (!guardStoreOperatingHours('타석 이동')) {
+                    return;
+                  }
                   setPurpose('MOVE_BAY');
                   setInitialAuthMode('FACE');
                   if (authMember) {
@@ -2833,6 +2867,9 @@ export default function KioskApp() {
                     const customMenu = kioskMenuConfigs.find((m) => m.menu_id === menuId);
                     if (customMenu) {
                       if (zIds.length > 0) {
+                        if (!guardStoreOperatingHours('타석 배정')) {
+                          return;
+                        }
                         setPurpose('ALLOCATE_DAILY');
                         setStep('PRACTICE_SELECT');
                       } else {

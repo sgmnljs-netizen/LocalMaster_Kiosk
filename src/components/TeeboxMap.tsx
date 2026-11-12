@@ -368,10 +368,22 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         if (success) {
           setSelectedBayNo(bay.bay_no);
         } else {
-          setErrorMsg(lang === 'KO' ? '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.' : 'This teebox is already being selected by another customer. Please choose another teebox.');
+          setErrorMsg(
+            api.resolvePreoccupyFailureMessage(
+              '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.',
+              'This teebox is already being selected by another customer. Please choose another teebox.',
+              lang
+            )
+          );
         }
       } catch {
-        setErrorMsg(lang === 'KO' ? '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.' : 'This teebox is already being selected by another customer. Please choose another teebox.');
+        setErrorMsg(
+          api.resolvePreoccupyFailureMessage(
+            '이미 다른 고객님이 선택 중인 타석입니다. 다른 타석을 선택해 주세요.',
+            'This teebox is already being selected by another customer. Please choose another teebox.',
+            lang
+          )
+        );
       } finally {
         setPreoccupyLoading(false);
         onRefreshBays(); // 즉시 상태 갱신

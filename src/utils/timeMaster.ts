@@ -376,7 +376,181 @@ export class TimeMaster {
     }
     return Math.floor((closeEpochMs - now.getTime()) / 60000);
   }
+
+  /**
+   * 매장 당일 운영시간(open_time ~ close_time) 가용 구간 판정 (백엔드 BayFacade.preoccupy_bays & ReservationValidationService 1:1 정합)
+   * - 24시간 영업(is24h 또는 00:00~23:59/24:00) 및 심야 익일 마감(예: 06:00~익일 05:00) 완벽 지원
+   * - KST(UTC+9) 고정 산술로 비-KST OS 환경 오차 원천 차단
+   */
+  static evaluateStoreOperatingWindow(
+    storeOpenTime?: string | null,
+    storeCloseTime?: string | null,
+    now: Date = TimeMaster.getSyncedDate(),
+    options?: { is24h?: boolean }
+  ): StoreOperatingWindowStatus {
+    const { hours, minutes } = TimeMaster.getKstParts(now);
+    const currentHhmm = `${hours}:${minutes}`;
+
+    if (options?.is24h === true) {
+      return {
+        isOpen: true,
+        phase: 'OPEN',
+        currentHhmm,
+        rangeLabel: '00:00 ~ 24:00',
+      };
+    }
+
+    const parsedOpen = parseStoreHhmm(storeOpenTime);
+    const parsedClose = parseStoreHhmm(storeCloseTime);
+    if (!parsedOpen || !parsedClose) {
+      return {
+        isOpen: true,
+        phase: 'OPEN',
+        currentHhmm,
+        rangeLabel: '00:00 ~ 24:00',
+      };
+    }
+
+    const is24hPair =
+      (parsedOpen.label === parsedClose.label &&
+        (parsedClose.label === '24:00' || parsedClose.label === '00:00')) ||
+      (parsedOpen.label === '00:00' &&
+        (parsedClose.label === '23:59' ||
+          parsedClose.label === '24:00' ||
+          parsedClose.label === '00:00'));
+
+    if (is24hPair) {
+      return {
+        isOpen: true,
+        phase: 'OPEN',
+        currentHhmm,
+        rangeLabel: '00:00 ~ 24:00',
+      };
+    }
+
+    const MINUTES_PER_HOUR = 60;
+    const MINUTES_PER_DAY = 1440;
+    const oMin = parsedOpen.hh === 24 ? 0 : parsedOpen.hh * MINUTES_PER_HOUR + parsedOpen.mm;
+    const rawCloseMin = parsedClose.hh * MINUTES_PER_HOUR + parsedClose.mm;
+    const cMin = rawCloseMin === 0 ? MINUTES_PER_DAY : rawCloseMin;
+    const closeDisplay = cMin === MINUTES_PER_DAY ? '24:00' : parsedClose.label;
+    const curMin = parseInt(hours, 10) * MINUTES_PER_HOUR + parseInt(minutes, 10);
+
+    if (oMin === cMin) {
+      return {
+        isOpen: true,
+        phase: 'OPEN',
+        currentHhmm,
+        rangeLabel: '00:00 ~ 24:00',
+      };
+    }
+
+    if (oMin < cMin) {
+      const rangeLabel = `${parsedOpen.label} ~ ${closeDisplay}`;
+      if (curMin < oMin) {
+        return { isOpen: false, phase: 'BEFORE_OPEN', currentHhmm, rangeLabel };
+      }
+      if (curMin >= cMin) {
+        return { isOpen: false, phase: 'AFTER_CLOSE', currentHhmm, rangeLabel };
+      }
+      return { isOpen: true, phase: 'OPEN', currentHhmm, rangeLabel };
+    }
+
+    const rangeLabel = `${parsedOpen.label} ~ 익일 ${closeDisplay}`;
+    if (curMin >= oMin || curMin < cMin) {
+      return { isOpen: true, phase: 'OPEN', currentHhmm, rangeLabel };
+    }
+    return { isOpen: false, phase: 'OVERNIGHT_CLOSED', currentHhmm, rangeLabel };
+  }
+
+  /** 매장 운영시간 외 진입 차단 시 사용자 친화적 안내 모달 문구 생성 */
+  static buildOperatingHoursBlockMessage(
+    windowStatus: StoreOperatingWindowStatus,
+    actionLabel: string,
+    lang: 'KO' | 'EN' = 'KO'
+  ): { title: string; message: string } {
+    if (lang !== 'KO') {
+      return {
+        title: windowStatus.phase === 'AFTER_CLOSE' ? 'Store Closed for Today' : 'Outside Operating Hours',
+        message: `Current time (${windowStatus.currentHhmm}) is outside store operating hours (${windowStatus.rangeLabel}).`,
+      };
+    }
+
+    const actionWithParticle = appendKoreanObjectParticle(actionLabel);
+    if (windowStatus.phase === 'AFTER_CLOSE') {
+      return {
+        title: '매장 운영시간 종료 안내',
+        message: `금일 매장 운영시간(${windowStatus.rangeLabel})이 종료되어 ${actionWithParticle} 진행할 수 없습니다.\n(현재 시각: ${windowStatus.currentHhmm})`,
+      };
+    }
+    if (windowStatus.phase === 'BEFORE_OPEN') {
+      return {
+        title: '매장 운영시간 안내',
+        message: `현재 시각(${windowStatus.currentHhmm})은 매장 오픈 전입니다.\n운영시간(${windowStatus.rangeLabel})에 ${actionWithParticle} 이용해 주세요.`,
+      };
+    }
+    return {
+      title: '매장 운영시간 안내',
+      message: `현재 시각(${windowStatus.currentHhmm})은 매장 운영시간(${windowStatus.rangeLabel}) 외이므로 ${actionWithParticle} 진행할 수 없습니다.`,
+    };
+  }
 }
+
+export interface StoreOperatingWindowStatus {
+  isOpen: boolean;
+  phase: 'OPEN' | 'BEFORE_OPEN' | 'AFTER_CLOSE' | 'OVERNIGHT_CLOSED';
+  currentHhmm: string;
+  rangeLabel: string;
+}
+
+const parseStoreHhmm = (
+  raw?: string | null
+): { hh: number; mm: number; label: string } | null => {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+
+  let hh = NaN;
+  let mm = NaN;
+  const colonMatch = trimmed.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (colonMatch) {
+    hh = parseInt(colonMatch[1], 10);
+    mm = parseInt(colonMatch[2], 10);
+  } else if (/^\d{4}$/.test(trimmed)) {
+    hh = parseInt(trimmed.slice(0, 2), 10);
+    mm = parseInt(trimmed.slice(2, 4), 10);
+  } else {
+    return null;
+  }
+
+  if (
+    Number.isNaN(hh) ||
+    Number.isNaN(mm) ||
+    hh < 0 ||
+    hh > 24 ||
+    mm < 0 ||
+    mm > 59 ||
+    (hh === 24 && mm > 0)
+  ) {
+    return null;
+  }
+  return {
+    hh,
+    mm,
+    label: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`,
+  };
+};
+
+const appendKoreanObjectParticle = (word: string): string => {
+  const trimmed = word.trim();
+  if (!trimmed) return word;
+  const lastCode = trimmed.charCodeAt(trimmed.length - 1);
+  if (lastCode >= 0xac00 && lastCode <= 0xd7a3) {
+    const hasBatchim = (lastCode - 0xac00) % 28 !== 0;
+    return `${trimmed}${hasBatchim ? '을' : '를'}`;
+  }
+  return `${trimmed}을(를)`;
+};
 
 export interface BayStatusProbe {
   status?: string | null;
