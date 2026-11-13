@@ -9,3 +9,7 @@ backups/
 test-results/
 playwright-report/
 electron/.runtime/
+
+# Antigravity workspace-level agent scratch/teamwork artifacts
+.agents/
+.agent/
