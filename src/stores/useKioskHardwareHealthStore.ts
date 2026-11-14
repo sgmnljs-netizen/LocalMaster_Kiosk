@@ -21,7 +21,13 @@ let healthState: KioskHardwareHealthState = {
 const listeners = new Set<(state: KioskHardwareHealthState) => void>();
 
 function notify() {
-  Array.from(listeners).forEach((listener) => listener({ ...healthState }));
+  Array.from(listeners).forEach((listener) => {
+    try {
+      listener({ ...healthState });
+    } catch {
+      // 개별 리스너 예외 격리
+    }
+  });
 }
 
 export function getKioskHardwareHealth(): KioskHardwareHealthState {
@@ -54,6 +60,18 @@ export function setKioskHardwareHealth(partial: Partial<KioskHardwareHealthState
       sanitized.lastCheckedAt > 0
         ? Math.floor(sanitized.lastCheckedAt)
         : Date.now();
+  }
+  if (sanitized.vcatErrorMessage !== undefined && sanitized.vcatErrorMessage !== null) {
+    sanitized.vcatErrorMessage =
+      typeof sanitized.vcatErrorMessage === 'string'
+        ? sanitized.vcatErrorMessage
+        : String((sanitized.vcatErrorMessage as { message?: unknown })?.message ?? sanitized.vcatErrorMessage);
+  }
+  if (sanitized.printerErrorMessage !== undefined && sanitized.printerErrorMessage !== null) {
+    sanitized.printerErrorMessage =
+      typeof sanitized.printerErrorMessage === 'string'
+        ? sanitized.printerErrorMessage
+        : String((sanitized.printerErrorMessage as { message?: unknown })?.message ?? sanitized.printerErrorMessage);
   }
 
   let changed = false;

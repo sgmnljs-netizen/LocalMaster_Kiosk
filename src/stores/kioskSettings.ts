@@ -544,7 +544,7 @@ export function saveKioskSettings(
     apiUrl: (settings.apiUrl ?? current.apiUrl ?? DEFAULT_KIOSK_SETTINGS.apiUrl).trim().replace(/\/+$/, ''),
     defaultAuthMode: normalizeDefaultAuthMode(
       settings.defaultAuthMode ?? current.defaultAuthMode,
-      DEFAULT_KIOSK_SETTINGS.defaultAuthMode
+      current.defaultAuthMode ?? DEFAULT_KIOSK_SETTINGS.defaultAuthMode
     ),
     minGapMinutes:
       settings.minGapMinutes !== undefined
@@ -552,11 +552,11 @@ export function saveKioskSettings(
         : sanitizeMinGapMinutes(current.minGapMinutes),
     topDashboardMode: normalizeTopDashboardMode(
       settings.topDashboardMode ?? current.topDashboardMode,
-      DEFAULT_KIOSK_SETTINGS.topDashboardMode
+      current.topDashboardMode ?? DEFAULT_KIOSK_SETTINGS.topDashboardMode
     ),
     bayNumberOrder: normalizeBayNumberOrder(
       settings.bayNumberOrder ?? current.bayNumberOrder,
-      DEFAULT_KIOSK_SETTINGS.bayNumberOrder ?? 'ASC'
+      current.bayNumberOrder ?? DEFAULT_KIOSK_SETTINGS.bayNumberOrder ?? 'ASC'
     ),
   };
   if (typeof localStorage !== 'undefined') {
@@ -750,6 +750,10 @@ export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSetti
     } else if (typeof srv.qr_coupon_only_mode === 'boolean') {
       patch.qrCouponOnlyMode = srv.qr_coupon_only_mode;
     }
+    const rawBayOrder = srv.bayNumberOrder ?? srv.bay_number_order;
+    if (typeof rawBayOrder === 'string' && rawBayOrder.trim()) {
+      patch.bayNumberOrder = normalizeBayNumberOrder(rawBayOrder, current.bayNumberOrder);
+    }
 
     return saveKioskSettings(patch, { syncRemote: false });
   } catch {
@@ -862,6 +866,14 @@ export async function bootstrapLocalKioskSettings(
           terminalId: data.terminal_id || current.terminalId,
           vcatPort: data.vcat_port || current.vcatPort,
           providerType: data.provider_type || current.providerType,
+          ...(typeof (data.bay_number_order ?? data.bayNumberOrder) === 'string'
+            ? {
+                bayNumberOrder: normalizeBayNumberOrder(
+                  data.bay_number_order ?? data.bayNumberOrder,
+                  current.bayNumberOrder
+                ),
+              }
+            : {}),
         },
         { syncRemote: false }
       );
