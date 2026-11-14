@@ -310,7 +310,18 @@ export class PaymentOutboxManager {
 
   private static saveEntries(entries: PaymentOutboxEntry[]): void {
     try {
-      const trimmed = entries.slice(-PAYMENT_RESILIENCE_CONFIG.MAX_OUTBOX_ITEMS);
+      let trimmed = entries;
+      if (entries.length > PAYMENT_RESILIENCE_CONFIG.MAX_OUTBOX_ITEMS) {
+        const dlqItems = entries.filter((e) => e.kind === 'PENDING_DLQ');
+        const walItems = entries.filter((e) => e.kind !== 'PENDING_DLQ');
+        if (dlqItems.length >= PAYMENT_RESILIENCE_CONFIG.MAX_OUTBOX_ITEMS) {
+          trimmed = dlqItems.slice(-PAYMENT_RESILIENCE_CONFIG.MAX_OUTBOX_ITEMS);
+        } else {
+          const allowedWalCount = PAYMENT_RESILIENCE_CONFIG.MAX_OUTBOX_ITEMS - dlqItems.length;
+          const keptWalIds = new Set(walItems.slice(-allowedWalCount).map((w) => w.id));
+          trimmed = entries.filter((e) => e.kind === 'PENDING_DLQ' || keptWalIds.has(e.id));
+        }
+      }
       localStorage.setItem(PAYMENT_RESILIENCE_CONFIG.OUTBOX_STORAGE_KEY, JSON.stringify(trimmed));
     } catch (err) {
       console.error('[PaymentOutbox] Failed to persist outbox entries:', err);
@@ -329,6 +340,9 @@ export class PaymentOutboxManager {
   }): string {
     const cleanAuth = String(params.authCode || '').trim();
     const cleanStore = String(params.storeCd || '').trim();
+    const safeAmount = Number.isFinite(Number(params.amount))
+      ? Math.max(0, Math.floor(Number(params.amount)))
+      : 0;
     const id = cleanAuth
       ? `WAL_${cleanStore}_${cleanAuth}`
       : `WAL_${Date.now()}_${params.vanTrNo || Math.random().toString(36).slice(2, 7)}`;
@@ -353,7 +367,7 @@ export class PaymentOutboxManager {
       terminalId: params.terminalId,
       authCode: cleanAuth,
       vanTrNo: params.vanTrNo,
-      amount: params.amount,
+      amount: safeAmount,
       purpose: params.purpose,
       endpoint: params.endpoint,
       payload: params.payload,
@@ -372,7 +386,10 @@ export class PaymentOutboxManager {
   }): string {
     const cleanAuth = String(params.authCode || '').trim();
     const cleanStore = String(params.storeCd || '').trim();
-    const dedupKey = `DLQ_${cleanStore}_${cleanAuth}_${params.amount}`;
+    const safeAmount = Number.isFinite(Number(params.amount))
+      ? Math.max(0, Math.floor(Number(params.amount)))
+      : 0;
+    const dedupKey = `DLQ_${cleanStore}_${cleanAuth}_${safeAmount}`;
     const nowIso = new Date().toISOString();
     // 동일 지점·승인번호의 WAL_IN_FLIGHT가 남아있으면 PENDING_DLQ로 원자적 승격(치환)
     const entries = this.getEntries().filter(
@@ -395,7 +412,7 @@ export class PaymentOutboxManager {
       terminalId: params.terminalId,
       authCode: cleanAuth,
       vanTrNo: params.vanTrNo,
-      amount: params.amount,
+      amount: safeAmount,
       endpoint: '/sales/dlq/report-ghost-charge',
       payload: params.payload,
     });

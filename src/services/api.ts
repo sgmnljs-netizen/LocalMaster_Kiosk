@@ -7,7 +7,13 @@
  */
 
 import { TimeMaster } from '../utils/timeMaster';
-import { parseNullableFloorNumber, normalizeFloorZoneToken } from '../utils/floorUtils';
+import {
+  parseNullableFloorNumber,
+  normalizeFloorZoneToken,
+  extractBayNumberOrderFromMeta,
+  normalizeBayNumberOrder,
+  type BayNumberOrder,
+} from '../utils/floorUtils';
 import { isKioskChannelProduct } from '../utils/kioskPurchaseEligibility';
 import type { CardApprovalResult } from './van/van_types';
 import { getKioskSettings, saveKioskSettings, normalizeApiUrl, hydrateKioskDeviceSettingsFromServer } from '../stores/kioskSettings';
@@ -473,6 +479,7 @@ export interface KioskStoreInfo {
   prepare_time_min?: number;
   logo_url?: string;
   photo_url?: string;
+  bay_number_order?: BayNumberOrder;
   meta_data?: KioskStoreMetaData | string | null;
 }
 
@@ -1239,8 +1246,8 @@ class HybridAPIClient {
 
             if (['bay_updated', 'bay_update', 'bay_status_updated', 'bay_preoccupy'].includes(eventType)) {
               // Edge DB LocalStorage 즉시 동기화
-              const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
-              const idx = bays.findIndex(b => b.bay_no === bayNo);
+              const bays = safeParseStorageArray<Bay>('LM_BAYS');
+              const idx = bays.findIndex(b => Number(b.bay_no) === Number(bayNo));
               if (idx !== -1) {
                 const isChainedEvent = data.action === 'CHAINED_RESERVED' || data.is_chained === true || bayObj.is_chained === true;
                 if (isChainedEvent) {
@@ -1324,7 +1331,7 @@ class HybridAPIClient {
             // global_pause: 전체 볼회수 일시정지/해제 동기화
             if (eventType === 'global_pause') {
               const pausedFlag = Boolean(data.is_paused ?? data.paused);
-              const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
+              const bays = safeParseStorageArray<Bay>('LM_BAYS');
               let changed = false;
               for (let i = 0; i < bays.length; i++) {
                 const isActive = ['OCCUPIED', 'PREPARE', 'USE'].includes(bays[i].status);
@@ -1342,11 +1349,11 @@ class HybridAPIClient {
 
             // bay_release: 종료된 타석 AVAILABLE 복원 (선점 해제 시 실제 이용 중인 타석 덮어쓰기 방어)
             if (eventType === 'bay_release') {
-              const bays = JSON.parse(localStorage.getItem('LM_BAYS') || '[]') as Bay[];
+              const bays = safeParseStorageArray<Bay>('LM_BAYS');
               const bayNos = (data.bay_nos as number[]) || (data.bay_no ? [data.bay_no as number] : []);
               let changed = false;
               for (const bNo of bayNos) {
-                const idx = bays.findIndex(b => b.bay_no === bNo);
+                const idx = bays.findIndex(b => Number(b.bay_no) === Number(bNo));
                 if (idx !== -1) {
                   const hasActiveSession = ['OCCUPIED', 'PREPARE', 'USE'].includes(bays[idx].status) && Boolean(bays[idx].current_user_name || bays[idx].end_time);
                   if (data.terminal_id && hasActiveSession) {
@@ -1612,18 +1619,38 @@ class HybridAPIClient {
           const resolvedTel = data.phone_no || data.tel || data.tel_no || '02-450-4500';
           const resolvedCeo = data.owner_nm || data.owner_name || data.ceo_name || data.ceo_nm || '';
           const resolvedBizNo = data.biz_no || data.biz_reg_no || data.business_no || '';
-          const parsedMeta =
+          const parsedMetaRaw =
             typeof data.meta_data === 'string'
               ? (() => {
                   try {
-                    return JSON.parse(data.meta_data) as Record<string, unknown>;
+                    return JSON.parse(data.meta_data) as unknown;
                   } catch {
                     return {};
                   }
                 })()
-              : ((data.meta_data as Record<string, unknown>) || {});
-          const todayOp = (parsedMeta.today_operation as Record<string, unknown>) || {};
-          const baseOp = (parsedMeta.operation as Record<string, unknown>) || {};
+              : data.meta_data;
+          const parsedMeta: Record<string, unknown> =
+            parsedMetaRaw && typeof parsedMetaRaw === 'object' && !Array.isArray(parsedMetaRaw)
+              ? (parsedMetaRaw as Record<string, unknown>)
+              : {};
+          const todayOp =
+            parsedMeta.today_operation && typeof parsedMeta.today_operation === 'object' && !Array.isArray(parsedMeta.today_operation)
+              ? (parsedMeta.today_operation as Record<string, unknown>)
+              : {};
+          const baseOp =
+            parsedMeta.operation && typeof parsedMeta.operation === 'object' && !Array.isArray(parsedMeta.operation)
+              ? (parsedMeta.operation as Record<string, unknown>)
+              : {};
+          const explicitTopOrder =
+            typeof (data.bay_number_order ?? data.bayNumberOrder) === 'string' &&
+            String(data.bay_number_order ?? data.bayNumberOrder).trim()
+              ? normalizeBayNumberOrder(data.bay_number_order ?? data.bayNumberOrder)
+              : undefined;
+          const resolvedBayOrder =
+            explicitTopOrder ?? extractBayNumberOrderFromMeta(parsedMeta) ?? undefined;
+          if (resolvedBayOrder && getKioskSettings().bayNumberOrder !== resolvedBayOrder) {
+            saveKioskSettings({ bayNumberOrder: resolvedBayOrder }, { syncRemote: false });
+          }
           const resolvedOpenTime = String(data.open_time || todayOp.open_time || baseOp.open_time || '06:00');
           const resolvedCloseTime = String(data.close_time || todayOp.close_time || baseOp.close_time || '23:00');
           const resolvedIs24h = Boolean(
@@ -1659,6 +1686,7 @@ class HybridAPIClient {
             prepare_time_min: resolvedPrepareMin,
             logo_url: data.logo_url || undefined,
             photo_url: data.photo_url || undefined,
+            bay_number_order: resolvedBayOrder,
             meta_data: data.meta_data
           };
         }
@@ -1692,6 +1720,8 @@ class HybridAPIClient {
       prepare_time_min?: number;
       logo_url?: string;
       photo_url?: string;
+      bay_number_order?: string;
+      bayNumberOrder?: string;
       meta_data?: Record<string, unknown>;
     };
     const fallbackTel = cached.phone_no || cached.tel || cached.tel_no || '1566-8705';
@@ -1699,6 +1729,11 @@ class HybridAPIClient {
     const fallbackBizNo = cached.biz_no || cached.biz_reg_no || cached.business_no || '721-81-04039';
     const cachedOpenTime = cached.open_time || '06:00';
     const cachedCloseTime = cached.close_time || '23:00';
+    const cachedBayOrder =
+      (typeof (cached.bay_number_order ?? cached.bayNumberOrder) === 'string' &&
+      String(cached.bay_number_order ?? cached.bayNumberOrder).trim()
+        ? normalizeBayNumberOrder(cached.bay_number_order ?? cached.bayNumberOrder)
+        : undefined) ?? extractBayNumberOrderFromMeta(cached.meta_data);
     return {
       store_cd: cached.store_cd || this.getStoreCd(),
       store_nm: cached.store_nm || '골포스 강남 1호점 (체험관)',
@@ -1726,6 +1761,7 @@ class HybridAPIClient {
           : 3,
       logo_url: cached.logo_url || undefined,
       photo_url: cached.photo_url || undefined,
+      bay_number_order: cachedBayOrder,
       meta_data: cached.meta_data || { integration: { face_terminal_yn: true } }
     };
   }
