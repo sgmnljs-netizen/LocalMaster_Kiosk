@@ -546,19 +546,24 @@ export default function KioskApp() {
         setLogoUrl(info.logo_url);
         setPhotoUrl(info.photo_url);
 
-        if (info.meta_data) {
+        if (info.meta_data || info.bay_number_order) {
           try {
             const meta = typeof info.meta_data === 'string' ? JSON.parse(info.meta_data) : info.meta_data;
             const faceYn = meta?.integration?.face_terminal_yn ?? true;
             setFaceTerminalEnabled(faceYn);
-            api.resolveKioskFaceTerminalIp(meta);
-            const resolvedBayOrder = extractBayNumberOrderFromMeta(meta) ?? 'ASC';
+            if (meta) {
+              api.resolveKioskFaceTerminalIp(meta);
+            }
+            const resolvedBayOrder = info.bay_number_order ?? extractBayNumberOrderFromMeta(meta) ?? 'ASC';
             setBayNumberOrder(resolvedBayOrder);
             if (getKioskSettings().bayNumberOrder !== resolvedBayOrder) {
               saveKioskSettings({ bayNumberOrder: resolvedBayOrder }, { syncRemote: false });
             }
           } catch {
             setFaceTerminalEnabled(true);
+            if (info.bay_number_order) {
+              setBayNumberOrder(info.bay_number_order);
+            }
           }
         }
         if (isOnlineNow) {

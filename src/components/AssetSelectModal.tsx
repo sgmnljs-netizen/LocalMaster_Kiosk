@@ -95,6 +95,28 @@ export function evaluateAssetFloorMismatchReason(
   return null;
 }
 
+export function isZoneCompatibleWithAllowedCategories(
+  targetZoneCode?: string | null,
+  allowedCategories?: string[] | null
+): boolean {
+  if (!allowedCategories || allowedCategories.length === 0) return true;
+  const allowedSet = new Set(
+    allowedCategories
+      .map((c) => String(c || '').trim().toUpperCase())
+      .filter(Boolean)
+  );
+  if (allowedSet.size === 0 || allowedSet.has('ALL')) return true;
+  const normTarget = String(targetZoneCode || 'BAY').trim().toUpperCase() || 'BAY';
+  if (allowedSet.has(normTarget)) return true;
+  if (
+    (normTarget === 'BAY' || normTarget === 'BAT') &&
+    (allowedSet.has('BAY') || allowedSet.has('BAT'))
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * [SSOT] 선택한 타석 및 인증 채널(QR 쿠폰 전용 모드 포함) 기준 유효 배정 가능 이용권 필터링
  * - AssetSelectModal, KioskApp, MemberAuth(본인 확인 프리뷰)에서 100% 동일 규약 공유
@@ -126,9 +148,7 @@ export function filterValidAssignableAssets(
       return false;
     }
     if (evaluateAssetFloorMismatchReason(asset, rawFloor) !== null) return false;
-    if (!asset.allowed_categories || asset.allowed_categories.length === 0) return true;
-    const allowedUpper = asset.allowed_categories.map((c) => c.toUpperCase());
-    return allowedUpper.includes(targetZoneCode);
+    return isZoneCompatibleWithAllowedCategories(targetZoneCode, asset.allowed_categories);
   });
 }
 
@@ -182,9 +202,12 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
     todayDigits,
   });
 
-  // 배정 불가(제약 위반 및 층 불일치) 이용권 목록 (레슨권 LESSON 및 기소진 0회 일일/횟수권은 제외)
+  // 배정 불가(제약 위반 및 층 불일치) 이용권 목록 (레슨권 LESSON, 기소진 0회 일일/횟수권, QR 쿠폰 전용 모드 시 개인 정기권 제외)
   const disabledAssets = (authMember.assets || []).flatMap(asset => {
     if (isLessonAsset(asset)) {
+      return [];
+    }
+    if (isQrCouponOnly && isPeriodMembershipAsset(asset)) {
       return [];
     }
     if (asset.is_assignable === false && Boolean(asset.unassignable_reason)) {
@@ -201,7 +224,10 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
   });
 
   // 현재 선택된 이용권 객체
-  const selectedAssetObj = validAssets.find(a => parseInt(a.member_item_id) === selectedAssetId) || null;
+  const selectedAssetObj =
+    selectedAssetId !== null
+      ? validAssets.find((a) => Number(a.member_item_id) === selectedAssetId) || null
+      : null;
   const selectedAssetName = selectedAssetObj
     ? (selectedAssetObj.prod_nm || selectedAssetObj.item_name)
     : null;

@@ -37,6 +37,19 @@ interface AllocationCompleteModalProps {
   onClose: () => void;
 }
 
+export function resolveAllocationDisplayTimeRange(
+  startTime?: string | null,
+  endTime?: string | null,
+  lang: 'KO' | 'EN' = 'KO',
+  fallbackNow?: Date
+): { startDisplay: string; endDisplay: string } {
+  const refNow = fallbackNow ?? TimeMaster.getSyncedDate();
+  const fallbackHhMm = TimeMaster.formatKstDateTime(refNow).slice(11, 16);
+  const startDisplay = formatKioskHhMm(startTime) || fallbackHhMm;
+  const endDisplay = formatKioskHhMm(endTime) || (lang === 'KO' ? '종료시' : 'Until Exit');
+  return { startDisplay, endDisplay };
+}
+
 export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = ({
   bayNo,
   oldBayNo,
@@ -78,6 +91,13 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   const isPrintingRef = useRef(false);
   const cardReceiptDoneRef = useRef(false);
   const slipDoneRef = useRef(false);
+  const hasClosedRef = useRef(false);
+
+  const triggerCloseOnce = useCallback(() => {
+    if (hasClosedRef.current) return;
+    hasClosedRef.current = true;
+    onClose();
+  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -243,45 +263,19 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   useEffect(() => {
     if (isPrinting || pauseCountdown) return;
     const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          onClose();
-          return 0;
-        }
-        return prev - 1;
-      });
+      setCountdown((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [onClose, isPrinting, pauseCountdown]);
+  }, [isPrinting, pauseCountdown]);
 
-  // 시각 포맷팅 (HH:mm)
-  const formatTime = (timeStr?: string) => {
-    if (!timeStr) {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, '0');
-      const mins = String(now.getMinutes()).padStart(2, '0');
-      return `${hours}:${mins}`;
+  useEffect(() => {
+    if (!isPrinting && !pauseCountdown && countdown <= 0) {
+      triggerCloseOnce();
     }
-    if (timeStr.includes('T')) {
-      const d = new Date(timeStr);
-      if (!isNaN(d.getTime())) {
-        const hours = String(d.getHours()).padStart(2, '0');
-        const mins = String(d.getMinutes()).padStart(2, '0');
-        return `${hours}:${mins}`;
-      }
-    }
-    // "1455" 또는 "900" 포맷 처리
-    const cleanStr = timeStr.trim().padStart(4, '0');
-    if (cleanStr.length === 4 && !isNaN(Number(cleanStr))) {
-      return `${cleanStr.slice(0, 2)}:${cleanStr.slice(2, 4)}`;
-    }
-    return timeStr;
-  };
+  }, [countdown, isPrinting, pauseCountdown, triggerCloseOnce]);
 
-  const startDisplay = formatTime(startTime);
-  let endDisplay = formatTime(endTime) || '종료시';
+  const { startDisplay, endDisplay } = resolveAllocationDisplayTimeRange(startTime, endTime, lang);
 
   const isPrinterOffline = !isPrinting && hasPrintError;
   const isWaitlist = checkinMode === 'WAITLIST_ASSIGNED';
@@ -592,7 +586,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
         <div style={{ display: 'flex', width: '100%' }}>
           <button
             type="button"
-            onClick={onClose}
+            onClick={triggerCloseOnce}
             style={{
               width: '100%',
               height: '96px',
