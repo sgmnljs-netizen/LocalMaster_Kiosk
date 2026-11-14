@@ -1776,7 +1776,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                     onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.97)'}
                     onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
                   >
-                    예, 본인 맞습니다
+                    예, 맞습니다!
                   </button>
                 </div>
               </div>

@@ -7,6 +7,7 @@ import {
   resolveDefaultSelectedAssetId,
 } from '../../components/AssetSelectModal';
 import { MemberAuth } from '../../components/MemberAuth';
+import { PracticeSelect } from '../../components/PracticeSelect';
 import { PaymentTerminal } from '../../components/PaymentTerminal';
 import { AllocationCompleteModal } from '../../components/AllocationCompleteModal';
 import { TimeMaster } from '../../utils/timeMaster';
@@ -495,6 +496,51 @@ describe('🏛️ 키오스크 타석 배정 퍼널 시인성·어포던스 & �
 
     expect(instantSlipWithStrFloor).toContain('1F');
     expect(instantSlipWithStrFloor).toContain('03');
+    expect(instantSlipWithStrFloor).toContain('골프 타석 배정표');
     expect(instantSlipWithStrFloor).not.toContain('영수증 재출력');
+  });
+
+  it('AS-08: 옴니채널·골든패스 E2E 핵심 라벨 계약(보유 회원권으로 배정 / 보유 이용권 선택 / 선택한 이용권으로 배정 / 골프 타석 배정표)을 100% 보존한다', () => {
+    const decisionHtml = renderToString(
+      React.createElement(PracticeSelect, {
+        bays: [
+          {
+            bay_no: 11,
+            bay_name: '11번 타석',
+            store_cd: 'H01-SE-001',
+            floor: '1F',
+            zone_code: 'BAY',
+            status: 'AVAILABLE',
+          },
+        ],
+        lang: 'KO',
+        initialSelectedBayNo: 11,
+        onBaySelected: vi.fn(),
+        onCancel: vi.fn(),
+        onRefreshBays: vi.fn(),
+      })
+    ).replace(/<!--.*?-->/g, '');
+    expect(decisionHtml).toContain('배정 방식을 선택해 주세요');
+    expect(decisionHtml).toContain('보유 회원권으로 배정');
+
+    const selectedModalHtml = renderToString(
+      React.createElement(AssetSelectModal, {
+        authMember: mockMember,
+        selectedBayNo: 7,
+        bays: mockOpenKunsanBay,
+        lang: 'KO',
+        selectedAssetId: 101,
+        prepareMin: 2,
+        now: fixedNow,
+        onSelectAsset: vi.fn(),
+        onConfirm: vi.fn(),
+        onCancel: vi.fn(),
+        onSwitchToDaily: vi.fn(),
+        onChangeBay: vi.fn(),
+      })
+    ).replace(/<!--.*?-->/g, '');
+    expect(selectedModalHtml).toContain('보유 이용권 선택');
+    expect(selectedModalHtml).toContain('선택한 이용권으로 배정');
+    expect(selectedModalHtml).toContain('07번 타석 · 12:00 ~ 13:32 즉시 배정');
   });
 });

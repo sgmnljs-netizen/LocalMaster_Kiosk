@@ -1219,7 +1219,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <span style={{ fontSize: '34px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.9px', lineHeight: 1.2, wordBreak: 'keep-all' }}>
                     {lang === 'KO'
-                      ? (!isOccupied ? '보유 회원권 배정' : '보유 회원권 대기')
+                      ? (!isOccupied ? '보유 회원권으로 배정' : '보유 회원권 대기')
                       : 'Membership Pass'}
                   </span>
                   <span style={{ fontSize: '20px', color: '#6e6e73', fontWeight: 700, lineHeight: 1.45, whiteSpace: 'pre-line', wordBreak: 'keep-all' }}>

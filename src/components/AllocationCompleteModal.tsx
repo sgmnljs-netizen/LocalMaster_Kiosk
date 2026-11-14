@@ -304,7 +304,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
     if (checkinMode === 'PENDING_WAIT') return lang === 'KO' ? '타석 체크인 대기 확인표' : 'Check-in Waiting Slip';
     if (isWaitlist) return lang === 'KO' ? '타석 대기 예약 확인표' : 'Waitlist Booking Confirmation';
     if (checkinMode === 'REPRINT') return lang === 'KO' ? '골프 타석 배정표 (재출력)' : 'Bay Assignment Ticket (Reprint)';
-    return lang === 'KO' ? '골프 타석 즉시 배정표' : 'Golf Bay Assignment Ticket';
+    return lang === 'KO' ? '골프 타석 배정표' : 'Golf Bay Assignment Ticket';
   })();
 
   return (

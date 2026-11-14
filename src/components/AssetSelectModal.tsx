@@ -278,6 +278,20 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
             </h2>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  padding: '5px 14px',
+                  borderRadius: '999px',
+                  background: '#f5f5f7',
+                  border: '1px solid #e5e7eb',
+                  fontSize: '18px',
+                  fontWeight: 800,
+                  color: '#4b5563',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {lang === 'KO' ? '보유 이용권 선택' : 'Pass Selection'}
+              </span>
               <span style={{ fontSize: '26px', fontWeight: 900, color: '#1d1d1f' }}>
                 {authMember.member_name} 님
               </span>
@@ -994,14 +1008,40 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
                 maxWidth: '100%',
               }}
             >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {selectedAssetName
-                  ? (lang === 'KO'
-                      ? (selectedBayNo !== null && finalPreview.endHhmm
-                          ? `${bayShortLabel} · ${finalPreview.timeRangeLabel} ${finalPreview.modeActionLabel}`
-                          : `${selectedAssetName} (${selectedAssetMin}분) ${finalPreview.modeActionLabel}`)
-                      : `Confirm ${finalPreview.modeCode} [${bayShortLabel} · ${finalPreview.timeRangeLabel}]`)
-                  : (lang === 'KO' ? '위 보유 이용권을 눌러주세요' : 'Please tap a pass card above first')}
+              <span
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '3px',
+                  minWidth: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                {selectedAssetName && lang === 'KO' && (
+                  <span
+                    style={{
+                      fontSize: '15px',
+                      fontWeight: 800,
+                      opacity: 0.92,
+                      letterSpacing: '-0.2px',
+                      lineHeight: 1.15,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {finalPreview.isWaitlist ? '선택한 이용권으로 대기 예약' : '선택한 이용권으로 배정'}
+                  </span>
+                )}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.15 }}>
+                  {selectedAssetName
+                    ? (lang === 'KO'
+                        ? (selectedBayNo !== null && finalPreview.endHhmm
+                            ? `${bayShortLabel} · ${finalPreview.timeRangeLabel} ${finalPreview.modeActionLabel}`
+                            : `${selectedAssetName} (${selectedAssetMin}분) ${finalPreview.modeActionLabel}`)
+                        : `Confirm ${finalPreview.modeCode} [${bayShortLabel} · ${finalPreview.timeRangeLabel}]`)
+                    : (lang === 'KO' ? '위 보유 이용권을 눌러주세요' : 'Please tap a pass card above first')}
+                </span>
               </span>
               {selectedAssetId !== null && (
                 <ArrowRight
