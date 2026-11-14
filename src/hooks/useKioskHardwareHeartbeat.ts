@@ -43,7 +43,12 @@ export async function probeKioskHardwareHealthOnce(): Promise<HardwareProbeResul
                     vcatBody = await res.json().catch(() => null);
                 }
                 const vcatSt = vcatBody?.status ? String(vcatBody.status).trim().toUpperCase() : '';
-                if (vcatBody?.isOnline === false || vcatSt === 'OFFLINE') {
+                if (
+                    vcatBody?.isOnline === false ||
+                    vcatSt === 'OFFLINE' ||
+                    vcatSt === 'ERROR' ||
+                    vcatSt === 'DISCONNECTED'
+                ) {
                     nextVcat = 'OFFLINE';
                     nextVcatReason =
                         (typeof vcatBody?.message === 'string' && vcatBody.message.trim()) ||

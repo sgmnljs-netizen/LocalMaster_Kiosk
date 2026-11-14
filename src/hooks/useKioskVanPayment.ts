@@ -12,7 +12,7 @@ import {
   type CardApprovalResult,
   type VanPaymentState,
 } from '../services/van/van_types';
-import { useKioskSettings } from '../stores/kioskSettings';
+import { resolveDefaultVanPort, useKioskSettings } from '../stores/kioskSettings';
 
 interface UseKioskVanPaymentReturn {
   state: VanPaymentState;
@@ -30,7 +30,28 @@ export function sanitizeVanPort(rawPort: unknown, defaultPort = 9099): number {
     Number.isInteger(defaultPort) && defaultPort >= 1 && defaultPort <= 65535
       ? defaultPort
       : 9099;
-  const parsed = Number.parseInt(String(rawPort ?? '').trim(), 10);
+  if (typeof rawPort === 'boolean' || rawPort === null || rawPort === undefined) {
+    return fallback;
+  }
+  if (typeof rawPort === 'number') {
+    return Number.isInteger(rawPort) && rawPort >= 1 && rawPort <= 65535 ? rawPort : fallback;
+  }
+  const trimmed = String(rawPort).trim();
+  if (!trimmed) return fallback;
+
+  let candidateDigits = '';
+  if (/^\d+$/.test(trimmed)) {
+    candidateDigits = trimmed;
+  } else {
+    const hostPortMatch = trimmed.match(/^(?:https?:\/\/)?(?:[A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\])?:(\d+)\/?$/);
+    if (hostPortMatch) {
+      candidateDigits = hostPortMatch[1];
+    }
+  }
+  if (!candidateDigits) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(candidateDigits, 10);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
     return fallback;
   }
@@ -82,10 +103,11 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
   // 키오스크 로컬 설정이 변경되면 vanClient 설정도 동기화
   useEffect(() => {
+    const providerDefaultPort = sanitizeVanPort(resolveDefaultVanPort(settings.providerType), 9099);
     kioskVanClient.setConfig({
       provider: normalizeVanProvider(settings.providerType),
       terminalId: settings.terminalId || '88010003',
-      vcatPort: sanitizeVanPort(settings.vcatPort, 9099),
+      vcatPort: sanitizeVanPort(settings.vcatPort, providerDefaultPort),
     });
   }, [settings.terminalId, settings.vcatPort, settings.providerType]);
 
@@ -153,10 +175,14 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
             if (stateRef.current === 'REQUESTING') {
               return 0;
             }
-            isTimeoutRef.current = true;
-            kioskVanClient.cancelCurrentRequest();
-            updateVanState('TIMEOUT');
-            setError('결제 시간이 초과되어 취소되었습니다.');
+            if (!isTimeoutRef.current) {
+              isTimeoutRef.current = true;
+              kioskVanClient.cancelCurrentRequest();
+              updateVanState('TIMEOUT');
+              if (isMountedRef.current) {
+                setError('결제 시간이 초과되어 취소되었습니다.');
+              }
+            }
             return 0;
           }
           return prev - 1;
