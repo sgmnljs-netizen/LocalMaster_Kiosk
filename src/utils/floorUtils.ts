@@ -69,11 +69,15 @@ export function extractBayNumberOrderFromMeta(meta: unknown): BayNumberOrder | u
   if (!current || typeof current !== 'object' || Array.isArray(current)) {
     return undefined;
   }
-  const op = (current as Record<string, unknown>).operation;
-  if (!op || typeof op !== 'object' || Array.isArray(op)) {
-    return undefined;
-  }
-  const rawOrder = (op as Record<string, unknown>).bay_number_order;
+  const currentRecord = current as Record<string, unknown>;
+  const op = currentRecord.operation;
+  const opRecord =
+    op && typeof op === 'object' && !Array.isArray(op) ? (op as Record<string, unknown>) : null;
+  const rawOrder =
+    opRecord?.bay_number_order ??
+    opRecord?.bayNumberOrder ??
+    currentRecord.bay_number_order ??
+    currentRecord.bayNumberOrder;
   if (typeof rawOrder !== 'string') return undefined;
   const upper = rawOrder.trim().toUpperCase();
   if (upper === 'DESC') return 'DESC';
@@ -86,10 +90,25 @@ export function sortBaysByNumber<T extends { bay_no?: number | string | null }>(
   order: BayNumberOrder = 'ASC'
 ): T[] {
   const normalizedOrder = normalizeBayNumberOrder(order);
+  const parseNumericBay = (val: unknown): number | null => {
+    if (val === undefined || val === null) return 0;
+    const trimmed = String(val).trim();
+    if (!trimmed) return 0;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+  };
   return [...bays].sort((a, b) => {
-    const numA = Number(a.bay_no) || 0;
-    const numB = Number(b.bay_no) || 0;
-    return normalizedOrder === 'DESC' ? numB - numA : numA - numB;
+    const numA = parseNumericBay(a.bay_no);
+    const numB = parseNumericBay(b.bay_no);
+    if (numA !== null && numB !== null && numA !== numB) {
+      return normalizedOrder === 'DESC' ? numB - numA : numA - numB;
+    }
+    if (numA !== null && numB === null) return -1;
+    if (numA === null && numB !== null) return 1;
+    const labelA = String(a.bay_no ?? '').trim();
+    const labelB = String(b.bay_no ?? '').trim();
+    const cmp = labelA.localeCompare(labelB, undefined, { numeric: true });
+    return normalizedOrder === 'DESC' ? -cmp : cmp;
   });
 }
 

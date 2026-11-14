@@ -1,10 +1,82 @@
-const { app, BrowserWindow, Menu, nativeImage, dialog, session, screen } = require('electron');
+let electronModule = null;
+try {
+  electronModule = require('electron');
+} catch (_) {
+  electronModule = null;
+}
+const isElectronRuntime = Boolean(
+  electronModule && typeof electronModule === 'object' && electronModule.app
+);
+const { app, BrowserWindow, Menu, nativeImage, dialog, session, screen } = isElectronRuntime
+  ? electronModule
+  : {};
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
 const KIOSK_BASE_WIDTH = 1080;
 const KIOSK_BASE_HEIGHT = 1920;
+
+const args = process.argv.slice(2);
+const isWindowedArg = args.includes('--window');
+const isKioskMode = args.includes('--kiosk') && !isWindowedArg;
+const isDevMode = args.includes('--dev');
+
+function computeMonitorFitMetrics(display, options) {
+  const effectiveKioskMode =
+    options && typeof options.isKioskMode === 'boolean' ? options.isKioskMode : isKioskMode;
+  const fallbackBounds = { x: 0, y: 0, width: KIOSK_BASE_WIDTH, height: KIOSK_BASE_HEIGHT };
+  const targetDisplay =
+    display || (screen && typeof screen.getPrimaryDisplay === 'function' ? screen.getPrimaryDisplay() : null);
+  const rawArea = targetDisplay
+    ? (effectiveKioskMode ? targetDisplay.bounds : (targetDisplay.workArea || targetDisplay.bounds))
+    : null;
+
+  const safeX = rawArea && Number.isFinite(Number(rawArea.x)) ? Number(rawArea.x) : fallbackBounds.x;
+  const safeY = rawArea && Number.isFinite(Number(rawArea.y)) ? Number(rawArea.y) : fallbackBounds.y;
+  const safeW =
+    rawArea && Number.isFinite(Number(rawArea.width)) && Number(rawArea.width) > 0
+      ? Number(rawArea.width)
+      : fallbackBounds.width;
+  const safeH =
+    rawArea && Number.isFinite(Number(rawArea.height)) && Number(rawArea.height) > 0
+      ? Number(rawArea.height)
+      : fallbackBounds.height;
+  const area = { x: safeX, y: safeY, width: safeW, height: safeH };
+
+  const availWidth = Math.max(360, effectiveKioskMode ? area.width : area.width - 32);
+  const availHeight = Math.max(480, effectiveKioskMode ? area.height : area.height - 44);
+  const rawScale = Math.min(1, availWidth / KIOSK_BASE_WIDTH, availHeight / KIOSK_BASE_HEIGHT);
+  const scale = Math.max(0.25, Math.round(rawScale * 1000) / 1000);
+  const isCompactMonitor = scale < 0.999;
+  const contentWidth = isCompactMonitor ? Math.round(KIOSK_BASE_WIDTH * scale) : KIOSK_BASE_WIDTH;
+  const contentHeight = isCompactMonitor ? Math.round(KIOSK_BASE_HEIGHT * scale) : KIOSK_BASE_HEIGHT;
+  return { scale, isCompactMonitor, contentWidth, contentHeight, area };
+}
+
+function computeMonitorZoomFactor(contentW, contentH) {
+  const w = Number(contentW);
+  const h = Number(contentH);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    return null;
+  }
+  const fitted = Math.min(
+    1.5,
+    Math.max(0.25, Math.min(w / KIOSK_BASE_WIDTH, h / KIOSK_BASE_HEIGHT))
+  );
+  return Math.round(fitted * 1000) / 1000;
+}
+
+module.exports = {
+  KIOSK_BASE_WIDTH,
+  KIOSK_BASE_HEIGHT,
+  computeMonitorFitMetrics,
+  computeMonitorZoomFactor,
+};
+
+if (!isElectronRuntime) {
+  return;
+}
 
 // 1. 앱 이름 및 Windows 작업표시줄 AppUserModelID를 GOLFOS KIOSK로 고정
 app.name = 'GOLFOS KIOSK';
@@ -62,10 +134,6 @@ function readWindowsServerUrlFallback() {
   return '';
 }
 
-const args = process.argv.slice(2);
-const isWindowedArg = args.includes('--window');
-const isKioskMode = args.includes('--kiosk') && !isWindowedArg;
-const isDevMode = args.includes('--dev');
 const urlArg = args.find((a) => a.startsWith('http://') || a.startsWith('https://'));
 const TARGET_URL =
   urlArg ||
@@ -229,21 +297,6 @@ function buildKioskAppMenu() {
   Menu.setApplicationMenu(menu);
 }
 
-function computeMonitorFitMetrics(display) {
-  const targetDisplay = display || screen.getPrimaryDisplay();
-  const area = isKioskMode
-    ? targetDisplay.bounds
-    : (targetDisplay.workArea || targetDisplay.bounds);
-  const availWidth = Math.max(360, isKioskMode ? area.width : area.width - 32);
-  const availHeight = Math.max(480, isKioskMode ? area.height : area.height - 44);
-  const rawScale = Math.min(1, availWidth / KIOSK_BASE_WIDTH, availHeight / KIOSK_BASE_HEIGHT);
-  const scale = Math.max(0.25, Math.round(rawScale * 1000) / 1000);
-  const isCompactMonitor = scale < 0.999;
-  const contentWidth = isCompactMonitor ? Math.round(KIOSK_BASE_WIDTH * scale) : KIOSK_BASE_WIDTH;
-  const contentHeight = isCompactMonitor ? Math.round(KIOSK_BASE_HEIGHT * scale) : KIOSK_BASE_HEIGHT;
-  return { scale, isCompactMonitor, contentWidth, contentHeight, area };
-}
-
 function createKioskWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -252,7 +305,9 @@ function createKioskWindow() {
     return mainWindow;
   }
 
-  const fit = computeMonitorFitMetrics(screen.getPrimaryDisplay());
+  const primaryDisplay =
+    screen && typeof screen.getPrimaryDisplay === 'function' ? screen.getPrimaryDisplay() : null;
+  const fit = computeMonitorFitMetrics(primaryDisplay);
   const windowX = fit.isCompactMonitor && !isKioskMode
     ? Math.round(fit.area.x + (fit.area.width - fit.contentWidth) / 2)
     : undefined;
@@ -287,12 +342,8 @@ function createKioskWindow() {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     try {
       const [contentW, contentH] = mainWindow.getContentSize();
-      if (contentW > 0 && contentH > 0) {
-        const fitted = Math.min(
-          1.5,
-          Math.max(0.25, Math.min(contentW / KIOSK_BASE_WIDTH, contentH / KIOSK_BASE_HEIGHT))
-        );
-        const nextZoom = Math.round(fitted * 1000) / 1000;
+      const nextZoom = computeMonitorZoomFactor(contentW, contentH);
+      if (nextZoom !== null) {
         mainWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
         mainWindow.webContents.setZoomFactor(nextZoom);
       }

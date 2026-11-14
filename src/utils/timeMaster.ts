@@ -599,12 +599,21 @@ export const buildBayAllocationPreview = (
       ? options.bays.find((b) => Number(b.bay_no) === Number(groupBayNos[0])) ?? null
       : null);
 
-  const resolvedBayNo =
+  const rawBayNoCandidate =
     resolvedBay?.bay_no !== undefined && resolvedBay?.bay_no !== null
-      ? Number(resolvedBay.bay_no)
+      ? resolvedBay.bay_no
       : options.bayNoFallback ?? (groupBayNos.length > 0 ? groupBayNos[0] : null);
+  const parsedNumericBayNo =
+    rawBayNoCandidate !== null && String(rawBayNoCandidate).trim() !== ''
+      ? Number(rawBayNoCandidate)
+      : Number.NaN;
+  const resolvedBayNo = Number.isFinite(parsedNumericBayNo) ? parsedNumericBayNo : null;
+  const nonNumericBayLabel =
+    resolvedBayNo === null && rawBayNoCandidate !== null && String(rawBayNoCandidate).trim() !== ''
+      ? String(rawBayNoCandidate).trim()
+      : null;
 
-  const hasTargetBay = resolvedBayNo !== null || groupBayNos.length > 0;
+  const hasTargetBay = resolvedBayNo !== null || nonNumericBayLabel !== null || groupBayNos.length > 0;
   const floorLabel = formatBayFloorLabel(resolvedBay);
 
   const formatSingleBayNo = (n: number | string) => `${String(n).padStart(2, '0')}번 타석`;
@@ -612,46 +621,56 @@ export const buildBayAllocationPreview = (
     ? `${groupBayNos.join('·')}번 타석 (${groupBayNos.length}석)`
     : resolvedBayNo !== null
       ? formatSingleBayNo(resolvedBayNo)
-      : '선택 타석';
+      : nonNumericBayLabel !== null
+        ? (nonNumericBayLabel.endsWith('타석') ? nonNumericBayLabel : `${nonNumericBayLabel} 타석`)
+        : '선택 타석';
   const bayWithFloorLabel = floorLabel ? `${floorLabel} · ${bayDisplayLabel}` : bayDisplayLabel;
 
   // 대기 예약(연쇄 배정) 여부 판별: PRE_OCCUPIED(본 단말기 선점 빈 타석)는 즉시 배정으로 유지
   let isWaitlist = false;
   let waitMinutes = 0;
 
+  const resolveOccupiedBayStartEpochMs = (
+    targetBay: BayAllocationPreviewProbe | null | undefined,
+    fallbackWaitMin: number
+  ): number => {
+    if (!targetBay) {
+      return refNowMs + fallbackWaitMin * 60 * 1000;
+    }
+    if (
+      !targetBay.is_paused &&
+      typeof targetBay.available_from_epoch_ms === 'number' &&
+      targetBay.available_from_epoch_ms > 0
+    ) {
+      return Math.max(refNowMs, targetBay.available_from_epoch_ms);
+    }
+    const availStr = TimeMaster.formatAvailableFromTime(targetBay);
+    const parsedAvail = availStr && availStr !== '종료' ? TimeMaster.parseSessionEnd(availStr, refNow) : null;
+    if (parsedAvail && !Number.isNaN(parsedAvail.getTime())) {
+      return Math.max(refNowMs, parsedAvail.getTime());
+    }
+    return refNowMs + fallbackWaitMin * 60 * 1000;
+  };
+
+  let startEpochMs = refNowMs;
   if (isGroupMode && options.bays && options.bays.length > 0) {
+    let maxGroupStartMs = refNowMs;
     for (const bNo of groupBayNos) {
       const bObj = options.bays.find((b) => Number(b.bay_no) === Number(bNo));
       if (isBayOccupied(bObj)) {
         isWaitlist = true;
-        waitMinutes = Math.max(waitMinutes, Math.max(1, TimeMaster.getTotalWaitMinutes(bObj, refNow)));
+        const bWaitMin = Math.max(1, TimeMaster.getTotalWaitMinutes(bObj, refNow));
+        waitMinutes = Math.max(waitMinutes, bWaitMin);
+        maxGroupStartMs = Math.max(maxGroupStartMs, resolveOccupiedBayStartEpochMs(bObj, bWaitMin));
       }
+    }
+    if (isWaitlist) {
+      startEpochMs = maxGroupStartMs;
     }
   } else if (isBayOccupied(resolvedBay)) {
     isWaitlist = true;
     waitMinutes = Math.max(1, TimeMaster.getTotalWaitMinutes(resolvedBay, refNow));
-  }
-
-  // 시작 시각(startEpochMs / startHhmm) 산출
-  let startEpochMs = refNowMs;
-  if (isWaitlist && resolvedBay) {
-    if (
-      !resolvedBay.is_paused &&
-      typeof resolvedBay.available_from_epoch_ms === 'number' &&
-      resolvedBay.available_from_epoch_ms > 0
-    ) {
-      startEpochMs = Math.max(refNowMs, resolvedBay.available_from_epoch_ms);
-    } else {
-      const availStr = TimeMaster.formatAvailableFromTime(resolvedBay);
-      const parsedAvail = availStr && availStr !== '종료' ? TimeMaster.parseSessionEnd(availStr, refNow) : null;
-      if (parsedAvail && !Number.isNaN(parsedAvail.getTime())) {
-        startEpochMs = Math.max(refNowMs, parsedAvail.getTime());
-      } else {
-        startEpochMs = refNowMs + waitMinutes * 60 * 1000;
-      }
-    }
-  } else if (isWaitlist && waitMinutes > 0) {
-    startEpochMs = refNowMs + waitMinutes * 60 * 1000;
+    startEpochMs = resolveOccupiedBayStartEpochMs(resolvedBay, waitMinutes);
   }
 
   const startParts = TimeMaster.getKstParts(new Date(startEpochMs));
