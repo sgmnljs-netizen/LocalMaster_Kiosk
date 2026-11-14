@@ -10,7 +10,14 @@ import {
   isBayTrulyAvailableForKiosk,
   resolveCanonicalBayStatus,
 } from '../utils/bayStatusGuard';
-import { sortBaysByNumber, formatFloorDisplayLabel, parseNullableFloorNumber } from '../utils/floorUtils';
+import {
+  sortBaysByNumber,
+  formatFloorDisplayLabel,
+  parseNullableFloorNumber,
+  normalizeBayNumberOrder,
+  type BayNumberOrder,
+} from '../utils/floorUtils';
+import { useKioskSettings } from '../stores/kioskSettings';
 
 interface TeeboxMapProps {
   member?: Member | null;
@@ -19,6 +26,7 @@ interface TeeboxMapProps {
   authChannel?: string | null;
   isMoveMode?: boolean; // 타석 이동 모드 여부
   lang?: 'KO' | 'EN';
+  bayNumberOrder?: BayNumberOrder;
   justAllocatedBayNo?: number | null;
   feedbackCountdown?: number | null;
   onCancelCountdown?: () => void;
@@ -66,6 +74,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   authChannel,
   isMoveMode = false,
   lang = 'KO',
+  bayNumberOrder,
   justAllocatedBayNo = null,
   feedbackCountdown = null,
   onCancelCountdown,
@@ -76,6 +85,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
   onRefreshBays,
   selectedZoneIds = []
 }) => {
+  const { settings } = useKioskSettings();
+  const effectiveBayOrder = normalizeBayNumberOrder(bayNumberOrder ?? settings.bayNumberOrder);
   const [activeFloor, setActiveFloor] = useState<number>(1);
   const [selectedBayNo, setSelectedBayNo] = useState<number | null>(null);
   const [preoccupyLoading, setPreoccupyLoading] = useState(false);
@@ -408,7 +419,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
 
   const getBayFloorNo = (b: Bay): number => parseNullableFloorNumber(b.floor_no ?? b.floor) ?? 1;
 
-  // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출 및 타석 번호 오름차순 정렬
+  // 🔄 [구역 카테고리 동적 격리] 명시적 매칭 구역(selectedZoneIds)이 있으면 최우선 반영(ROOM 등 포함), 미지정 시 기본 연습타석(PAR3/ROOM 제외) 표출 및 매장 타석 가로 배열 방향(ASC/DESC) 정렬
   const floorBays = sortBaysByNumber(
     bays.filter(b => {
       const zCode = String(b.zone_code || b.zoneCode || '');
@@ -425,7 +436,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       }
 
       return getBayFloorNo(b) === activeFloor;
-    })
+    }),
+    effectiveBayOrder
   );
 
   const availableFloors = Array.from(
@@ -990,7 +1002,8 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                 )
               );
               const simLabel = sims.length > 0 ? sims.join(' / ') : '타석 센서';
-              return `${floorLabel} ${simLabel} (${minBay}~${maxBay}번 · 빈 타석 ${availCnt}석)`;
+              const bayRangeText = effectiveBayOrder === 'DESC' ? `${maxBay}~${minBay}번` : `${minBay}~${maxBay}번`;
+              return `${floorLabel} ${simLabel} (${bayRangeText} · 빈 타석 ${availCnt}석)`;
             })()}
           </strong>
         </span>

@@ -495,7 +495,249 @@ export class TimeMaster {
       message: `현재 시각(${windowStatus.currentHhmm})은 매장 운영시간(${windowStatus.rangeLabel}) 외이므로 ${actionWithParticle} 진행할 수 없습니다.`,
     };
   }
+
+  /**
+   * [SSOT] 타석 배정(즉시 배정 vs 대기 예약) 시각·이용시간·단축여부 프리뷰 산출
+   * - 백엔드 AllocatorService.find_next_available_slot & kiosk.py (total_duration = effective_duration_min + prepare_min) 1:1 정합
+   * - 본 단말기 선점 상태(PRE_OCCUPIED)는 빈 타석 즉시 배정(!isBayOccupied)으로 판정하여 오판 원천 차단
+   */
+  static buildBayAllocationPreview(options: BayAllocationPreviewOptions): BayAllocationPreviewResult {
+    return buildBayAllocationPreview(options);
+  }
 }
+
+export interface BayAllocationPreviewProbe extends BayStatusProbe {
+  bay_no?: number | string | null;
+  floor?: string | number | null;
+  floor_no?: number | string | null;
+  available_from_time?: string | null;
+  available_from_epoch_ms?: number | null;
+  total_wait_minutes?: number | null;
+  waiting_res_total_min?: number | null;
+  minutes_left?: number;
+  end_time?: string | null;
+  end_epoch_ms?: number | null;
+  is_paused?: boolean;
+  duration_min?: number | null;
+  max_assignable_min?: number | null;
+  next_limit_res_start_time?: string | null;
+}
+
+export interface BayAllocationPreviewOptions {
+  bay?: BayAllocationPreviewProbe | null;
+  bays?: BayAllocationPreviewProbe[];
+  bayNoFallback?: number | null;
+  bayNos?: number[];
+  durationMin?: number | null;
+  prepareMin?: number | null;
+  storeCloseTime?: string | null;
+  storeOpenTime?: string | null;
+  isStore24h?: boolean;
+  now?: Date;
+}
+
+export interface BayAllocationPreviewResult {
+  hasTargetBay: boolean;
+  isGroupMode: boolean;
+  isWaitlist: boolean;
+  modeCode: 'INSTANT' | 'WAITLIST';
+  modeBadgeText: string;
+  modeActionLabel: string;
+  modeSubText: string;
+  waitMinutes: number;
+  floorLabel: string | null;
+  bayDisplayLabel: string;
+  bayWithFloorLabel: string;
+  startHhmm: string;
+  endHhmm: string | null;
+  timeRangeLabel: string;
+  requestedDurationMin: number | null;
+  effectiveDurationMin: number | null;
+  prepareMin: number;
+  isTruncated: boolean;
+  truncateReason: 'NEXT_RESERVATION' | 'STORE_CLOSE' | null;
+  nextLimitResStartTime: string | null;
+}
+
+export const formatBayFloorLabel = (
+  bay?: { floor?: string | number | null; floor_no?: number | string | null } | null
+): string | null => {
+  if (!bay) return null;
+  const raw = bay.floor ?? bay.floor_no;
+  if (raw === null || raw === undefined) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+  if (/^-?\d+$/.test(trimmed)) {
+    const num = parseInt(trimmed, 10);
+    if (num === 0) return null;
+    return num < 0 ? `B${Math.abs(num)}` : `${num}F`;
+  }
+  return trimmed.toUpperCase();
+};
+
+export const buildBayAllocationPreview = (
+  options: BayAllocationPreviewOptions
+): BayAllocationPreviewResult => {
+  const refNow = options.now ?? TimeMaster.getSyncedDate();
+  const refNowMs = refNow.getTime();
+  const safePrepareMin =
+    typeof options.prepareMin === 'number' && Number.isFinite(options.prepareMin) && options.prepareMin >= 0
+      ? Math.floor(options.prepareMin)
+      : 3;
+
+  const groupBayNos = Array.isArray(options.bayNos)
+    ? options.bayNos.filter((n) => typeof n === 'number' && Number.isFinite(n))
+    : [];
+  const isGroupMode = groupBayNos.length > 1;
+
+  const resolvedBay =
+    options.bay ??
+    (options.bays && options.bayNoFallback != null
+      ? options.bays.find((b) => Number(b.bay_no) === Number(options.bayNoFallback)) ?? null
+      : null) ??
+    (options.bays && groupBayNos.length > 0
+      ? options.bays.find((b) => Number(b.bay_no) === Number(groupBayNos[0])) ?? null
+      : null);
+
+  const resolvedBayNo =
+    resolvedBay?.bay_no !== undefined && resolvedBay?.bay_no !== null
+      ? Number(resolvedBay.bay_no)
+      : options.bayNoFallback ?? (groupBayNos.length > 0 ? groupBayNos[0] : null);
+
+  const hasTargetBay = resolvedBayNo !== null || groupBayNos.length > 0;
+  const floorLabel = formatBayFloorLabel(resolvedBay);
+
+  const formatSingleBayNo = (n: number | string) => `${String(n).padStart(2, '0')}번 타석`;
+  const bayDisplayLabel = isGroupMode
+    ? `${groupBayNos.join('·')}번 타석 (${groupBayNos.length}석)`
+    : resolvedBayNo !== null
+      ? formatSingleBayNo(resolvedBayNo)
+      : '선택 타석';
+  const bayWithFloorLabel = floorLabel ? `${floorLabel} · ${bayDisplayLabel}` : bayDisplayLabel;
+
+  // 대기 예약(연쇄 배정) 여부 판별: PRE_OCCUPIED(본 단말기 선점 빈 타석)는 즉시 배정으로 유지
+  let isWaitlist = false;
+  let waitMinutes = 0;
+
+  if (isGroupMode && options.bays && options.bays.length > 0) {
+    for (const bNo of groupBayNos) {
+      const bObj = options.bays.find((b) => Number(b.bay_no) === Number(bNo));
+      if (isBayOccupied(bObj)) {
+        isWaitlist = true;
+        waitMinutes = Math.max(waitMinutes, Math.max(1, TimeMaster.getTotalWaitMinutes(bObj, refNow)));
+      }
+    }
+  } else if (isBayOccupied(resolvedBay)) {
+    isWaitlist = true;
+    waitMinutes = Math.max(1, TimeMaster.getTotalWaitMinutes(resolvedBay, refNow));
+  }
+
+  // 시작 시각(startEpochMs / startHhmm) 산출
+  let startEpochMs = refNowMs;
+  if (isWaitlist && resolvedBay) {
+    if (
+      !resolvedBay.is_paused &&
+      typeof resolvedBay.available_from_epoch_ms === 'number' &&
+      resolvedBay.available_from_epoch_ms > 0
+    ) {
+      startEpochMs = Math.max(refNowMs, resolvedBay.available_from_epoch_ms);
+    } else {
+      const availStr = TimeMaster.formatAvailableFromTime(resolvedBay);
+      const parsedAvail = availStr && availStr !== '종료' ? TimeMaster.parseSessionEnd(availStr, refNow) : null;
+      if (parsedAvail && !Number.isNaN(parsedAvail.getTime())) {
+        startEpochMs = Math.max(refNowMs, parsedAvail.getTime());
+      } else {
+        startEpochMs = refNowMs + waitMinutes * 60 * 1000;
+      }
+    }
+  } else if (isWaitlist && waitMinutes > 0) {
+    startEpochMs = refNowMs + waitMinutes * 60 * 1000;
+  }
+
+  const startParts = TimeMaster.getKstParts(new Date(startEpochMs));
+  const startHhmm = `${startParts.hours}:${startParts.minutes}`;
+
+  // 이용 시간 및 단축(다음 예약 / 영업 마감) 산출
+  const hasDuration =
+    typeof options.durationMin === 'number' && Number.isFinite(options.durationMin) && options.durationMin > 0;
+  const requestedDurationMin = hasDuration ? Math.floor(options.durationMin as number) : null;
+  let effectiveDurationMin = requestedDurationMin;
+  let isTruncated = false;
+  let truncateReason: 'NEXT_RESERVATION' | 'STORE_CLOSE' | null = null;
+
+  const bayMaxMin =
+    typeof resolvedBay?.max_assignable_min === 'number' && resolvedBay.max_assignable_min > 0
+      ? Math.floor(resolvedBay.max_assignable_min)
+      : null;
+  const nextLimitResStartTime = resolvedBay?.next_limit_res_start_time
+    ? String(resolvedBay.next_limit_res_start_time)
+    : null;
+
+  if (effectiveDurationMin !== null) {
+    if (bayMaxMin !== null && bayMaxMin < effectiveDurationMin) {
+      effectiveDurationMin = bayMaxMin;
+      isTruncated = true;
+      truncateReason = 'NEXT_RESERVATION';
+    }
+    if (options.storeCloseTime && options.isStore24h !== true) {
+      const minsUntilClose = TimeMaster.getMinutesUntilClose(
+        options.storeCloseTime,
+        new Date(startEpochMs),
+        { is24h: options.isStore24h, storeOpenTime: options.storeOpenTime }
+      );
+      const closeAvailMin = Math.max(0, minsUntilClose - safePrepareMin);
+      if (closeAvailMin > 0 && closeAvailMin < effectiveDurationMin) {
+        effectiveDurationMin = closeAvailMin;
+        isTruncated = true;
+        truncateReason = 'STORE_CLOSE';
+      }
+    }
+  }
+
+  let endHhmm: string | null = null;
+  if (effectiveDurationMin !== null && effectiveDurationMin > 0) {
+    const endEpochMs = startEpochMs + (effectiveDurationMin + safePrepareMin) * 60 * 1000;
+    const endParts = TimeMaster.getKstParts(new Date(endEpochMs));
+    endHhmm = `${endParts.hours}:${endParts.minutes}`;
+  }
+
+  const timeRangeLabel = endHhmm
+    ? `${startHhmm} ~ ${endHhmm}`
+    : isWaitlist
+      ? `${startHhmm} 시작 예정`
+      : `지금 즉시 시작 (${startHhmm}~)`;
+
+  const modeBadgeText = isWaitlist
+    ? `⏳ 대기 예약 · 약 ${waitMinutes}분 대기`
+    : '⚡ 즉시 배정 · 바로 입장';
+  const modeActionLabel = isWaitlist ? '대기 예약' : '즉시 배정';
+  const modeSubText = isWaitlist
+    ? `현재 이용 중인 타석입니다 · 앞 타임 종료 후 ${startHhmm} 자동 시작`
+    : '현재 비어 있는 타석입니다 · 배정 확정 즉시 바로 입장 가능';
+
+  return {
+    hasTargetBay,
+    isGroupMode,
+    isWaitlist,
+    modeCode: isWaitlist ? 'WAITLIST' : 'INSTANT',
+    modeBadgeText,
+    modeActionLabel,
+    modeSubText,
+    waitMinutes,
+    floorLabel,
+    bayDisplayLabel,
+    bayWithFloorLabel,
+    startHhmm,
+    endHhmm,
+    timeRangeLabel,
+    requestedDurationMin,
+    effectiveDurationMin,
+    prepareMin: safePrepareMin,
+    isTruncated,
+    truncateReason,
+    nextLimitResStartTime,
+  };
+};
 
 export interface StoreOperatingWindowStatus {
   isOpen: boolean;

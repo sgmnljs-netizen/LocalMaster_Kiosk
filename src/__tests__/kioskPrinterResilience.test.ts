@@ -221,9 +221,9 @@ describe('Kiosk Thermal Printer (:18080 vcat_bridge.py) Paper-Out / Offline UX R
       'utf-8'
     );
 
-    // AllocationCompleteModal checks
+    // AllocationCompleteModal checks (auto-prints once on mount; manual reprint button intentionally omitted — handled at Front POS)
     expect(allocModalSrc).toContain('isPrintingRef');
-    expect(allocModalSrc).toContain('disabled={isPrinting}');
+    expect(allocModalSrc).not.toContain('영수증 재출력');
     expect(allocModalSrc).toContain('cardReceiptDoneRef');
     expect(allocModalSrc).toContain('slipDoneRef');
     expect(allocModalSrc).toContain('setCountdown(20)');

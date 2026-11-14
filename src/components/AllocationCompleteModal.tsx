@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Check, Printer, ArrowRight, RefreshCw } from 'lucide-react';
+import { Check, Printer, ArrowRight, Clock } from 'lucide-react';
 import { kioskHardwareBridge } from '../services/hardware/services/HardwareBridgeClient';
-import { printKioskBayAllocationSlip } from '../utils/kioskSlipPrinter';
+import { printKioskBayAllocationSlip, formatKioskHhMm } from '../utils/kioskSlipPrinter';
 import { useKioskSettings } from '../stores/kioskSettings';
-import { TimeMaster } from '../utils/timeMaster';
+import { TimeMaster, formatBayFloorLabel } from '../utils/timeMaster';
 import { api, type KioskStoreInfo } from '../services/api';
 import { Code128BarcodeSvg } from './common/Code128BarcodeSvg';
 
@@ -97,7 +97,8 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
     try {
       const nowStr = TimeMaster.formatKstDateTime(new Date());
-      const startStr = startTime || nowStr.slice(11, 16);
+      const startStr = formatKioskHhMm(startTime) || nowStr.slice(11, 16);
+      const endStr = formatKioskHhMm(endTime) || endTime;
       const resolvedDiscount = (discountAmount ?? 0) + (usedPoints ?? 0);
       const resolvedUnitPrice = originalAmount ?? (payAmount + resolvedDiscount);
       const isTaxFree = String(vatYn || 'Y').toUpperCase() === 'N';
@@ -134,8 +135,8 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
           useMinutes: durationMin,
           start_time: startStr,
           startTime: startStr,
-          end_time: endTime,
-          endTime,
+          end_time: endStr,
+          endTime: endStr,
           member_name: memberName || '비회원',
           member_no: memberNo,
           client_type: 'KIOSK',
@@ -283,6 +284,28 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
   let endDisplay = formatTime(endTime) || '종료시';
 
   const isPrinterOffline = !isPrinting && hasPrintError;
+  const isWaitlist = checkinMode === 'WAITLIST_ASSIGNED';
+  const floorLabel = formatBayFloorLabel({ floor });
+  const modeAccent = isWaitlist ? '#d97706' : '#059669';
+  const modeBadgeBg = isWaitlist ? '#fef3c7' : '#d1fae5';
+  const modeBadgeBorder = isWaitlist ? '#f59e0b' : '#10b981';
+  const modeBadgeTextColor = isWaitlist ? '#92400e' : '#065f46';
+  const modeBadgeLabel = (() => {
+    if (checkinMode === 'MOVE_BAY') return lang === 'KO' ? '타석 이동 완료' : 'Relocated';
+    if (checkinMode === 'PRE_CHECKIN') return lang === 'KO' ? '사전 체크인' : 'Pre-Checkin';
+    if (checkinMode === 'PENDING_WAIT') return lang === 'KO' ? '체크인 대기' : 'Pending';
+    if (isWaitlist) return lang === 'KO' ? '대기 예약 완료' : 'Waitlist Booked';
+    if (checkinMode === 'REPRINT') return lang === 'KO' ? '배정표 재출력' : 'Reprint';
+    return lang === 'KO' ? '즉시 배정 완료' : 'Assigned Now';
+  })();
+  const titleText = (() => {
+    if (checkinMode === 'MOVE_BAY') return lang === 'KO' ? '타석 이동 확인표' : 'Bay Relocation Confirmation Slip';
+    if (checkinMode === 'PRE_CHECKIN') return lang === 'KO' ? '사전 체크인 접수 확인표' : 'Pre-Checkin Confirmation Slip';
+    if (checkinMode === 'PENDING_WAIT') return lang === 'KO' ? '타석 체크인 대기 확인표' : 'Check-in Waiting Slip';
+    if (isWaitlist) return lang === 'KO' ? '타석 대기 예약 확인표' : 'Waitlist Booking Confirmation';
+    if (checkinMode === 'REPRINT') return lang === 'KO' ? '골프 타석 배정표 (재출력)' : 'Bay Assignment Ticket (Reprint)';
+    return lang === 'KO' ? '골프 타석 즉시 배정표' : 'Golf Bay Assignment Ticket';
+  })();
 
   return (
     <div 
@@ -293,91 +316,121 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.45)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
+        backgroundColor: 'rgba(15, 23, 42, 0.44)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 9999,
-        padding: '24px'
+        padding: '24px 24px 132px 24px'
       }}
     >
-      {/* Apple Snow White Ticket Card */}
+      {/* Apple HIG 920px 초대형 디지털 배정표 시트 */}
       <div 
         onClick={(e) => e.stopPropagation()}
         style={{
           width: '100%',
-          maxWidth: '620px',
+          maxWidth: '920px',
+          maxHeight: 'calc(100vh - 156px)',
+          overflowY: 'auto',
           background: '#ffffff',
-          borderRadius: '32px',
-          border: '1px solid #e5e5ea',
-          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.15)',
-          padding: '44px 36px',
+          borderRadius: '38px',
+          border: '1.5px solid #e5e5ea',
+          boxShadow: '0 28px 72px rgba(0, 0, 0, 0.22)',
+          padding: '44px 42px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           textAlign: 'center',
           color: '#1d1d1f',
           position: 'relative',
-          overflow: 'hidden'
+          boxSizing: 'border-box',
         }}
       >
-        {/* Apple Minimal Green Circle Icon */}
-        <div style={{ marginBottom: '20px' }}>
+        {/* 상단 시맨틱 상태 서클 + 모드 배지 (이모지 제거 · Apple HIG 고대비) */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', marginBottom: '14px' }}>
           <div 
             style={{ 
-              width: '72px',
-              height: '72px',
+              width: '92px',
+              height: '92px',
               borderRadius: '50%',
-              background: 'rgba(52, 199, 89, 0.12)',
-              border: '1px solid rgba(52, 199, 89, 0.25)',
+              background: isWaitlist ? '#fffbeb' : '#ecfdf5',
+              border: `2.5px solid ${modeBadgeBorder}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 4px 14px rgba(52, 199, 89, 0.15)'
+              boxShadow: isWaitlist
+                ? '0 10px 24px rgba(217, 119, 6, 0.20)'
+                : '0 10px 24px rgba(5, 150, 105, 0.18)'
             }}
           >
-            <Check size={40} style={{ color: '#34c759', strokeWidth: 2.5 }} />
+            {isWaitlist ? (
+              <Clock size={46} style={{ color: '#d97706', strokeWidth: 2.8 }} />
+            ) : (
+              <Check size={48} style={{ color: '#059669', strokeWidth: 3 }} />
+            )}
           </div>
-        </div>
 
-        {/* 100% 한글 애플 타이포그래피 */}
-        <h2 style={{ fontSize: '32px', fontWeight: 800, color: '#1d1d1f', marginBottom: '8px', letterSpacing: '-1px' }}>
-          {checkinMode === 'MOVE_BAY'
-            ? (lang === 'KO' ? '타석 이동 확인표' : 'Bay Relocation Confirmation Slip')
-            : checkinMode === 'PRE_CHECKIN'
-            ? (lang === 'KO' ? '사전 체크인 접수 확인표' : 'Pre-Checkin Confirmation Slip')
-            : checkinMode === 'PENDING_WAIT'
-            ? (lang === 'KO' ? '타석 체크인 대기 확인표' : 'Check-in Waiting Slip')
-            : checkinMode === 'REPRINT'
-            ? (lang === 'KO' ? '골프 타석 배정표 (재출력)' : 'Bay Assignment Ticket (Reprint)')
-            : (lang === 'KO' ? '골프 타석 배정표' : 'Golf Bay Assignment Ticket')}
-        </h2>
-        
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            background: isPrinting ? '#eff6ff' : isPrinterOffline ? '#fef2f2' : '#f0fdf4',
-            border: `1px solid ${isPrinting ? '#bfdbfe' : isPrinterOffline ? '#fecdd3' : '#bbf7d0'}`,
-            padding: '8px 18px',
-            borderRadius: '999px',
-            color: isPrinting ? '#1d4ed8' : isPrinterOffline ? '#dc2626' : '#15803d',
-            fontSize: '15px',
-            fontWeight: 700,
-            marginBottom: isPrinterOffline ? '12px' : (noticeMessage ? '16px' : '28px'),
-            letterSpacing: '-0.3px'
-          }}
-        >
-          <Printer size={18} style={{ color: isPrinting ? '#0071e3' : isPrinterOffline ? '#dc2626' : '#15803d' }} />
-          <span>
-            {printStatus 
-              ? `${lang === 'KO' ? '영수증 인쇄 상태' : 'Print Status'}: ${printStatus}` 
-              : (lang === 'KO' ? '영수증 및 확인표가 현장에서 출력 중입니다.' : 'Printing receipt and confirmation ticket...')}
+          <span
+            data-testid="allocation-complete-mode-badge"
+            style={{
+              padding: '7px 20px',
+              borderRadius: '999px',
+              background: modeBadgeBg,
+              border: `1.5px solid ${modeBadgeBorder}`,
+              color: modeBadgeTextColor,
+              fontSize: '20px',
+              fontWeight: 900,
+              letterSpacing: '-0.3px',
+            }}
+          >
+            {modeBadgeLabel}
           </span>
         </div>
+
+        {/* 100% 한글 애플 초대형 타이틀 */}
+        <h2
+          style={{
+            fontSize: '46px',
+            fontWeight: 900,
+            color: isWaitlist ? '#b45309' : '#1d1d1f',
+            margin: '0 0 14px 0',
+            letterSpacing: '-1.2px',
+            lineHeight: 1.15,
+            wordBreak: 'keep-all',
+          }}
+        >
+          {titleText}
+        </h2>
+        
+        {autoPrintReceipt && (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '10px',
+              background: isPrinting ? '#eff6ff' : isPrinterOffline ? '#fef2f2' : '#f5f5f7',
+              border: `1.5px solid ${isPrinting ? '#bfdbfe' : isPrinterOffline ? '#fecdd3' : '#e5e7eb'}`,
+              padding: '10px 24px',
+              borderRadius: '999px',
+              color: isPrinting ? '#1d4ed8' : isPrinterOffline ? '#dc2626' : '#374151',
+              fontSize: '21px',
+              fontWeight: 800,
+              marginBottom: isPrinterOffline ? '18px' : (noticeMessage ? '18px' : '28px'),
+              letterSpacing: '-0.3px'
+            }}
+          >
+            <Printer size={22} style={{ color: isPrinting ? '#0071e3' : isPrinterOffline ? '#dc2626' : '#059669' }} />
+            <span>
+              {printStatus 
+                ? `${lang === 'KO' ? (payAmount > 0 ? '영수증·배정표 인쇄 상태' : '배정표 인쇄 상태') : 'Print Status'}: ${printStatus}` 
+                : (lang === 'KO'
+                    ? (payAmount > 0 ? '영수증 및 배정표가 자동 출력 중입니다.' : '타석 배정표가 자동 출력 중입니다.')
+                    : 'Printing confirmation ticket...')}
+            </span>
+          </div>
+        )}
 
         {isPrinterOffline && (
           <div
@@ -385,161 +438,183 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
             style={{
               width: '100%',
               background: '#fff1f2',
-              border: '1px solid #fecdd3',
-              borderRadius: '16px',
-              padding: '12px 16px',
-              marginBottom: noticeMessage ? '12px' : '20px',
-              fontSize: '14px',
-              fontWeight: 700,
+              border: '1.5px solid #fecdd3',
+              borderRadius: '20px',
+              padding: '18px 22px',
+              marginBottom: noticeMessage ? '16px' : '24px',
+              fontSize: '18px',
+              fontWeight: 800,
               color: '#be123c',
-              lineHeight: 1.45,
+              lineHeight: 1.5,
               textAlign: 'center',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: '10px',
+              gap: '12px',
+              boxSizing: 'border-box',
             }}
           >
             <span>
               {lang === 'KO'
-                ? '⚠️ 프린터 용지 부족 또는 연결 지연으로 확인표가 출력되지 않았습니다. 타석 배정은 정상 완료되었으니 아래 배정 타석 번호를 확인하신 뒤 바로 입장하시거나 [영수증 재출력]을 눌러주세요.'
-                : '⚠️ Ticket printing failed due to paper shortage or printer offline. Your bay is assigned—please check your bay number below or tap [Reprint].'}
+                ? '⚠️ 프린터 용지 부족 또는 연결 지연으로 확인표가 출력되지 않았습니다. 타석 배정은 정상 완료되었으니 아래 배정 타석 번호를 확인하신 뒤 바로 입장해 주세요. (종이 확인표가 필요하시면 프런트에 말씀해 주세요.)'
+                : '⚠️ Ticket printing was skipped due to paper shortage or printer offline. Your bay is assigned—please check your bay number below and proceed directly (ask the front desk if you need a printed slip).'}
             </span>
             <Code128BarcodeSvg
               value={String(resId || `BAY-${bayNo}`).slice(0, 24)}
-              width={210}
-              barHeight={42}
+              width={260}
+              barHeight={52}
               testId="allocation-offline-barcode"
             />
           </div>
         )}
 
         {noticeMessage && (
-          <div style={{
-            width: '100%',
-            background: checkinMode === 'PRE_CHECKIN' || checkinMode === 'PENDING_WAIT' ? '#eff6ff' : '#ecfdf5',
-            border: checkinMode === 'PRE_CHECKIN' || checkinMode === 'PENDING_WAIT' ? '1px solid #bfdbfe' : '1px solid #a7f3d0',
-            borderRadius: '14px',
-            padding: '12px 16px',
-            marginBottom: '20px',
-            fontSize: '15px',
-            fontWeight: 700,
-            color: checkinMode === 'PRE_CHECKIN' || checkinMode === 'PENDING_WAIT' ? '#1d4ed8' : '#047857',
-            lineHeight: 1.4
-          }}>
+          <div
+            style={{
+              width: '100%',
+              background: isWaitlist
+                ? '#fffbeb'
+                : (checkinMode === 'PRE_CHECKIN' || checkinMode === 'PENDING_WAIT' ? '#eff6ff' : '#ecfdf5'),
+              border: isWaitlist
+                ? '2px solid #f59e0b'
+                : (checkinMode === 'PRE_CHECKIN' || checkinMode === 'PENDING_WAIT' ? '1.5px solid #bfdbfe' : '1.5px solid #a7f3d0'),
+              borderRadius: '20px',
+              padding: '18px 24px',
+              marginBottom: '24px',
+              fontSize: '21px',
+              fontWeight: 800,
+              color: isWaitlist
+                ? '#b45309'
+                : (checkinMode === 'PRE_CHECKIN' || checkinMode === 'PENDING_WAIT' ? '#1d4ed8' : '#047857'),
+              lineHeight: 1.45,
+              boxSizing: 'border-box',
+              wordBreak: 'keep-all',
+            }}
+          >
             {noticeMessage}
           </div>
         )}
 
-        {/* 한글 데이터 그리드 티켓 카딩 */}
+        {/* 한글 데이터 그리드 초대형 티켓 카드 */}
         <div 
           style={{ 
             width: '100%', 
             background: '#f5f5f7', 
-            borderRadius: '24px', 
-            border: '1px solid #e5e5ea', 
-            padding: '24px 28px', 
+            borderRadius: '28px', 
+            border: '1.5px solid #e5e5ea', 
+            padding: '28px 32px', 
             display: 'flex', 
             flexDirection: 'column', 
-            gap: '18px', 
-            marginBottom: '32px'
+            gap: '20px', 
+            marginBottom: '30px',
+            boxSizing: 'border-box',
           }}
         >
-          {/* 배정 타석 번호 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e5ea', paddingBottom: '16px' }}>
-            <span style={{ fontSize: '17px', color: '#86868b', fontWeight: 600, letterSpacing: '-0.3px' }}>
-              {checkinMode === 'MOVE_BAY' ? (lang === 'KO' ? '이동 내역' : 'Relocated Bay') : (lang === 'KO' ? '배정 위치' : 'Assigned Bay')}
-            </span>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+          {/* 배정 타석 히어로 박스 (원거리 시인성 극대화) */}
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '22px',
+              border: '1.5px solid #e5e5ea',
+              padding: '24px 30px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '20px',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '6px' }}>
+              <span style={{ fontSize: '22px', color: '#6e6e73', fontWeight: 700, letterSpacing: '-0.4px' }}>
+                {checkinMode === 'MOVE_BAY' ? (lang === 'KO' ? '이동 타석' : 'Relocated Bay') : (lang === 'KO' ? '배정 위치' : 'Assigned Bay')}
+              </span>
+              {floorLabel && (
+                <span
+                  style={{
+                    padding: '4px 14px',
+                    borderRadius: '10px',
+                    background: '#f5f5f7',
+                    border: '1px solid #e5e7eb',
+                    fontSize: '22px',
+                    fontWeight: 900,
+                    color: '#1d1d1f',
+                  }}
+                >
+                  {floorLabel}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               {checkinMode === 'MOVE_BAY' && oldBayNo !== undefined && oldBayNo !== null && (
                 <>
-                  <span style={{ fontSize: '28px', fontWeight: 800, color: '#86868b', textDecoration: 'line-through' }}>
+                  <span style={{ fontSize: '42px', fontWeight: 800, color: '#86868b', textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>
                     {!isNaN(Number(oldBayNo)) ? `${String(oldBayNo).padStart(2, '0')}번` : String(oldBayNo)}
                   </span>
-                  <span style={{ fontSize: '24px', fontWeight: 900, color: '#10b981' }}>➔</span>
+                  <span style={{ fontSize: '34px', fontWeight: 900, color: '#059669' }}>➔</span>
                 </>
               )}
-              <span style={{ fontSize: !isNaN(Number(bayNo)) ? '52px' : '34px', fontWeight: 950, color: '#000000', letterSpacing: '-1.5px' }}>
+              <span style={{ fontSize: !isNaN(Number(bayNo)) ? '84px' : '48px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-2.5px', lineHeight: 0.95, fontVariantNumeric: 'tabular-nums' }}>
                 {!isNaN(Number(bayNo)) ? String(bayNo).padStart(2, '0') : String(bayNo)}
               </span>
               {!isNaN(Number(bayNo)) && (
-                <span style={{ fontSize: '22px', fontWeight: 800, color: '#1d1d1f' }}>
+                <span style={{ fontSize: '36px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '-0.8px' }}>
                   {lang === 'KO' ? '번 타석' : ''}
                 </span>
               )}
             </div>
           </div>
 
-          {/* 이용 시간 & 이용 시간대 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div style={{ background: '#ffffff', padding: '16px', borderRadius: '18px', display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'center', border: '1px solid #e5e5ea' }}>
-              <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>
+          {/* 이용 시간 & 이용 시간대 2열 대형 카드 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.25fr', gap: '18px' }}>
+            <div style={{ background: '#ffffff', padding: '24px 20px', borderRadius: '22px', display: 'flex', flexDirection: 'column', gap: '8px', textAlign: 'center', border: '1.5px solid #e5e5ea' }}>
+              <span style={{ fontSize: '20px', color: '#6e6e73', fontWeight: 700 }}>
                 {checkinMode === 'MOVE_BAY' ? (lang === 'KO' ? '보전 잔여 시간' : 'Remaining Time') : (lang === 'KO' ? '이용 시간' : 'Duration')}
               </span>
-              <span style={{ fontSize: '26px', fontWeight: 800, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
+              <span style={{ fontSize: '44px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>
                 {durationMin}{lang === 'KO' ? '분' : ' min'}
               </span>
             </div>
 
-            <div style={{ background: '#ffffff', padding: '16px', borderRadius: '18px', display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'center', border: '1px solid #e5e5ea' }}>
-              <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>
-                {lang === 'KO' ? '이용 시간대' : 'Time Interval'}
+            <div style={{ background: '#ffffff', padding: '24px 20px', borderRadius: '22px', display: 'flex', flexDirection: 'column', gap: '8px', textAlign: 'center', border: '1.5px solid #e5e5ea' }}>
+              <span style={{ fontSize: '20px', color: '#6e6e73', fontWeight: 700 }}>
+                {isWaitlist
+                  ? (lang === 'KO' ? '이용 예정 시간대' : 'Expected Time')
+                  : (lang === 'KO' ? '이용 시간대' : 'Time Interval')}
               </span>
-              <span style={{ fontSize: '22px', fontWeight: 800, color: '#0071e3', letterSpacing: '-0.5px' }}>
+              <span style={{ fontSize: '40px', fontWeight: 900, color: modeAccent, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, whiteSpace: 'nowrap' }}>
                 {startDisplay} ~ {endDisplay}
               </span>
             </div>
           </div>
         </div>
 
-        {/* 버튼 영역: 재출력 버튼 + 확인 버튼 */}
-        <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+        {/* 하단 대형 단일 확인 CTA 버튼 (96px 풀와이드 · 자동 출력되므로 중복 재출력 버튼 배제) */}
+        <div style={{ display: 'flex', width: '100%' }}>
           <button
-            onClick={handlePrint}
-            disabled={isPrinting}
-            style={{
-              flex: '1',
-              height: '64px',
-              borderRadius: '999px',
-              background: '#f5f5f7',
-              color: '#1d1d1f',
-              border: '1px solid #d2d2d7',
-              fontSize: '18px',
-              fontWeight: 700,
-              cursor: isPrinting ? 'not-allowed' : 'pointer',
-              opacity: isPrinting ? 0.55 : 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
-            }}
-          >
-            <Printer size={20} style={{ color: '#0071e3' }} />
-            <span>{lang === 'KO' ? '영수증 재출력' : 'Reprint'}</span>
-          </button>
-
-          <button
+            type="button"
             onClick={onClose}
             style={{
-              flex: '2',
-              height: '64px',
+              width: '100%',
+              height: '96px',
               borderRadius: '999px',
-              background: '#1d1d1f',
+              background: isWaitlist ? '#d97706' : '#1d1d1f',
               color: '#ffffff',
               border: 'none',
-              fontSize: '20px',
-              fontWeight: 700,
-              letterSpacing: '-0.5px',
+              fontSize: '32px',
+              fontWeight: 900,
+              letterSpacing: '-0.6px',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '10px',
-              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
+              gap: '12px',
+              boxShadow: isWaitlist
+                ? '0 14px 32px rgba(217, 119, 6, 0.28)'
+                : '0 14px 32px rgba(0, 0, 0, 0.22)',
+              whiteSpace: 'nowrap',
               transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
             }}
-            onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.opacity = '0.9'; }}
+            onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.98)'; e.currentTarget.style.opacity = '0.9'; }}
             onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.opacity = '1'; }}
             onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.opacity = '1'; }}
           >
@@ -548,7 +623,7 @@ export const AllocationCompleteModal: React.FC<AllocationCompleteModalProps> = (
                 ? `확인 (${countdown}s)` 
                 : `Confirm (${countdown}s)`}
             </span>
-            <ArrowRight size={22} style={{ color: '#ffffff' }} />
+            <ArrowRight size={30} style={{ color: '#ffffff' }} />
           </button>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, User, X, Sparkles, Smartphone, QrCode, Delete, Hash } from 'lucide-react';
-import { api, Member } from '../services/api';
+import { Camera, User, X, Check, Smartphone, QrCode, Delete, Hash } from 'lucide-react';
+import { api, Member, Bay } from '../services/api';
 import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
 import {
   useKioskSettings,
@@ -9,6 +9,7 @@ import {
   resolveEffectiveAuthMode,
   isKioskMenuEnabled,
 } from '../stores/kioskSettings';
+import { TimeMaster } from '../utils/timeMaster';
 
 export type AuthMode = 'SMART_TAG' | 'PHONE_KEYPAD' | 'QR_SCAN' | 'FACE';
 
@@ -115,6 +116,13 @@ interface MemberAuthProps {
   isSubModal?: boolean;
   selectedBayNo?: number | null;
   selectedBayNos?: number[];
+  selectedBay?: Bay | null;
+  bays?: Bay[];
+  prepareMin?: number;
+  storeCloseTime?: string | null;
+  storeOpenTime?: string | null;
+  isStore24h?: boolean;
+  now?: Date;
   onAuthSuccess: (member: Member) => void;
   onCancel: () => void;
   onSignUpClick?: () => void;
@@ -130,6 +138,13 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   isSubModal = false,
   selectedBayNo,
   selectedBayNos,
+  selectedBay,
+  bays,
+  prepareMin,
+  storeCloseTime,
+  storeOpenTime,
+  isStore24h,
+  now,
   onAuthSuccess, 
   onCancel, 
   onSignUpClick,
@@ -604,6 +619,28 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
     };
   }, [authMode]);
 
+  const resolvedTargetBay =
+    selectedBay ??
+    (bays && selectedBayNo !== undefined && selectedBayNo !== null
+      ? bays.find((b) => Number(b.bay_no) === Number(selectedBayNo)) ?? null
+      : null) ??
+    (bays && selectedBayNos && selectedBayNos.length > 0
+      ? bays.find((b) => Number(b.bay_no) === Number(selectedBayNos[0])) ?? null
+      : null);
+
+  const authAllocationPreview = TimeMaster.buildBayAllocationPreview({
+    bay: resolvedTargetBay,
+    bays,
+    bayNoFallback: selectedBayNo,
+    bayNos: selectedBayNos,
+    durationMin: null,
+    prepareMin,
+    storeCloseTime,
+    storeOpenTime,
+    isStore24h,
+    now,
+  });
+
   return (
     <div
       style={{
@@ -613,7 +650,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: isSubModal ? 'flex-start' : 'flex-start',
-        paddingTop: isSubModal ? '20px' : '180px',
+        paddingTop: isSubModal ? '20px' : (authAllocationPreview.hasTargetBay ? '96px' : '160px'),
         paddingBottom: 0,
         boxSizing: 'border-box',
       }}
@@ -623,11 +660,11 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
       style={{
         width: isSubModal ? '880px' : '1000px',
         maxWidth: 'calc(100% - 32px)',
-        height: isSubModal ? 'auto' : '1040px',
-        minHeight: isSubModal ? 'auto' : '1040px',
+        height: isSubModal ? 'auto' : undefined,
+        minHeight: isSubModal ? 'auto' : (authAllocationPreview.hasTargetBay ? '1260px' : '1040px'),
         boxSizing: 'border-box',
         margin: '0 auto',
-        padding: isSubModal ? '34px 36px' : '40px 44px',
+        padding: isSubModal ? '34px 36px' : '38px 44px',
         background: '#ffffff',
         borderRadius: '36px',
         border: '1.5px solid #e2e8f0',
@@ -635,7 +672,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        gap: '20px',
+        gap: '18px',
       }}
     >
       {/* 상단 타이틀 바 (스페이스 블랙 원형 아이콘 배지 + 36px 타이틀 + 우측 돌아가기 솔리드 캡슐) */}
@@ -674,31 +711,6 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               <h2 style={{ fontSize: isSubModal ? '30px' : '36px', fontWeight: 900, color: '#111827', margin: 0, letterSpacing: '-0.8px', lineHeight: 1.15 }}>
                 회원 본인 인증
               </h2>
-              {(selectedBayNos && selectedBayNos.length > 0 ? true : Boolean(selectedBayNo)) && (
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '5px 16px',
-                    borderRadius: '999px',
-                    background: 'rgba(0, 113, 227, 0.08)',
-                    border: '1.5px solid rgba(0, 113, 227, 0.35)',
-                    color: '#0071e3',
-                    fontSize: '18px',
-                    fontWeight: 900,
-                    letterSpacing: '-0.4px',
-                    boxShadow: '0 2px 8px rgba(0, 113, 227, 0.12)',
-                  }}
-                >
-                  <span style={{ fontSize: '18px' }}>⛳</span>
-                  <span>
-                    {selectedBayNos && selectedBayNos.length > 0
-                      ? `${selectedBayNos.map((n) => String(n).padStart(2, '0')).join(', ')}번 타석 배정`
-                      : `${String(selectedBayNo).padStart(2, '0')}번 타석 배정`}
-                  </span>
-                </div>
-              )}
             </div>
             <span style={{ fontSize: '16px', fontWeight: 700, color: '#64748b', letterSpacing: '-0.2px' }}>
               {`원하시는 인증 수단을 선택해 주세요 (${activeAuthModes.map((m) => AUTH_MODE_SHORT_LABELS[m]).join(' · ')})`}
@@ -728,6 +740,92 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
           돌아가기
         </button>
       </div>
+
+      {/* 🎫 [타석 배정 컨텍스트 티켓 바] — 회원인증 단계에서 몇 번 타석·즉시/대기·시작 예정 시각을 초대형으로 상시 표출 (탭 전환 0.00px 고정) */}
+      {authAllocationPreview.hasTargetBay && (
+        <div
+          data-testid="member-auth-allocation-banner"
+          style={{
+            borderRadius: '26px',
+            padding: '20px 28px',
+            background: authAllocationPreview.isWaitlist ? '#fffbeb' : '#ffffff',
+            border: authAllocationPreview.isWaitlist ? '2px solid #d97706' : '2px solid #e5e7eb',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '20px',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.05)',
+            boxSizing: 'border-box',
+          }}
+        >
+          {/* 좌측: 즉시배정 vs 대기예약 시맨틱 캡슐 + 타석번호 대형 표기 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '18px', flexWrap: 'wrap' }}>
+            <span
+              style={{
+                padding: '10px 22px',
+                borderRadius: '999px',
+                background: authAllocationPreview.isWaitlist ? '#d97706' : '#059669',
+                color: '#ffffff',
+                fontSize: '22px',
+                fontWeight: 900,
+                letterSpacing: '-0.3px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {authAllocationPreview.isWaitlist
+                ? `대기 예약 · 약 ${authAllocationPreview.waitMinutes}분 대기`
+                : '즉시 배정'}
+            </span>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <span
+                style={{
+                  fontSize: '42px',
+                  fontWeight: 900,
+                  color: '#1d1d1f',
+                  letterSpacing: '-1px',
+                  lineHeight: 1.05,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {authAllocationPreview.bayWithFloorLabel}
+              </span>
+              <span
+                style={{
+                  fontSize: '18px',
+                  fontWeight: 700,
+                  color: authAllocationPreview.isWaitlist ? '#b45309' : '#6e6e73',
+                }}
+              >
+                {authAllocationPreview.modeSubText}
+              </span>
+            </div>
+          </div>
+
+          {/* 우측: 시작 시각 & 제약 사항 */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', textAlign: 'right', gap: '4px', flexShrink: 0 }}>
+            <span
+              style={{
+                fontSize: '30px',
+                fontWeight: 900,
+                color: authAllocationPreview.isWaitlist ? '#b45309' : '#059669',
+                letterSpacing: '-0.6px',
+                fontVariantNumeric: 'tabular-nums',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {authAllocationPreview.isWaitlist
+                ? `${authAllocationPreview.startHhmm} 대기 시작`
+                : `${authAllocationPreview.startHhmm} 즉시 시작`}
+            </span>
+            {resolvedTargetBay && typeof resolvedTargetBay.max_assignable_min === 'number' && resolvedTargetBay.max_assignable_min > 0 && (
+              <span style={{ fontSize: '17px', fontWeight: 700, color: '#b45309', whiteSpace: 'nowrap' }}>
+                다음 예약({resolvedTargetBay.next_limit_res_start_time || '예정'}) 전 최대 {resolvedTargetBay.max_assignable_min}분
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 인증 모드 전환 탭 (스페이스 블랙 솔리드 활성 탭 + 에메랄드 아이콘 포인트) */}
       <div style={{ 
@@ -1030,7 +1128,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   justifyContent: 'center',
                   boxShadow: '0 0 40px rgba(16, 185, 129, 0.5)'
                 }}>
-                  <Sparkles size={56} color="#ffffff" />
+                  <Check size={56} strokeWidth={3} color="#ffffff" />
                 </div>
                 <h3 style={{ fontSize: '34px', fontWeight: 900, color: '#ffffff', margin: '4px 0 0 0' }}>
                   안면 매칭 성공!
@@ -1380,20 +1478,37 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         >
           <div
             style={{
-              width: '620px',
-              padding: '40px 36px',
+              width: '700px',
+              maxWidth: '94vw',
+              padding: '40px 38px',
               borderRadius: '32px',
               textAlign: 'center',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: '24px',
+              gap: '22px',
               background: '#ffffff',
               border: '1.5px solid #e2e8f0',
               boxShadow: '0 25px 60px rgba(0, 0, 0, 0.25)',
               animation: 'scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
           >
+            {authAllocationPreview.hasTargetBay && (
+              <div
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '999px',
+                  background: authAllocationPreview.isWaitlist ? '#fffbeb' : '#ecfdf5',
+                  border: authAllocationPreview.isWaitlist ? '2px solid #f59e0b' : '1.5px solid #34d399',
+                  color: authAllocationPreview.isWaitlist ? '#b45309' : '#047857',
+                  fontSize: '17px',
+                  fontWeight: 900,
+                }}
+              >
+                {authAllocationPreview.modeBadgeText} · {authAllocationPreview.bayWithFloorLabel}
+              </div>
+            )}
+
             <div>
               <h3 style={{ fontSize: '32px', fontWeight: 800, color: '#0f172a', marginBottom: '8px', letterSpacing: '-0.6px' }}>
                 이용하실 회원님을 선택해 주세요
@@ -1415,7 +1530,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                   }}
                   style={{
                     width: '100%',
-                    padding: '20px 24px',
+                    padding: '22px 26px',
                     borderRadius: '18px',
                     border: '2px solid #10b981',
                     background: '#f8fafc',
@@ -1423,7 +1538,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     cursor: 'pointer',
-                    fontSize: '23px',
+                    fontSize: '24px',
                     fontWeight: 800,
                     color: '#0f172a'
                   }}
@@ -1443,7 +1558,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               onClick={() => setDuplicateCandidates([])}
               style={{
                 width: '100%',
-                height: '62px',
+                height: '68px',
                 borderRadius: '999px',
                 fontSize: '21px',
                 fontWeight: 800,
@@ -1460,150 +1575,214 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
         document.body
       )}
 
-      {/* 3번 방어선: 1초 회원 이름 확인 팝업 모달 (620px 고시인성 대형 다이얼로그) */}
+      {/* 3번 방어선: 1초 회원 이름 확인 + 배정 타석·시작 시각 프리뷰 팝업 모달 (920px Apple HIG 대형 다이얼로그) */}
       {detectedMember && createPortal(
-        <div 
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            width: '100vw',
-            height: '100vh',
-            background: 'rgba(15, 23, 42, 0.5)',
-            backdropFilter: 'blur(24px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 999999,
-            margin: 0,
-            padding: 0
-          }}
-        >
-          <div 
-            style={{
-              width: '620px',
-              padding: '44px 40px',
-              borderRadius: '32px',
-              textAlign: 'center',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '26px',
-              background: '#ffffff',
-              border: '1.5px solid #e2e8f0',
-              boxShadow: '0 28px 65px rgba(0, 0, 0, 0.22), 0 4px 16px rgba(0, 0, 0, 0.06)',
-              animation: 'scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
-            }}
-          >
-            {/* 성공 뱃지 스타일 서클 */}
+        (() => {
+          const detectedPreview = TimeMaster.buildBayAllocationPreview({
+            bay: resolvedTargetBay,
+            bays,
+            bayNoFallback: selectedBayNo,
+            bayNos: selectedBayNos,
+            durationMin: null,
+            prepareMin,
+            storeCloseTime,
+            storeOpenTime,
+            isStore24h,
+            now,
+          });
+
+          return (
             <div 
-              style={{ 
-                width: '88px', 
-                height: '88px', 
-                borderRadius: '50%', 
-                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                display: 'flex', 
-                alignItems: 'center', 
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100vw',
+                height: '100vh',
+                background: 'rgba(15, 23, 42, 0.54)',
+                backdropFilter: 'blur(24px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+                display: 'flex',
+                alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 12px 28px rgba(16, 185, 129, 0.35)'
+                zIndex: 999999,
+                margin: 0,
+                padding: '24px',
+                boxSizing: 'border-box',
               }}
             >
-              <Sparkles size={46} style={{ color: '#ffffff' }} />
-            </div>
-
-            <div>
-              <h3 style={{ fontSize: '38px', fontWeight: 900, color: '#0f172a', marginBottom: '10px', letterSpacing: '-0.6px' }}>
-                <span style={{ color: '#059669', fontWeight: 900 }}>
-                  [{detectedMember.masked_name || buildMaskedName(detectedMember.member_name) || detectedMember.member_name}]
-                </span> 회원님
-              </h3>
-              <p style={{ fontSize: '24px', color: '#334155', fontWeight: 800, margin: 0 }}>
-                본인이 맞으신가요?
-              </p>
-              {/* 회원 보유 이용권/등급 요약 안내 뱃지 */}
-              <div
+              <div 
                 style={{
-                  marginTop: '16px',
-                  padding: '12px 22px',
-                  borderRadius: '16px',
-                  background: '#f0fdf4',
-                  border: '1.5px solid #86efac',
-                  color: '#065f46',
-                  fontSize: '19px',
-                  fontWeight: 800,
-                  display: 'inline-block'
+                  width: '920px',
+                  maxWidth: '94vw',
+                  padding: '48px 44px',
+                  borderRadius: '36px',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '28px',
+                  background: '#ffffff',
+                  border: '1px solid rgba(0, 0, 0, 0.08)',
+                  boxShadow: '0 32px 72px rgba(0, 0, 0, 0.24), 0 4px 16px rgba(0, 0, 0, 0.06)',
+                  animation: 'scaleIn 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
+                  boxSizing: 'border-box',
                 }}
               >
-                {(() => {
-                  const assignableAssets = (detectedMember.assets || []).filter(a => a.is_assignable !== false);
-                  if (assignableAssets.length > 0) {
-                    const primary = assignableAssets[0];
-                    const remCnt = primary.remain_cnt ?? primary.rem_count;
-                    return assignableAssets.length > 1
-                      ? `${primary.item_name} 외 ${assignableAssets.length - 1}건 보유`
-                      : `${primary.item_name}${remCnt != null ? ` (잔여 ${remCnt}회)` : ''}`;
-                  }
-                  if (detectedMember.item_name) {
-                    return detectedMember.item_name;
-                  }
-                  return `회원번호 ${detectedMember.member_no} · 일일권/상품 이용 가능`;
-                })()}
+                <div>
+                  <h3 style={{ fontSize: '56px', fontWeight: 900, color: '#1d1d1f', marginBottom: '10px', letterSpacing: '-1.2px', lineHeight: 1.1 }}>
+                    <span style={{ color: '#059669', fontWeight: 900 }}>
+                      [{detectedMember.masked_name || buildMaskedName(detectedMember.member_name) || detectedMember.member_name}]
+                    </span> 회원님
+                  </h3>
+                  <p style={{ fontSize: '32px', color: '#374151', fontWeight: 800, margin: 0, letterSpacing: '-0.5px' }}>
+                    본인이 맞으신가요?
+                  </p>
+                </div>
+
+                {/* 배정 타석 & 시작 시각 프리뷰 (이용권 선택 전이므로 시작 시간만 표기) */}
+                {detectedPreview.hasTargetBay && (
+                  <div
+                    data-testid="detected-member-allocation-preview"
+                    style={{
+                      width: '100%',
+                      borderRadius: '26px',
+                      background: detectedPreview.isWaitlist ? '#fffbeb' : '#f5f5f7',
+                      border: detectedPreview.isWaitlist ? '2px solid #d97706' : '1.5px solid #e5e7eb',
+                      padding: '22px 26px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '16px',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                      <span
+                        style={{
+                          padding: '8px 22px',
+                          borderRadius: '999px',
+                          background: detectedPreview.isWaitlist ? '#d97706' : '#059669',
+                          color: '#ffffff',
+                          fontSize: '22px',
+                          fontWeight: 900,
+                          letterSpacing: '-0.3px',
+                        }}
+                      >
+                        {detectedPreview.isWaitlist
+                          ? `대기 예약 · 약 ${detectedPreview.waitMinutes}분 대기`
+                          : '즉시 배정'}
+                      </span>
+                      {detectedPreview.isWaitlist && (
+                        <span style={{ fontSize: '20px', fontWeight: 800, color: '#b45309' }}>
+                          앞 타임 종료 후 대기 입장
+                        </span>
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        background: '#ffffff',
+                        borderRadius: '20px',
+                        padding: '22px 28px',
+                        border: detectedPreview.isWaitlist ? '1.5px solid #fde68a' : '1.5px solid #e5e7eb',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '20px',
+                      }}
+                    >
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#6e6e73', marginBottom: '4px' }}>배정 타석</div>
+                        <div style={{ fontSize: '48px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-1px', lineHeight: 1.05, fontVariantNumeric: 'tabular-nums' }}>
+                          {detectedPreview.bayWithFloorLabel}
+                        </div>
+                      </div>
+
+                      <div style={{ width: '1.5px', height: '64px', background: '#e5e7eb', flexShrink: 0 }} />
+
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#6e6e73', marginBottom: '4px' }}>
+                          {detectedPreview.isWaitlist ? '대기 시작' : '시작 시간'}
+                        </div>
+                        <div
+                          style={{
+                            color: detectedPreview.isWaitlist ? '#b45309' : '#059669',
+                            letterSpacing: '-0.8px',
+                            lineHeight: 1.05,
+                            fontVariantNumeric: 'tabular-nums',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <span style={{ fontSize: '46px', fontWeight: 900 }}>
+                            {detectedPreview.startHhmm}
+                          </span>
+                          <span style={{ fontSize: '28px', fontWeight: 900, marginLeft: '10px' }}>
+                            {detectedPreview.isWaitlist ? '대기 시작' : '즉시 시작'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '18px', width: '100%', marginTop: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      api.clearLocalBleCache();
+                      setDetectedMember(null);
+                    }}
+                    style={{
+                      height: '96px',
+                      borderRadius: '999px',
+                      fontSize: '28px',
+                      fontWeight: 800,
+                      background: '#f5f5f7',
+                      color: '#1d1d1f',
+                      border: '1.5px solid #d1d5db',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.97)'}
+                    onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  >
+                    아니오
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = detectedMember;
+                      api.clearLocalBleCache();
+                      detectedMemberRef.current = null;
+                      setDetectedMember(null);
+                      confirmDetectedMemberOnce(authConfirmedRef, target, onAuthSuccess);
+                    }}
+                    style={{
+                      height: '96px',
+                      borderRadius: '999px',
+                      fontSize: '32px',
+                      fontWeight: 900,
+                      background: detectedPreview.isWaitlist ? '#d97706' : '#059669',
+                      color: '#ffffff',
+                      border: 'none',
+                      boxShadow: detectedPreview.isWaitlist
+                        ? '0 12px 28px rgba(217, 119, 6, 0.30)'
+                        : '0 12px 28px rgba(5, 150, 105, 0.30)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.97)'}
+                    onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  >
+                    예, 본인 맞습니다
+                  </button>
+                </div>
               </div>
             </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.25fr', gap: '16px', width: '100%', marginTop: '6px' }}>
-              <button
-                onClick={() => {
-                  api.clearLocalBleCache();
-                  setDetectedMember(null);
-                }}
-                style={{
-                  height: '68px',
-                  borderRadius: '999px',
-                  fontSize: '22px',
-                  fontWeight: 800,
-                  background: '#f1f5f9',
-                  color: '#334155',
-                  border: '1.5px solid #cbd5e1',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.96)'}
-                onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              >
-                아니오 (취소)
-              </button>
-              <button
-                onClick={() => {
-                  const target = detectedMember;
-                  api.clearLocalBleCache();
-                  detectedMemberRef.current = null;
-                  setDetectedMember(null);
-                  confirmDetectedMemberOnce(authConfirmedRef, target, onAuthSuccess);
-                }}
-                style={{
-                  height: '68px',
-                  borderRadius: '999px',
-                  fontSize: '23px',
-                  fontWeight: 800,
-                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                  color: '#ffffff',
-                  border: 'none',
-                  boxShadow: '0 10px 24px rgba(16, 185, 129, 0.35)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.96)'}
-                onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              >
-                예, 맞습니다!
-              </button>
-            </div>
-          </div>
-        </div>,
+          );
+        })(),
         document.body
       )}
 

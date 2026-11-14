@@ -1,7 +1,10 @@
-const { app, BrowserWindow, Menu, nativeImage, dialog, session } = require('electron');
+const { app, BrowserWindow, Menu, nativeImage, dialog, session, screen } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+
+const KIOSK_BASE_WIDTH = 1080;
+const KIOSK_BASE_HEIGHT = 1920;
 
 // 1. 앱 이름 및 Windows 작업표시줄 AppUserModelID를 GOLFOS KIOSK로 고정
 app.name = 'GOLFOS KIOSK';
@@ -226,6 +229,21 @@ function buildKioskAppMenu() {
   Menu.setApplicationMenu(menu);
 }
 
+function computeMonitorFitMetrics(display) {
+  const targetDisplay = display || screen.getPrimaryDisplay();
+  const area = isKioskMode
+    ? targetDisplay.bounds
+    : (targetDisplay.workArea || targetDisplay.bounds);
+  const availWidth = Math.max(360, isKioskMode ? area.width : area.width - 32);
+  const availHeight = Math.max(480, isKioskMode ? area.height : area.height - 44);
+  const rawScale = Math.min(1, availWidth / KIOSK_BASE_WIDTH, availHeight / KIOSK_BASE_HEIGHT);
+  const scale = Math.max(0.25, Math.round(rawScale * 1000) / 1000);
+  const isCompactMonitor = scale < 0.999;
+  const contentWidth = isCompactMonitor ? Math.round(KIOSK_BASE_WIDTH * scale) : KIOSK_BASE_WIDTH;
+  const contentHeight = isCompactMonitor ? Math.round(KIOSK_BASE_HEIGHT * scale) : KIOSK_BASE_HEIGHT;
+  return { scale, isCompactMonitor, contentWidth, contentHeight, area };
+}
+
 function createKioskWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -234,12 +252,23 @@ function createKioskWindow() {
     return mainWindow;
   }
 
+  const fit = computeMonitorFitMetrics(screen.getPrimaryDisplay());
+  const windowX = fit.isCompactMonitor && !isKioskMode
+    ? Math.round(fit.area.x + (fit.area.width - fit.contentWidth) / 2)
+    : undefined;
+  const windowY = fit.isCompactMonitor && !isKioskMode
+    ? Math.round(fit.area.y + Math.max(0, (fit.area.height - fit.contentHeight - 28) / 2))
+    : undefined;
+
   mainWindow = new BrowserWindow({
     title: 'GOLFOS KIOSK',
-    width: 1080,
-    height: 1920,
-    minWidth: 1024,
-    minHeight: 768,
+    width: fit.contentWidth,
+    height: fit.contentHeight,
+    x: windowX,
+    y: windowY,
+    useContentSize: true,
+    minWidth: fit.isCompactMonitor ? Math.min(360, fit.contentWidth) : 1024,
+    minHeight: fit.isCompactMonitor ? Math.min(480, fit.contentHeight) : 768,
     backgroundColor: '#041B14',
     icon: fs.existsSync(windowIconPath) ? windowIconPath : undefined,
     autoHideMenuBar: true,
@@ -253,6 +282,28 @@ function createKioskWindow() {
       devTools: isDevMode,
     },
   });
+
+  const applyMonitorZoomFit = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      const [contentW, contentH] = mainWindow.getContentSize();
+      if (contentW > 0 && contentH > 0) {
+        const fitted = Math.min(
+          1.5,
+          Math.max(0.25, Math.min(contentW / KIOSK_BASE_WIDTH, contentH / KIOSK_BASE_HEIGHT))
+        );
+        const nextZoom = Math.round(fitted * 1000) / 1000;
+        mainWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
+        mainWindow.webContents.setZoomFactor(nextZoom);
+      }
+    } catch (_) {
+      // 무시
+    }
+  };
+
+  mainWindow.webContents.on('dom-ready', applyMonitorZoomFit);
+  mainWindow.webContents.on('did-finish-load', applyMonitorZoomFit);
+  mainWindow.on('resize', applyMonitorZoomFit);
 
   // 창 제목을 항상 GOLFOS KIOSK로 고정
   mainWindow.on('page-title-updated', (e) => {
@@ -332,9 +383,10 @@ function createKioskWindow() {
 
   mainWindow.once('ready-to-show', () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (!isKioskMode) {
+    if (!isKioskMode && !fit.isCompactMonitor) {
       mainWindow.maximize();
     }
+    applyMonitorZoomFit();
     mainWindow.show();
     mainWindow.focus();
     if (isDevMode) {
@@ -404,7 +456,8 @@ function createKioskWindow() {
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (!mainWindow.isVisible()) {
-        if (!isKioskMode) mainWindow.maximize();
+        if (!isKioskMode && !fit.isCompactMonitor) mainWindow.maximize();
+        applyMonitorZoomFit();
         mainWindow.show();
       }
       mainWindow.loadURL(buildWaitingSplashDataUrl(loadRetryCount, TARGET_URL)).catch(() => {});
@@ -421,6 +474,7 @@ function createKioskWindow() {
 
   mainWindow.webContents.on('did-finish-load', () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
+    applyMonitorZoomFit();
     const currentUrl = mainWindow.webContents.getURL() || '';
     if (!currentUrl.startsWith('data:text/html')) {
       if (loadRetryCount > 0) {

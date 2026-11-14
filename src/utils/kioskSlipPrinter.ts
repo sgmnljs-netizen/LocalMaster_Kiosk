@@ -83,6 +83,7 @@ export function buildKioskBayAllocationSlipPayload(options: KioskBayAllocationSl
   const isMoveBay = options.checkinMode === 'MOVE_BAY';
   const isPreCheckin = options.checkinMode === 'PRE_CHECKIN';
   const isPendingWait = options.checkinMode === 'PENDING_WAIT';
+  const isWaitlist = options.checkinMode === 'WAITLIST_ASSIGNED';
   const isReprint = options.checkinMode === 'REPRINT';
 
   const headerMessage = isMoveBay
@@ -91,9 +92,11 @@ export function buildKioskBayAllocationSlipPayload(options: KioskBayAllocationSl
       ? '★ [ 사 전 체 크 인 확 인 표 ] ★'
       : isPendingWait
         ? '★ [ 체 크 인 대 기 확 인 표 ] ★'
-        : isReprint
-          ? '★ [ 타 석 배 정 표 (재출력) ] ★'
-          : '★ [ 타 석 배 정 표 ] ★';
+        : isWaitlist
+          ? '★ [ 타 석 대 기 예 약 표 ] ★'
+          : isReprint
+            ? '★ [ 타 석 배 정 표 (재출력) ] ★'
+            : '★ [ 타 석 배 정 표 ] ★';
 
   const floorStr = options.floor
     ? String(options.floor).toUpperCase().endsWith('F') || String(options.floor).includes('층')
@@ -125,9 +128,11 @@ export function buildKioskBayAllocationSlipPayload(options: KioskBayAllocationSl
         ? '사전예약 체크인'
         : isPendingWait
           ? '체크인 대기'
-          : isReprint
-            ? '배정표 재출력'
-            : '타석 배정'
+          : isWaitlist
+            ? '타석 대기 예약'
+            : isReprint
+              ? '배정표 재출력'
+              : '타석 배정'
   );
 
   const timeRangeStr = endHhMm ? `${startHhMm} ~ ${endHhMm}` : `${startHhMm} ~ 종료시`;
@@ -139,7 +144,9 @@ export function buildKioskBayAllocationSlipPayload(options: KioskBayAllocationSl
       ? '예약시간 정각에 타석 전원이 자동 가동됩니다.'
       : isPendingWait
         ? '앞 타임 종료 즉시 타석이 가동됩니다.'
-        : '';
+        : isWaitlist
+          ? '앞 타임 종료 후 지정 시각부터 입장해 주십시오.'
+          : '';
 
   const cleanTimeToken = startHhMm.replace(/[^0-9]/g, '') || nowStr.slice(11, 16).replace(/[^0-9]/g, '');
   const cleanBayToken = String(options.bayNo).replace(/[^0-9A-Za-z]/g, '') || '0';

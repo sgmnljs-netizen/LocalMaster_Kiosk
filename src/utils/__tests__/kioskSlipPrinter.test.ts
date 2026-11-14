@@ -84,6 +84,29 @@ describe('kioskSlipPrinter & KioskHardwareBridgeClient FIFO Queue', () => {
     expect(textPreview).not.toContain('결제금액');
   });
 
+  it('builds waitlist booking slip with WAITLIST_ASSIGNED header, footer, and normalized HH:mm from backend 4-digit HHmm', () => {
+    const payload = buildKioskBayAllocationSlipPayload({
+      bayNo: 8,
+      floor: '1F',
+      resId: 'KSK_20261114_WAIT',
+      memberName: '이종섭',
+      memberNo: 'M1001',
+      productName: '프리미엄 6개월',
+      checkinMode: 'WAITLIST_ASSIGNED',
+      durationMin: 60,
+      startTime: '1501',
+      endTime: '1603',
+      storeInfo: mockStoreInfo,
+      tradeDt: '2026-11-14 14:35:00',
+    });
+
+    expect(payload.slip_meta?.title).toBe('★ [ 타 석 대 기 예 약 표 ] ★');
+    expect(payload.slip_meta?.action_label).toBe('타석 대기 예약');
+    expect(payload.slip_meta?.badge_text).toBe('1F - 08번 타석');
+    expect(payload.slip_meta?.time_range).toBe('15:01 ~ 16:03');
+    expect(payload.footer_message).toContain('앞 타임 종료 후 지정 시각부터 입장해 주십시오.');
+  });
+
   it('builds slim eco bay allocation slip with 5mm barcode (GS h 40) and 1-line feed', () => {
     const rawBuffer = kioskEscPosPrinter.buildReceiptBuffer({
       storeName: mockStoreInfo.store_name,

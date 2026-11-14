@@ -1,8 +1,8 @@
 # 🗺️ LocalMaster Kiosk (`LocalMaster_Kiosk`) 단일 진실 공급원(SSOT) 맵
 
-> **최종 동기화 일자**: 2026-11-12
+> **최종 동기화 일자**: 2026-11-14
 > **포트 규약**: `Port 5179` (Vite React + TypeScript + Electron/Windows Hardware Bridge)
-> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 92개 파일 565 passed / 8대 골든 패스 E2E 100% 통과)
+> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 93개 파일 573 passed / 8대 골든 패스 E2E 100% 통과)
 
 ---
 
@@ -31,7 +31,7 @@
 - **`components/MemberRegister.tsx` & `VirtualKeyboard.tsx`**: 30초 즉석 회원가입 및 4대 모드(`HANGUL_NAME`·`COUPON_CODE`·`ASCII_TEXT`·`NUMERIC`) 가상 키보드
 - **`components/CheckinSelect.tsx`**: 당일 예약 조회 및 2-Track 상시 체크인(얼리 체크인 `CHK` & 정시 물리 타석 기동)
 - **`components/PracticeSelect.tsx` & `TeeboxMap.tsx` & `TeeboxTileCard.tsx` & `utils/bayStatusGuard.ts`**: 층별 타석 배정 및 셀프 이동 맵, `isBayTrulyAvailableForKiosk` 가용 필터 및 선점 거절 원문(`resolvePreoccupyFailureMessage`) 표출
-- **`components/AssetSelectModal.tsx`**: 보유 이용권 선택 모달 (1.58:1 2열 카드 덱, `evaluateAssetFloorMismatchReason` 층 제한 안내)
+- **`components/AssetSelectModal.tsx`**: 보유 이용권 선택 모달 (1.6:1 카드, 1장 미선택 시작·2단 시선 릴레이 CTA 비콘, `LESSON`·기소진권 차단, `evaluateAssetFloorMismatchReason`)
 - **`components/CompanionSetupModal.tsx` & `ChainedBookingModal.tsx`**: 동반자 다중 타석(최대 4석, 횟수권/일일권) 설정 및 연쇄 대기 예약
 - **`components/Par3Allocation.tsx`**: 파3 코스/티타임 선택, 보유 이용권 차감, 서브 사업자 TID 라우팅 및 WAL/망취소/DLQ 연동
 - **`components/ProductShop.tsx`**: 일일 타석권 및 회원 이용권 매대 (`restrictionChips` 유동 칩 및 일일권 사전 자격 가드)
@@ -41,3 +41,4 @@
 - **`utils/kioskProductSpecSummary.ts` & `utils/kioskPurchaseEligibility.ts` & `utils/code128Barcode.ts` & `utils/kioskBlackBox.ts`**: 상품 스펙 요약·자격 판정 엔진, ISO Code128B 바코드, PAN 마스킹 블랙박스 로거
 - **`components/AdminPinModal.tsx` & `KioskSettingsModal.tsx` & `hooks/useHiddenAdminTrigger.ts` & `stores/kioskSettings.ts`**: 서버 검증 관리자/엔지니어 PIN, 5-Tap 히든 트리거, 호기별 설정 분리, `X-Device-Key` 기기인증 및 앱 제어
 - **`hooks/useKioskHardwareHeartbeat.ts` & `stores/useKioskHardwareHealthStore.ts` & `hooks/useKioskVanPayment.ts`**: 멀티 VAN·프린터 헬스 하트비트 스토어, VAN 결제 `E_BUSY` 잠금 및 QR 스캐너(`useHardwareScanner.ts`) 훅
+- **`electron/main.cjs`**: 24/7 무인 키오스크 데스크톱 셸 (모니터 배율 자동 맞춤 `applyMonitorZoomFit`, LAN PNA 해제, 크래시/오프라인 자동 복구)

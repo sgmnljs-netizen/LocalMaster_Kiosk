@@ -7,19 +7,31 @@ import {
   isBayTrulyAvailableForKiosk,
   resolveCanonicalBayStatus,
 } from '../utils/bayStatusGuard';
-import { sortFloorsDescending, sortBaysByNumber, normalizeFloorZoneToken } from '../utils/floorUtils';
+import {
+  sortFloorsDescending,
+  sortBaysByNumber,
+  normalizeFloorZoneToken,
+  normalizeBayNumberOrder,
+  type BayNumberOrder,
+} from '../utils/floorUtils';
+import { useKioskSettings } from '../stores/kioskSettings';
 
 interface MiniTeeboxMonitorProps {
   bays: Bay[];
   onBayClick: (bayNo: number) => void;
   lang: 'KO' | 'EN';
+  bayNumberOrder?: BayNumberOrder;
 }
 
 export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
   bays,
   onBayClick,
-  lang
+  lang,
+  bayNumberOrder,
 }) => {
+  const { settings } = useKioskSettings();
+  const effectiveBayOrder = normalizeBayNumberOrder(bayNumberOrder ?? settings.bayNumberOrder);
+
   // 연습타석 구역 기준 필터링
   const practiceBays = bays.filter(bay => {
     const zCode = bay.zone_code || bay.zoneCode || '';
@@ -40,7 +52,7 @@ export const MiniTeeboxMonitor: React.FC<MiniTeeboxMonitorProps> = ({
 
   const sortedFloors = sortFloorsDescending(Object.keys(floorsMap));
   sortedFloors.forEach(floorKey => {
-    floorsMap[floorKey] = sortBaysByNumber(floorsMap[floorKey]);
+    floorsMap[floorKey] = sortBaysByNumber(floorsMap[floorKey], effectiveBayOrder);
   });
 
   const isBayBlocked = (b: Bay) => {

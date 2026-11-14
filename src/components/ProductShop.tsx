@@ -9,6 +9,7 @@ import {
   resolveKioskProductDurationMin,
 } from '../utils/kioskProductSpecSummary';
 import { isKioskChannelProduct } from '../utils/kioskPurchaseEligibility';
+import { TimeMaster } from '../utils/timeMaster';
 
 /** 샴페인 플래티넘 메탈 스마트 IC 칩 (EMV Chip) 그래픽 */
 const EmvChip: React.FC = () => (
@@ -36,6 +37,7 @@ interface ProductShopProps {
   maxAssignableMin?: number | null;
   nextLimitResStartTime?: string | null;
   selectedBay?: Bay | null;
+  prepareMin?: number;
   allStoreFloors?: string[];
   zoneLabelMap?: Record<string, string>;
   hasActiveMembership?: boolean;
@@ -67,6 +69,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   maxAssignableMin = null,
   nextLimitResStartTime = null,
   selectedBay = null,
+  prepareMin,
   allStoreFloors,
   zoneLabelMap,
   hasActiveMembership = false,
@@ -291,6 +294,65 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           <X size={28} strokeWidth={2.4} />
         </button>
       </div>
+
+      {/* 일일 타석 배정 모드 시 선택 타석 + 즉시배정/대기예약 시맨틱 요약 바 */}
+      {isDailyPurpose && selectedBay && (() => {
+        const shopPreview = TimeMaster.buildBayAllocationPreview({
+          bay: selectedBay,
+          durationMin: null,
+          prepareMin,
+          storeCloseTime,
+          storeOpenTime,
+          isStore24h,
+          now: nowOverride,
+        });
+        return (
+          <div
+            data-testid="product-shop-allocation-banner"
+            style={{
+              borderRadius: '20px',
+              padding: '14px 22px',
+              background: shopPreview.isWaitlist ? '#fffbeb' : '#f0fdf4',
+              border: shopPreview.isWaitlist ? '2px solid #f59e0b' : '1.5px solid #34d399',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '14px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span
+                style={{
+                  padding: '6px 15px',
+                  borderRadius: '999px',
+                  background: shopPreview.isWaitlist ? '#d97706' : '#059669',
+                  color: '#ffffff',
+                  fontSize: '16px',
+                  fontWeight: 900,
+                }}
+              >
+                {shopPreview.modeBadgeText}
+              </span>
+              <span style={{ fontSize: '24px', fontWeight: 950, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
+                {shopPreview.bayWithFloorLabel}
+              </span>
+            </div>
+            <span
+              style={{
+                fontSize: '18px',
+                fontWeight: 900,
+                color: shopPreview.isWaitlist ? '#b45309' : '#047857',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {shopPreview.isWaitlist
+                ? `⏰ ${shopPreview.startHhmm} 시작 예정 (상품 선택 시 종료 시각 표시)`
+                : `⚡ ${shopPreview.startHhmm} 즉시 시작 (상품 선택 시 종료 시각 표시)`}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* 동적 카테고리 탭 목록 (회원권 구매 전용 매대) */}
       {!isDailyPurpose && displayCategories.length > 0 && (

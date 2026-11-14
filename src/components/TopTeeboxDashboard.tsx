@@ -6,7 +6,13 @@ import {
   isBayTrulyAvailableForKiosk,
   resolveCanonicalBayStatus,
 } from '../utils/bayStatusGuard';
-import { sortFloorsDescending, sortBaysByNumber, normalizeFloorZoneToken } from '../utils/floorUtils';
+import {
+  sortFloorsDescending,
+  sortBaysByNumber,
+  normalizeFloorZoneToken,
+  normalizeBayNumberOrder,
+  type BayNumberOrder,
+} from '../utils/floorUtils';
 import { useKioskSettings, KioskTopDashboardMode } from '../stores/kioskSettings';
 import { KioskLiveClock } from './KioskLiveClock';
 
@@ -15,6 +21,7 @@ interface TopTeeboxDashboardProps {
   onBayClick: (bayNo: number) => void;
   lang: 'KO' | 'EN';
   modeOverride?: KioskTopDashboardMode;
+  bayNumberOrder?: BayNumberOrder;
   onClose?: () => void;
   selectedBayNo?: number | null;
   selectedBayNos?: number[];
@@ -25,12 +32,14 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   onBayClick,
   lang,
   modeOverride,
+  bayNumberOrder,
   onClose,
   selectedBayNo,
   selectedBayNos,
 }) => {
   const { settings } = useKioskSettings();
   const displayMode: KioskTopDashboardMode = modeOverride || settings.topDashboardMode || 'AUTO';
+  const effectiveBayOrder = normalizeBayNumberOrder(bayNumberOrder ?? settings.bayNumberOrder);
 
   if (displayMode === 'HIDDEN') {
     return null;
@@ -58,7 +67,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   // 층 정렬: 프런트포스(floorUtils.ts)와 1:1 동일하게 건물 물리 층수 내림차순 배치 (예: 3F 상단 -> 2F 중단 -> 1F 최하단)
   const sortedFloors = sortFloorsDescending(Object.keys(floorsMap));
   sortedFloors.forEach(floorKey => {
-    floorsMap[floorKey] = sortBaysByNumber(floorsMap[floorKey]);
+    floorsMap[floorKey] = sortBaysByNumber(floorsMap[floorKey], effectiveBayOrder);
   });
 
   const renderBayCard = (bay: Bay, floorBayCount: number) => {

@@ -19,7 +19,7 @@ import { CompanionSetupModal, CompanionTargetItem } from './components/Companion
 import { ErrorMessageModal, ErrorModalData } from './components/ErrorMessageModal';
 import { CheckinSelect } from './components/CheckinSelect';
 import { AllocationCompleteModal } from './components/AllocationCompleteModal';
-import { AssetSelectModal } from './components/AssetSelectModal';
+import { AssetSelectModal, resolveDefaultSelectedAssetId } from './components/AssetSelectModal';
 import { PurchaseCompleteModal, CompletedPurchaseInfo } from './components/PurchaseCompleteModal';
 import { api, Member, Product, Bay, type KioskMenuConfig } from './services/api';
 import type { CardApprovalResult } from './services/van/van_types';
@@ -32,9 +32,15 @@ import {
   hydrateKioskDeviceSettingsFromServer,
   bootstrapLocalKioskSettings,
   getKioskSettings,
+  saveKioskSettings,
   isQrDisallowedForPurpose,
   resolveEnabledAuthModesForPurpose,
 } from './stores/kioskSettings';
+import {
+  extractBayNumberOrderFromMeta,
+  normalizeBayNumberOrder,
+  type BayNumberOrder,
+} from './utils/floorUtils';
 import { useHiddenAdminTrigger } from './hooks/useHiddenAdminTrigger';
 import { AdminPinModal } from './components/AdminPinModal';
 import { KioskSettingsModal } from './components/KioskSettingsModal';
@@ -53,6 +59,7 @@ import {
 import {
   buildKioskProductSpecSummary,
   evaluateDailyPassEligibility,
+  resolveKioskProductDurationMin,
 } from './utils/kioskProductSpecSummary';
 import {
   evaluateBayHardwareState,
@@ -60,6 +67,7 @@ import {
   isBayTrulyAvailableForKiosk,
   runWithAllocationMutex,
 } from './utils/bayStatusGuard';
+import { formatKioskHhMm } from './utils/kioskSlipPrinter';
 
 type KioskStep = 
   | 'INTRO' 
@@ -239,6 +247,9 @@ export default function KioskApp() {
   const [storeClosedReason, setStoreClosedReason] = useState<string | null>(null);
   const [storePrepareMin, setStorePrepareMin] = useState<number>(3);
   const [checkinPolicy, setCheckinPolicy] = useState<string>('CHECKIN_REQUIRED');
+  const [bayNumberOrder, setBayNumberOrder] = useState<BayNumberOrder>(() =>
+    normalizeBayNumberOrder(settings.bayNumberOrder)
+  );
   const [hwFailAlert, setHwFailAlert] = useState<{ bayNo: number; resId: string } | null>(null);
   const [hwFailCountdown, setHwFailCountdown] = useState<number>(10);
 
@@ -541,6 +552,11 @@ export default function KioskApp() {
             const faceYn = meta?.integration?.face_terminal_yn ?? true;
             setFaceTerminalEnabled(faceYn);
             api.resolveKioskFaceTerminalIp(meta);
+            const resolvedBayOrder = extractBayNumberOrderFromMeta(meta) ?? 'ASC';
+            setBayNumberOrder(resolvedBayOrder);
+            if (getKioskSettings().bayNumberOrder !== resolvedBayOrder) {
+              saveKioskSettings({ bayNumberOrder: resolvedBayOrder }, { syncRemote: false });
+            }
           } catch {
             setFaceTerminalEnabled(true);
           }
@@ -1258,7 +1274,16 @@ export default function KioskApp() {
           setShowCompanionModal(true);
           setStep('PRACTICE_SELECT');
         } else {
-          setSelectedAssetId(null);
+          const activeTargetBayNo = selectedBayNo ?? selectedBayNoRef.current;
+          const targetBayForAuto =
+            activeTargetBayNo !== null
+              ? bays.find((b) => Number(b.bay_no) === Number(activeTargetBayNo))
+              : undefined;
+          setSelectedAssetId(
+            resolveDefaultSelectedAssetId(member, targetBayForAuto, {
+              qrCouponOnlyMode: settings.qrCouponOnlyMode,
+            })
+          );
           setStep('ASSET_SELECT');
         }
       }
@@ -1359,8 +1384,13 @@ export default function KioskApp() {
     setSelectedBayNo(bayNo);
 
     if (purpose === 'ALLOCATE_MEMBERSHIP' && authMember) {
-      // 회원권 타석 배정은 이용권 선택 화면으로 유도
-      setSelectedAssetId(null);
+      // 회원권 타석 배정은 이용권 선택 화면으로 유도 (1건 보유 시에도 미선택 상태로 시작하여 2단 시선 릴레이 작동)
+      const targetBayForAuto = bays.find((b) => Number(b.bay_no) === Number(bayNo));
+      setSelectedAssetId(
+        resolveDefaultSelectedAssetId(authMember, targetBayForAuto, {
+          qrCouponOnlyMode: settings.qrCouponOnlyMode,
+        })
+      );
       setStep('ASSET_SELECT');
     } else if (purpose === 'ALLOCATE_DAILY') {
       // 일일권은 먼저 타석을 선택한 뒤, 60분/90분 결제 단계로 진입
@@ -1448,7 +1478,7 @@ export default function KioskApp() {
           setCompletedAllocationInfo({
             bayNo: bayNo,
             oldBayNo: resolvedOldBayNo,
-            floor: targetBayObj?.floor_no || null,
+            floor: targetBayObj?.floor ?? targetBayObj?.floor_no ?? null,
             durationMin: remainMin,
             startTime: formatMoveTimeStr(res.start_time || currentBay?.start_time),
             endTime: formatMoveTimeStr(res.end_time || currentBay?.end_time),
@@ -1547,18 +1577,24 @@ export default function KioskApp() {
           setSelectedBayNo(null);
           selectedBayNoRef.current = null;
           
+          const resolvedStartStr = res.start_time || res.startTime;
+          const formattedStartStr = formatKioskHhMm(resolvedStartStr);
           setStep('PRACTICE_SELECT');
           setCompletedAllocationInfo({
             bayNo: allocatedBayNo,
-            floor: targetBayObj?.floor_no || null,
+            floor: targetBayObj?.floor ?? targetBayObj?.floor_no ?? null,
             durationMin: effectiveDur,
-            startTime: res.start_time || res.startTime,
+            startTime: resolvedStartStr,
             endTime: res.end_time || res.endTime,
             resId: res.res_id,
             memberName: confirmedMemberName,
             memberNo: confirmedMemberNo,
             productName: assetProductName,
-            actionLabel: '회원권 타석 배정',
+            actionLabel: res.is_chained ? '회원권 대기 예약' : '회원권 타석 배정',
+            checkinMode: res.is_chained ? 'WAITLIST_ASSIGNED' : undefined,
+            noticeMessage: res.is_chained
+              ? `현재 이용 중인 타석의 [대기 예약]이 완료되었습니다. 앞 세션 종료 후 [${formattedStartStr || '예정 시각'}]부터 입장해 주세요.`
+              : undefined,
             remainInfo: remainInfoStr || undefined,
             payAmount: 0
           });
@@ -1618,6 +1654,14 @@ export default function KioskApp() {
       // 🛡️ BUG-S07 & BUG-M4: 회원권 구매 완료 직후 [구매한 회원권으로 바로 타석 배정받기]로 진입한 경우 재인증 생략 후 방금 구매한 이용권(selectedAssetId) 프리선택 유지
       if (keepAuthAfterPurchaseRef.current && authMember) {
         keepAuthAfterPurchaseRef.current = false;
+        if (selectedAssetId === null) {
+          const targetBayForAuto = bays.find((b) => Number(b.bay_no) === Number(bayNo));
+          setSelectedAssetId(
+            resolveDefaultSelectedAssetId(authMember, targetBayForAuto, {
+              qrCouponOnlyMode: settings.qrCouponOnlyMode,
+            })
+          );
+        }
         setStep('ASSET_SELECT');
         return;
       }
@@ -2168,18 +2212,24 @@ export default function KioskApp() {
               setSelectedBayNo(null);
               selectedBayNoRef.current = null;
               
+              const resolvedDailyStartStr = allocResult.start_time || allocResult.startTime;
+              const formattedDailyStartStr = formatKioskHhMm(resolvedDailyStartStr);
               setStep('PRACTICE_SELECT');
               setCompletedAllocationInfo({
                 bayNo: allocatedBayNo,
-                floor: targetBayObj?.floor_no || null,
+                floor: targetBayObj?.floor ?? targetBayObj?.floor_no ?? null,
                 durationMin: allocResult.duration_min ?? finalDuration,
-                startTime: allocResult.start_time || allocResult.startTime,
+                startTime: resolvedDailyStartStr,
                 endTime: allocResult.end_time || allocResult.endTime,
                 resId: allocResult.res_id,
                 memberName: confirmedMemberName,
                 memberNo: confirmedMemberNo,
                 productName: resolvedDailyProdName,
-                actionLabel: '일일권 타석 배정',
+                actionLabel: allocResult.is_chained ? '일일권 대기 예약' : '일일권 타석 배정',
+                checkinMode: allocResult.is_chained ? 'WAITLIST_ASSIGNED' : undefined,
+                noticeMessage: allocResult.is_chained
+                  ? `현재 이용 중인 타석의 [대기 예약] 결제가 완료되었습니다. 앞 세션 종료 후 [${formattedDailyStartStr || '예정 시각'}]부터 입장해 주세요.`
+                  : undefined,
                 payAmount: actualPaidAmount,
                 originalAmount: effectiveDailyBasePrice,
                 discountAmount: payResult?.discountAmount ?? (gradeDiscount + couponDiscount),
@@ -2681,7 +2731,7 @@ export default function KioskApp() {
         <>
           {/* step === 'MAIN_DASHBOARD' 일 때만 대형 실시간 타석 종합 전광판 노출 (기존 광고 영역 대체) */}
           {step === 'MAIN_DASHBOARD' && (
-            <TopTeeboxDashboard bays={bays} onBayClick={handleMiniBayClick} lang={lang} />
+            <TopTeeboxDashboard bays={bays} onBayClick={handleMiniBayClick} lang={lang} bayNumberOrder={bayNumberOrder} />
           )}
 
           {/* 메인 기능 터미널 구역 (대시보드일 때는 가변 flex, 나머지 단계일 때는 1920px 전체화면으로 가변 확장) */}
@@ -2924,7 +2974,7 @@ export default function KioskApp() {
                     showToast(message || (lang === 'KO' ? `${bayNo}번 타석 체크인이 완료되었습니다.` : `Bay ${bayNo} check-in completed.`));
                     setCompletedAllocationInfo({
                       bayNo: bayNo,
-                      floor: targetBayObj?.floor_no || null,
+                      floor: targetBayObj?.floor ?? targetBayObj?.floor_no ?? null,
                       durationMin: durationMin ?? DEFAULT_SESSION_MIN,
                       startTime,
                       endTime,
@@ -2986,6 +3036,21 @@ export default function KioskApp() {
                       ? selectedBayNos
                       : undefined
                   }
+                  selectedBay={
+                    ((purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY') &&
+                    selectedBayNo !== null
+                      ? bays.find((b) => Number(b.bay_no) === Number(selectedBayNo)) || null
+                      : null
+                  }
+                  bays={
+                    (purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY'
+                      ? bays
+                      : undefined
+                  }
+                  prepareMin={storePrepareMin}
+                  storeCloseTime={storeCloseTime}
+                  storeOpenTime={storeOpenTime}
+                  isStore24h={isStore24h}
                   onAuthSuccess={handleAuthSuccess}
                   onCancel={
                     (purpose as string) === 'ALLOCATE_MEMBERSHIP' || (purpose as string) === 'ALLOCATE_DAILY'
@@ -3064,6 +3129,7 @@ export default function KioskApp() {
               <PracticeSelect
                 bays={bays}
                 lang={lang}
+                bayNumberOrder={bayNumberOrder}
                 initialSelectedBayNo={selectedBayNo}
                 externalSelectedBayNos={selectedBayNos}
                 justAllocatedBayNo={justAllocatedBayNo}
@@ -3119,6 +3185,7 @@ export default function KioskApp() {
                   authChannel={authMember?.auth_channel}
                   isMoveMode={purpose === 'MOVE_BAY'}
                   lang={lang}
+                  bayNumberOrder={bayNumberOrder}
                   justAllocatedBayNo={justAllocatedBayNo}
                   feedbackCountdown={feedbackCountdown}
                   onCancelCountdown={cancelFeedbackCountdown}
@@ -3196,6 +3263,7 @@ export default function KioskApp() {
                       maxAssignableMin={bays.find(b => b.bay_no === selectedBayNo)?.max_assignable_min}
                       nextLimitResStartTime={bays.find(b => b.bay_no === selectedBayNo)?.next_limit_res_start_time}
                       selectedBay={bays.find(b => b.bay_no === selectedBayNo) || null}
+                      prepareMin={storePrepareMin}
                       allStoreFloors={allStoreFloors}
                       zoneLabelMap={zoneLabelMap}
                       hasActiveMembership={hasActivePeriodMembership}
@@ -3322,6 +3390,19 @@ export default function KioskApp() {
                 }
                 assignedBayNo={selectedBayNo}
                 assignedBayNos={selectedBayNos}
+                selectedBay={
+                  selectedBayNo !== null
+                    ? bays.find((b) => Number(b.bay_no) === Number(selectedBayNo)) || null
+                    : null
+                }
+                bays={bays}
+                selectedDurationMin={
+                  selectedProduct ? resolveKioskProductDurationMin(selectedProduct) : null
+                }
+                prepareMin={storePrepareMin}
+                storeCloseTime={storeCloseTime}
+                storeOpenTime={storeOpenTime}
+                isStore24h={isStore24h}
                 assignedLockerNo={selectedLockerDisplayNo || selectedLockerNo}
                 resId={purpose === 'EXTEND_LOCKER' ? null : (currentHoldResId || checkinResId)}
                 memberName={authMember?.member_name}
@@ -3373,6 +3454,10 @@ export default function KioskApp() {
                 bays={bays}
                 lang={lang}
                 selectedAssetId={selectedAssetId}
+                prepareMin={storePrepareMin}
+                storeCloseTime={storeCloseTime}
+                storeOpenTime={storeOpenTime}
+                isStore24h={isStore24h}
                 onSelectAsset={(assetId) => setSelectedAssetId(assetId)}
                 onConfirm={(assetId) => handleAssetSelected(assetId)}
                 onCancel={() => {

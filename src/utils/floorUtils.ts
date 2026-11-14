@@ -42,8 +42,55 @@ export function sortFloorsAscending(floors: string[]): string[] {
   });
 }
 
-export function sortBaysByNumber<T extends { bay_no?: number | string | null }>(bays: T[]): T[] {
-  return [...bays].sort((a, b) => (Number(a.bay_no) || 0) - (Number(b.bay_no) || 0));
+export type BayNumberOrder = 'ASC' | 'DESC';
+
+export function normalizeBayNumberOrder(
+  raw: unknown,
+  fallback: BayNumberOrder = 'ASC'
+): BayNumberOrder {
+  const safeFallback: BayNumberOrder = fallback === 'DESC' ? 'DESC' : 'ASC';
+  if (typeof raw !== 'string') return safeFallback;
+  const upper = raw.trim().toUpperCase();
+  if (upper === 'DESC') return 'DESC';
+  if (upper === 'ASC') return 'ASC';
+  return safeFallback;
+}
+
+export function extractBayNumberOrderFromMeta(meta: unknown): BayNumberOrder | undefined {
+  if (!meta) return undefined;
+  let current: unknown = meta;
+  for (let depth = 0; depth < 2 && typeof current === 'string'; depth += 1) {
+    try {
+      current = JSON.parse(current);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!current || typeof current !== 'object' || Array.isArray(current)) {
+    return undefined;
+  }
+  const op = (current as Record<string, unknown>).operation;
+  if (!op || typeof op !== 'object' || Array.isArray(op)) {
+    return undefined;
+  }
+  const rawOrder = (op as Record<string, unknown>).bay_number_order;
+  if (typeof rawOrder !== 'string') return undefined;
+  const upper = rawOrder.trim().toUpperCase();
+  if (upper === 'DESC') return 'DESC';
+  if (upper === 'ASC') return 'ASC';
+  return undefined;
+}
+
+export function sortBaysByNumber<T extends { bay_no?: number | string | null }>(
+  bays: T[],
+  order: BayNumberOrder = 'ASC'
+): T[] {
+  const normalizedOrder = normalizeBayNumberOrder(order);
+  return [...bays].sort((a, b) => {
+    const numA = Number(a.bay_no) || 0;
+    const numB = Number(b.bay_no) || 0;
+    return normalizedOrder === 'DESC' ? numB - numA : numA - numB;
+  });
 }
 
 export function formatFloorDisplayLabel(floorInput?: string | number | null): string {

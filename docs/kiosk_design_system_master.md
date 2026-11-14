@@ -37,10 +37,11 @@
 
 ### 3. 💊 애플 시그니처 필 버튼 (Apple Signature Pill Button)
 - **버튼 형태**:
-  - 모든 메인 액션 버튼(결제하기, 배정하기, 확인 등)은 **완전 원형 필 버튼 (`borderRadius: 999px`, `height: 56px` ~ `64px`)**으로 통일합니다.
+  - 일반 메인 액션 버튼(결제하기, 배정하기, 확인 등)은 **완전 원형 필 버튼 (`borderRadius: 999px`, `height: 56px` ~ `96px`)**으로 통일하며, 타석 최종 배정 확정 CTA(`AssetSelectModal.tsx` `data-testid="asset-confirm-cta-btn"`)는 27인치 터치 인지 극대화를 위해 **`height: 108px`, `fontSize: 30px` Weight `900`** 풀와이드 시맨틱 필 버튼을 적용합니다.
 - **버튼 컬러 스킴**:
   - 화이트 배경 카드: **애플 딥 차콜 필 버튼 (`background: #1d1d1f`, `color: #ffffff`)**
   - 다크 프로스트 카드: **애플 스노우 화이트 필 버튼 (`background: #ffffff`, `color: #000000`)**
+  - 타석 배정 최종 확정 CTA (`AssetSelectModal.tsx` 2단 시선 릴레이): 미선택 시 뉴트럴 슬레이트(`#f1f5f9`)로 대기하다가, 고객이 이용권 카드를 터치하는 즉시 **즉시 배정 에메랄드 주얼 그라디언트(`.asset-cta-ready`)** / **대기 예약 앰버 주얼 그라디언트(`.asset-cta-ready-amber`)**와 외곽 호흡형 헤일로 링(`::before` `inset: -7px`)·내부 화이트 유리 광택 스윕(`.asset-cta-sheen-clip::after`)·우측 화살표 넛지(`.asset-cta-arrow`)가 동시 점등됩니다(`{NN}번 타석 · {HH:mm ~ HH:mm} 즉시 배정` / `대기 예약` 직접 각인, 이모지 미사용; `Why`: 1장 보유 시에도 자동 선선택하지 않고 카드 광택 ➔ 확정 CTA 점등으로 시선을 넘겨 오터치 배정을 방지).
 - **마이크로 터치 유도 인터랙션**:
   - 버튼 내부 좌측에 콕콕 누르는 손가락 탭 마이크로 애니메이션(`Hand` 아이콘 + `animate-hand-tap`)을 필수로 탑재하여 0.1초 만에 터치를 강력하게 유도합니다.
 
@@ -59,12 +60,15 @@
   - 이를 통해 팝업 카드 전면의 높은 집중도를 유지하면서도, 뒤쪽의 1F/2F/3F 타석 현황판과 선택된 타석 번호가 흐릿하지 않고 또렷하게 실물 투과(Spatial Orientation 보존)됩니다.
 - **상단 전광판(TopTeeboxDashboard) 선택 타석 블루 펄스 점등 (Halo Pulse)**:
   - 타석이 선택되면 상단 전광판의 해당 타석 칩이 **애플 딥 블루(`#0071e3`)**로 점등되며, `0 0 0 3px #ffffff, 0 0 0 6px #0071e3` 더블 링 테두리와 `scale(1.12)` 및 부드러운 펄스 애니메이션(`selectedBayHaloPulse`)이 활성화되어 팝업 뒤에서도 선택 타석이 즉시 눈에 띕니다.
-- **본인 인증(MemberAuth) 모달 2중 안심 배지 (Double Assurance Badge)**:
-  - 타석 배정 목적(`ALLOCATE_MEMBERSHIP`, `ALLOCATE_DAILY`)으로 인증 시, 모달 헤더 `회원 본인 인증` 타이틀 바로 옆에 **`[ ⛳ {NN}번 타석 배정 ]`** 블루 필 뱃지(`rgba(0, 113, 227, 0.08)`, `border: 1.5px solid rgba(0, 113, 227, 0.35)`)를 상시 표출하여 고객이 2중으로 확실하게 인지하도록 보장합니다.
+- **본인 인증(MemberAuth) 모달 2중 안심 배지 & 상단 배정 컨텍스트 티켓 바 (Double Assurance + Context Ticket)**:
+  - 타석 배정 목적(`ALLOCATE_MEMBERSHIP`, `ALLOCATE_DAILY`)으로 인증 시, 모달 헤더 `회원 본인 인증` 타이틀 바로 옆에 **`[ ⛳ {NN}번 타석 배정 ]`** 블루 필 뱃지(`rgba(0, 113, 227, 0.08)`, `border: 1.5px solid rgba(0, 113, 227, 0.35)`)를 표출하고, 직하단에 애플 스노우 화이트 고정형 **`member-auth-allocation-banner`**(`즉시 배정` 에메랄드 / `대기 예약 · 약 N분 대기` 앰버 `22px` 배지, `42px` `{층} · {NN}번 타석`, `30px` `HH:mm 즉시 시작` / `HH:mm 대기 시작`)를 상시 표출하여 인증 도중에도 배정 맥락을 100% 인지시킵니다.
 - **카드 외곽 및 위치 고정 (Top Y Anchor)**:
-  - 외부 오버레이 컨테이너: `justifyContent: 'flex-start'`, `paddingTop: '180px'`.
-  - 모달 카드 치수: **`width: 1,000px` × `height: 1,040px` (minHeight: 1,040px 고정)**.
-  - 상단 Y좌표(Top Y)가 `180.00px`에 절대 고정되어 탭 전환이나 키패드 터치 시 **상하 들썩임(Layout Shift) 편차 0.0000px** 보장.
+  - 외부 오버레이 컨테이너: `justifyContent: 'flex-start'`, 타석 배정 컨텍스트 진입 시 `paddingTop: '96px'`(비배정 일반 인증 시 `160px`).
+  - 모달 카드 치수: **`width: 1,000px` × `minHeight: 1,260px`**(타석 배정 컨텍스트 티켓 바 포함 시; 비배정 일반 인증 시 `minHeight: 1,040px`).
+  - 상단 Y좌표(Top Y)가 절대 고정되어 탭 전환이나 키패드 터치 시 **상하 들썩임(Layout Shift) 편차 0.0000px** 보장.
+- **회원 이름 확인 모달 (`detectedMember`) Apple HIG 초대형 고대비 프리뷰**:
+  - AI `Sparkles` 아이콘·중복 이용권 요약 띠·이모지 장식을 전면 제거하고 모달 폭을 **`920px`**로 확대하며, **`[{마스킹 이름}] 회원님` (`56px`)** + **`본인이 맞으신가요?` (`32px`)**, 중앙 **`detected-member-allocation-preview`**(`즉시 배정`/`대기 예약 · 약 N분 대기` 배지 + `48px` `{층} · {NN}번 타석` + 이용권 선택 전 단계이므로 종료 시각 대신 **`46px` `HH:mm` + `28px` `즉시 시작` / `대기 시작`**) 및 하단 **`96px` (`28px`/`32px`) 확인/취소 필 버튼**을 적용합니다.
+  - 보유 이용권 선택 모달(`AssetSelectModal.tsx`)도 Apple HIG 순백색 **`1,008px`** 시트(`46px` 헤드라인 + 1줄 컨텍스트 + **1장 보유 시에도 미선택 시작** + 단일 `480×296` / 다중 **2열 `458×286` `1.6:1` 신용카드 직사각형 비율** · `30px` 상품명 · `25px` 잔여 가치 · `3단 정형 스노우 푸터` · `LESSON` 오차감 및 기소진 0회권 차단 + **1단계 미선택 카드 유리 광택 스윕(`asset-card-pulse-hint`) ➔ 2단계 카드 선택 즉시 하단 `108px` 확정 CTA 루미너스 비콘(`asset-cta-ready`) 바통 터치** + `44px` 최종 타석·시간 독)로 일원화하며, `AllocationCompleteModal.tsx`는 **`920px` 디지털 배정표** + 풀와이드 **`96px` 단일 `[확인]` 버튼**으로 마감합니다(`Why`: 배정표는 모달 오픈 시 자동 인쇄되며, 용지 소진·재출력 대응은 프런트포스 전담이므로 키오스크 불필요 `[영수증 재출력]` 버튼을 제거해 오터치와 감열지 중복 낭비를 차단).
 - **내부 콘텐츠 패널 높이 단일화 (Uniform 750px Workspace)**:
   - 스마트 태그(`SMART_TAG`), 전화번호 키패드(`PHONE_KEYPAD`), 안면 인식(`FACE`), QR 스캔(`QR_SCAN`) 4대 인증 탭의 내부 작업 공간 높이를 **`height: 750px` (minHeight: 750px)**로 100% 일원화.
 - **전화번호 3×4 키패드 황금비율 복원 (+44% 수직 확장)**:
@@ -85,26 +89,11 @@
 
 ---
 
-## 📜 변경 이력 및 적용 완료 현황
-- **`IntroScreen.tsx`**: GOLF CLUB 상단 대형 실시간 타석 현황 위젯 스케일업.
-- **`PracticeSelect.tsx`**: 타석 배정 방식 선택 모달 원색 제거 및 애플 화이트/차콜 리뉴얼.
-- **`AllocationCompleteModal.tsx`**: 100% 한글 애플 스노우 화이트 타석 배정표 디지털 티켓 구축.
-- **`ProductShop.tsx`**: 일일 타석권 상품별 BEST 뱃지, 48px 대형 숫자, 애플 딥 차콜 필 결제 버튼 반영.
-- **`PaymentTerminal.tsx`**: 군더더기 줄글/과장 안내문 전면 삭제, 담백한 `[👤 회원 인증 / 로그인]` 단일 버튼 및 실보유 혜택 한정 표출, 하단 플로팅 네비게이션 충돌 원천 차단 및 컴팩트 4-Zone 결제 독 구축.
-- **`PaymentTerminal.tsx (v6.2)`**: 애플 미니멀 중앙 플로팅 시트 리뉴얼 (`maxWidth: 860px`, `borderRadius: 32px`, 원색 도배 90% 제거, 고대비 모노톤 SF Pro 딥 블랙 `#1d1d1f` 및 애플 딥 차콜 완전 원형 `999px` 필 버튼 전역 통일).
-- **`PaymentTerminal.tsx (v6.3)`**: 27인치 대형 화면 황금 비례 스케일업 (`maxWidth: 940px`, `padding: 44px 48px`, 48px 대형 금액 타이포, 76px 시그니처 딥 차콜 필 버튼, ProductShop과 100% 비례 통일).
-- **`CheckinSelect.tsx & TeeboxMap.tsx (v6.5)`**: 당일 사전 예약 체크인 화면 및 셀프 타석 이동 화면의 구형 다크 그린/네온 인디고 테마를 전면 폐기하고, 애플 스노우 화이트 글래스 카드(`#ffffff`), `#f5f5f7` 서브 패널, `#1d1d1f` 시그니처 원형 필 버튼으로 리뉴얼 완료 (전역 `KioskBottomBar`와 중복되던 내부 취소/이전 버튼 정리).
-- **`VirtualKeyboard.tsx, ProductShop.tsx, Par3Allocation.tsx & PurchaseCompleteModal.tsx (v6.6)`**: 즉석 회원가입용 가상 키보드의 다크 네온 인디고 테마를 폐기하고 스노우 화이트(`#ffffff` / `#f5f5f7` 키캡)로 전환했으며, 회원권 매대 카테고리 세그먼트 컨트롤, 파3 라운딩 예약 버튼/모달, 구매 완료 확인 버튼까지 모두 `#1d1d1f` 딥 차콜 원형 필(Pill) 스타일로 100% 일원화 완료.
-- **`ErrorMessageModal.tsx, CompanionSetupModal.tsx, MaintenanceOverlay.tsx, ReceiptPrinter.tsx & KioskApp.tsx Fail-Safe Modals (v6.7)`**: 에러 안내 팝업, 네트워크/미들웨어 단절 차단 모달, 마감 단축 배정 모달, 동반자 다중 배정 설정창, 시스템 점검 오버레이, 영수증 인쇄 확인 버튼까지 모든 예외·안전망 화면을 스노우 화이트(`#ffffff` / `#f5f5f7`)와 `#1d1d1f` 딥 차콜 필 버튼으로 100% 일원화 완료.
-- **`KioskMainDashboard.tsx, TopTeeboxDashboard.tsx & kiosk_design_system.css (v7.5)`**: 27인치 Windows 키오스크(`1080×1920`) 고시인성 타이포그래피 전면 확대(헤드라인 `46px`, 히어로 타이틀 `40px`/버튼 `62px`, 서브카드 타이틀 `34px`/풀와이드 필 버튼 `56px` 통일, 회원가입 타이틀 `30px`/버튼 `62px`), Windows ClearType 한글 가독성 최적화(`'Pretendard Variable', 'Pretendard', 'Segoe UI', 'Malgun Gothic'`, `fontWeight: 800`, 단위 없는 `line-height: 1.4`), 상단 타석 현황판 자동 반응형 그리드(`AUTO`: 12석 이하 1줄 대형 와이드 `62px` / 13석 이상 2줄 균등 배분 `54px`) 및 가맹점 커스터마이징(`topDashboardMode`) 구축 완료.
-- **`LockerExtend.tsx (v8.0)`**: 개인 라카 연장 화면 27인치 세로형 FHD(`1080×1920`) 고시인성 전면 개편. 수직 중앙 플로팅 밸런스로 하단 여백 과다 해소, 라카 미보유 회원 전용 풀와이드 Empty 안내 뷰(타이틀 `32px`, 설명문 `23px` line-height 1.75 고대비 차콜, `기간 연장만` 블루/`안내 데스크` 오렌지 하이라이트, `22px` 대형 원형 필 버튼), 상단 파란색 안내 박스(`20px`), 라카 번호 배지(`74px` / `34px` UltraBold) 및 가격(`38px`) 스케일업 완료.
-- **`TeeboxMap.tsx (v8.1)`**: 셀프 타석 이동 화면 27인치 세로형 FHD(`1080×1920`) 고시인성 전면 개편. 수직 중앙 플로팅 밸런스(`flex: 1`, `margin: auto 0`)로 하단 600px 빈 여백 해소, 타석 미보유 전용 Full-Width Empty 안내 뷰(타이틀 `32px`, 설명문 `23px` 3줄 고대비 차콜, `연습타석 배정하기` `22px` 에메랄드 필 버튼 원터치 연결), 상단 현재 타석 바 `32px` UltraBold 및 UTC ISO 시각 버그 KST 정규화(`HH:mm 종료`), 하단 [타석 이동 확정] 메인 CTA 버튼 `68px` / `22px` UltraBold 스케일업 완료.
-- **`TeeboxTileCard.tsx & TeeboxMap.tsx (v8.2)`**: 타석 이동 화면 타석 그리드를 공용 `TeeboxTileCard` 단일 진실 공급원(SSOT)으로 100% 통합 및 300줄 레거시 중복 코드 완전 제거. `isCurrentMyBay`(현재 내 타석 에메랄드 하이라이트 및 보전 배지), `isMoveMode`(즉시 이동 가능/이동 선택 완료 텍스트 및 사용 중 타석 실시간 잔여시간/진행바 완전 가시화), 사용 중 타석 터치 시 즉시 이동 불가 안내 토스트 및 상단 5대 범례 일원화 완료.
-- **`TeeboxTileCard.tsx & TeeboxMap.tsx (v8.3)`**: 27인치 세로형 FHD(`1080×1920`) 텍스트 클리핑 긴급 해소 및 UI 황금비율 최적화. 종횡비 `1 / 1.22` 및 패딩 `13px 11px`로 세로 15px/가로 10px 유효폭 확장, 사용 중 박스 잔여시간(`12px`) 및 예정시각(`11px`) `whiteSpace: nowrap` 강제로 2줄 개행(`남/음`, `예/정`) 및 프로그레스 바 바닥 클리핑 100% 차단, 상단 활성 배너 `whiteSpace: nowrap` 및 `28px` 적용으로 `타/석` 단어 쪼개짐 완전 해소.
-- **`MemberRegister.tsx & VirtualKeyboard.tsx (v8.4)`**: 신규 회원가입 창 27인치 세로형 FHD(`1080×1920`) 1.3배 전면 스케일업(`width: 1,000px` × `height: 약 920px` 대형 Bento 글래스 시트). 텐키 숫자 버튼(`68px ➔ 82px` / 폰트 `26px ➔ 32px`), 휴대폰 번호 디스플레이(`68px ➔ 80px` / 폰트 `28px ➔ 34px`), 이름 입력창(`68px ➔ 80px` / 폰트 `20px ➔ 24px`), 성별 버튼(`64px ➔ 76px` / 폰트 `22px`), 전체 약관 동의(`50px ➔ 64px` / 폰트 `18px` / 체크박스 `26px`), 최종 가입 CTA(`72px ➔ 84px` / 폰트 `24px` UltraBold), 2단계 안면등록 뷰파인더(`520×340px ➔ 640×420px`), 가상 키보드 docked width `1,000px` Flush 정합 완료.
-- **`TeeboxTileCard.tsx (v8.5)`**: 사용 중 타석 2컬럼 미니 KPI 분할 및 하단 4px 매립 그래프바(Graph Bar) 고시인성 전면 개편. 좌측 `남은 대기 {N}분`(16px 에메랄드)과 우측 `시작 시각 {HH:mm}`(16px 딥 차콜) 2대 핵심 수치를 16px 특대형 UltraBold로 확대(+33%)하고, 하단 바닥면에 4px 일체형 매립 프로그레스 바를 결합하여 글씨 짤림 0% 및 진행률 직관성 극대화 완료. 상단 `● 대기 N명` 뱃지 연동.
-- **`MemberAuth.tsx & kiosk_design_system.css (v8.6)`**: 전화번호 인증 키패드 화면 울렁거림(Wobble/Bounce) 0.00px 영구 제거 및 스마트 디스플레이 개편. `.premium-glass-card:active`의 `scale(0.97)` 부모 축소 전파와 `.keypad-num-btn`의 `scale(0.95)` 기하학적 변형을 전면 제거(`transform: none !important`, 솔리드 배경 컬러 `#e2e8f0` 즉시 반응)하고, 번호 표시창을 `84px` 고정 높이·등폭 숫자(`tabular-nums`)로 고정했으며, 뒷번호 4자리(`5678`) 입력 시 하이픈 깨짐(`567-8`) 없이 `5678` + `[뒷 4자리 조회 가능]` 배지로 표출하도록 개선 완료.
-- **`MemberAuth.tsx (v8.7)`**: 본인 인증 모달 상단/하단 절대 높이 고정(Zero Layout Shift) 및 키패드 황금비율 전면 개편. 카드 외곽을 `width: 1,000px` × `height: 1,040px`(상단 Top Y 180px 절대 앵커) 및 내부 작업 공간 `height: 750px`로 전 탭 단일화하여 탭 전환 시 높낮이 편차 0.0000px 달성. 3×4 키패드 버튼 높이를 `68px ➔ 98px`로 +44% 대폭 확대하여 기존 납작한 4:1 호떡에서 2.73:1 두툼한 터치 캡슐로 복원 완료.
-- **`KioskApp.tsx & MemberAuth.tsx (v8.8)`**: 타석 선택 후 본인인증 모달 오버레이 표준화(`position: fixed; inset: 0; zIndex: 9000; backdropFilter: blur(14px)`) 및 하단 타석현황판 겹침 0% 완전 해소. 배정 퍼널 진행 중 배경 타석 화면이 하단으로 밀려나와 깨지던 아키텍처 결함을 수정하고 애플 럭셔리 다크 글래스 오버레이로 일원화 완료.
-- **`TopTeeboxDashboard.tsx, PracticeSelect.tsx, MemberAuth.tsx (v8.9)`**: 방안 2 크리스탈 라이트 블러 투과(`blur(3px)`, 딤 38%) 표준화 및 선택 타석 2중 안심 강조 구축 완료. 상단 전광판 내 선택 타석 블루 펄스 점등(`selectedBayHaloPulse`)과 본인인증 모달 헤더 `[ ⛳ {NN}번 타석 배정 ]` 필 배지 렌더링으로 팝업 중에도 고객의 공간 인지(Spatial Orientation) 100% 완벽 보장.
-- **`MemberAuth.tsx, KioskSettingsModal.tsx (v9.0)`**: NFC 방식 및 리더기 접촉 안내 전면 제거, 모바일 앱 '스마트 체크인' 전용 UI 개편 완료. 탭 라벨을 `스마트폰 태그`에서 `앱 스마트 체크인`으로 직관화하고, Android/iOS 구분 없이 `STEP 1 골포스 앱 실행` ➔ `STEP 2 [스마트 체크인] 터치` 2단계 통합 원터치 가이드와 리더기 비접촉 무선 안심 배너 구축 완료.
+## 변경 이력 (Revision History)
+
+| 일자 | 버전 | 변경 구분 | 핵심 변경 요약 |
+| :--- | :--- | :--- | :--- |
+| 2026-11-14 | v9.3 | 배정 퍼널 Apple HIG 1.6:1 직사각형 카드 & 2단 시선 릴레이 CTA 비콘 마감 | `TimeMaster.buildBayAllocationPreview` 전 퍼널 `즉시 배정`(에메랄드 `#059669`) vs `대기 예약`(앰버 `#d97706`) 이원화, AI `Sparkles`·`VIP PASS`/`EMV Chip`·`1단계`·이모지 전면 제거, `PracticeSelect` `960px` 2열 `nowrap` 모달(`Touch :`·중복 경고 제거, `72px` 버튼), `MemberAuth` `920px` 이름 확인(이용권 선택 전 `HH:mm 즉시 시작`/`HH:mm 대기 시작`만 표출, `96px` 버튼), `AssetSelectModal` `1,008px`(1장 보유 포함 전 권종 미선택 시작 · 단일 `480×296`/다중 2열 `458×286` `1.6:1` 카드 · 1단계 `asset-card-pulse-hint` 유리 광택 ➔ 2단계 `.asset-cta-ready` 스프링 팝인·헤일로 펄스·유리 광택 스윕·화살표 넛지 `108px` CTA 비콘 · `LESSON` 제외 및 `DAILY`/`TICKET` 0회 소진 차단), `AllocationCompleteModal` `920px` 대형 배정표(`floor ?? floor_no` + `84px` 타석번호 · `44px`/`40px` 시간 · `[영수증 재출력]` 제거 후 풀와이드 단일 `96px` `[확인]` 버튼) 및 `electron/main.cjs` 모니터 배율 자동 맞춤 완료 |
+| 2026-10-30 | v9.0 | 모바일 앱 스마트 체크인 | `MemberAuth.tsx`, `KioskSettingsModal.tsx` NFC 태그 안내 전면 제거 및 `앱 스마트 체크인` 2-Step 무선 가이드·750px 워크스페이스 일원화 |
+| 2026-10-29 | v8.9 | 크리스탈 라이트 블러 & 펄스 | `TopTeeboxDashboard.tsx`, `PracticeSelect.tsx`, `MemberAuth.tsx` 3px 라이트 블러 투과(딤 38%) · 선택 타석 블루 펄스 · 27인치 FHD 스케일업 및 98px 키패드/Zero Layout Shift 정비 (`v6.2~v8.8` 누적 반영 포함) |
+| 2026-10-28 | v6.0 | 애플 미니멀 표준 제정 | `IntroScreen.tsx`~`AllocationCompleteModal.tsx` 순백색 스노우 화이트(`#ffffff`), `#1d1d1f` 딥 차콜 999px 필 버튼, 5% 인디케이터 닷 및 100% 한글 티켓 표준 확립 |

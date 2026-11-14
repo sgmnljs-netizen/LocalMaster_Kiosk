@@ -1,4 +1,10 @@
 import { useState, useEffect } from 'react';
+import {
+  normalizeBayNumberOrder,
+  type BayNumberOrder,
+} from '../utils/floorUtils';
+
+export { normalizeBayNumberOrder, type BayNumberOrder };
 
 export type KioskAuthModeKey = 'SMART_TAG' | 'PHONE_KEYPAD' | 'QR_SCAN' | 'FACE';
 export type KioskTopDashboardMode = 'AUTO' | 'COMPACT_1ROW' | 'HIDDEN';
@@ -38,6 +44,8 @@ export interface KioskSettings {
   topDashboardMode?: KioskTopDashboardMode;
   /** QR 인증 시 개인 전용 정기권(PERIOD/MEMBERSHIP)·포인트·등급할인 노출 차단 여부 (기본값: true = 쿠폰/횟수권 전용) */
   qrCouponOnlyMode?: boolean;
+  /** 각 층 타석 번호 가로(좌↔우) 배열 방향: ASC(1→11 정방향, 기본) | DESC(11→1 역방향, 매장 SSOT 연동) */
+  bayNumberOrder?: BayNumberOrder;
 }
 
 export const DEFAULT_AUTH_METHODS: KioskAuthMethodsConfig = {
@@ -201,6 +209,7 @@ export const DEFAULT_KIOSK_SETTINGS: KioskSettings = {
   minGapMinutes: 60,
   topDashboardMode: 'AUTO',
   qrCouponOnlyMode: true,
+  bayNumberOrder: 'ASC',
 };
 
 const STORAGE_KEY = 'lm-kiosk-settings';
@@ -317,6 +326,10 @@ export function getKioskSettings(): KioskSettings {
         typeof parsed.qrCouponOnlyMode === 'boolean'
           ? parsed.qrCouponOnlyMode
           : DEFAULT_KIOSK_SETTINGS.qrCouponOnlyMode ?? true,
+      bayNumberOrder: normalizeBayNumberOrder(
+        parsed.bayNumberOrder,
+        DEFAULT_KIOSK_SETTINGS.bayNumberOrder ?? 'ASC'
+      ),
     };
   } catch {
     return cloneDefaultKioskSettings();
@@ -540,6 +553,10 @@ export function saveKioskSettings(
     topDashboardMode: normalizeTopDashboardMode(
       settings.topDashboardMode ?? current.topDashboardMode,
       DEFAULT_KIOSK_SETTINGS.topDashboardMode
+    ),
+    bayNumberOrder: normalizeBayNumberOrder(
+      settings.bayNumberOrder ?? current.bayNumberOrder,
+      DEFAULT_KIOSK_SETTINGS.bayNumberOrder ?? 'ASC'
     ),
   };
   if (typeof localStorage !== 'undefined') {
