@@ -57,7 +57,7 @@
 - **크리스탈 라이트 블러(Crystal Light Blur) 배경 투과 강제**:
   - `MemberAuth` 및 `DecisionModal`(배정 방식 선택 팝업)은 `position: 'fixed'`, `inset: 0`, `zIndex: 9000` 오버레이로 감싸되,
   - 배경 투명도는 **`background: 'rgba(15, 23, 42, 0.38)'`** 및 **`backdropFilter: 'blur(3px)'`**로 표준화합니다.
-  - 이를 통해 팝업 카드 전면의 높은 집중도를 유지하면서도, 뒤쪽의 1F/2F/3F 타석 현황판과 선택된 타석 번호가 흐릿하지 않고 또렷하게 실물 투과(Spatial Orientation 보존)됩니다.
+  - 이를 통해 팝업 카드 전면의 높은 집중도를 유지하면서도, 뒤쪽의 1F/2F/3F 타석 현황판과 선택된 타석 번호가 흐릿하지 않고 또렷하게 실물 투과(Spatial Orientation 보존)됩니다 (`Why`: 고령·신규 고객이 어두운 전면 암전 배경으로 인해 방금 선택한 층·타석 위치를 잊고 모달을 닫아 재진입하는 이탈을 방지).
 - **상단 전광판(TopTeeboxDashboard) 선택 타석 블루 펄스 점등 (Halo Pulse)**:
   - 타석이 선택되면 상단 전광판의 해당 타석 칩이 **애플 딥 블루(`#0071e3`)**로 점등되며, `0 0 0 3px #ffffff, 0 0 0 6px #0071e3` 더블 링 테두리와 `scale(1.12)` 및 부드러운 펄스 애니메이션(`selectedBayHaloPulse`)이 활성화되어 팝업 뒤에서도 선택 타석이 즉시 눈에 띕니다.
 - **본인 인증(MemberAuth) 모달 2중 안심 배지 & 상단 배정 컨텍스트 티켓 바 (Double Assurance + Context Ticket)**:
@@ -65,7 +65,7 @@
 - **카드 외곽 및 위치 고정 (Top Y Anchor)**:
   - 외부 오버레이 컨테이너: `justifyContent: 'flex-start'`, 타석 배정 컨텍스트 진입 시 `paddingTop: '96px'`(비배정 일반 인증 시 `160px`).
   - 모달 카드 치수: **`width: 1,000px` × `minHeight: 1,260px`**(타석 배정 컨텍스트 티켓 바 포함 시; 비배정 일반 인증 시 `minHeight: 1,040px`).
-  - 상단 Y좌표(Top Y)가 절대 고정되어 탭 전환이나 키패드 터치 시 **상하 들썩임(Layout Shift) 편차 0.0000px** 보장.
+  - 상단 Y좌표(Top Y)가 절대 고정되어 탭 전환이나 키패드 터치 시 **상하 들썩임(Layout Shift) 편차 0.0000px** 보장 (`Why`: 27인치 대형 터치스크린에서 인증 탭 전환 시 모달 높이가 출렁이면 손가락 목표 좌표가 어긋나 연속 오터치를 유발하기 때문).
 - **회원 이름 확인 모달 (`detectedMember`) Apple HIG 초대형 고대비 프리뷰**:
   - AI `Sparkles` 아이콘·중복 이용권 요약 띠·이모지 장식을 전면 제거하고 모달 폭을 **`920px`**로 확대하며, **`[{마스킹 이름}] 회원님` (`56px`)** + **`본인이 맞으신가요?` (`32px`)**, 중앙 **`detected-member-allocation-preview`**(`즉시 배정`/`대기 예약 · 약 N분 대기` 배지 + `48px` `{층} · {NN}번 타석` + 이용권 선택 전 단계이므로 종료 시각 대신 **`46px` `HH:mm` + `28px` `즉시 시작` / `대기 시작`**) 및 하단 **`96px` (`28px`/`32px`) 확인/취소 필 버튼**을 적용합니다.
   - 보유 이용권 선택 모달(`AssetSelectModal.tsx`)도 Apple HIG 순백색 **`1,008px`** 시트(`46px` 헤드라인 + 1줄 컨텍스트 + **1장 보유 시에도 미선택 시작** + 단일 `480×296` / 다중 **2열 `458×286` `1.6:1` 신용카드 직사각형 비율** · `30px` 상품명 · `25px` 잔여 가치 · `3단 정형 스노우 푸터` · `LESSON` 오차감 및 기소진 0회권 차단 + **1단계 미선택 카드 유리 광택 스윕(`asset-card-pulse-hint`) ➔ 2단계 카드 선택 즉시 하단 `108px` 확정 CTA 루미너스 비콘(`asset-cta-ready`) 바통 터치** + `44px` 최종 타석·시간 독)로 일원화하며, `AllocationCompleteModal.tsx`는 **`920px` 디지털 배정표** + 풀와이드 **`96px` 단일 `[확인]` 버튼**으로 마감합니다(`Why`: 배정표는 모달 오픈 시 자동 인쇄되며, 용지 소진·재출력 대응은 프런트포스 전담이므로 키오스크 불필요 `[영수증 재출력]` 버튼을 제거해 오터치와 감열지 중복 낭비를 차단).
@@ -93,6 +93,7 @@
 
 | 일자 | 버전 | 변경 구분 | 핵심 변경 요약 |
 | :--- | :--- | :--- | :--- |
+| 2026-11-15 | v9.4 | SSOT 표준화 | 크리스탈 라이트 블러(`3px`) 공간 맥락 보존 및 Top-Y 앵커 무변위(`0.0000px`) 오터치 방어 근거(`Why`) 보강, 링크·컴포넌트 참조 전수 검증 |
 | 2026-11-14 | v9.3 | 배정 퍼널 Apple HIG 1.6:1 직사각형 카드 & 2단 시선 릴레이 CTA 비콘 마감 | `TimeMaster.buildBayAllocationPreview` 전 퍼널 `즉시 배정`(에메랄드 `#059669`) vs `대기 예약`(앰버 `#d97706`) 이원화, AI `Sparkles`·`VIP PASS`/`EMV Chip`·`1단계`·이모지 전면 제거, `PracticeSelect` `960px` 2열 `nowrap` 모달(`Touch :`·중복 경고 제거, `72px` 버튼), `MemberAuth` `920px` 이름 확인(이용권 선택 전 `HH:mm 즉시 시작`/`HH:mm 대기 시작`만 표출, `96px` 버튼), `AssetSelectModal` `1,008px`(1장 보유 포함 전 권종 미선택 시작 · 단일 `480×296`/다중 2열 `458×286` `1.6:1` 카드 · 1단계 `asset-card-pulse-hint` 유리 광택 ➔ 2단계 `.asset-cta-ready` 스프링 팝인·헤일로 펄스·유리 광택 스윕·화살표 넛지 `108px` CTA 비콘 · `LESSON` 제외 및 `DAILY`/`TICKET` 0회 소진 차단), `AllocationCompleteModal` `920px` 대형 배정표(`floor ?? floor_no` + `84px` 타석번호 · `44px`/`40px` 시간 · `[영수증 재출력]` 제거 후 풀와이드 단일 `96px` `[확인]` 버튼) 및 `electron/main.cjs` 모니터 배율 자동 맞춤 완료 |
 | 2026-10-30 | v9.0 | 모바일 앱 스마트 체크인 | `MemberAuth.tsx`, `KioskSettingsModal.tsx` NFC 태그 안내 전면 제거 및 `앱 스마트 체크인` 2-Step 무선 가이드·750px 워크스페이스 일원화 |
 | 2026-10-29 | v8.9 | 크리스탈 라이트 블러 & 펄스 | `TopTeeboxDashboard.tsx`, `PracticeSelect.tsx`, `MemberAuth.tsx` 3px 라이트 블러 투과(딤 38%) · 선택 타석 블루 펄스 · 27인치 FHD 스케일업 및 98px 키패드/Zero Layout Shift 정비 (`v6.2~v8.8` 누적 반영 포함) |
