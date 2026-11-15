@@ -107,7 +107,7 @@ export const PurchaseCompleteModal: React.FC<PurchaseCompleteModalProps> = ({
     setHasPrintError(false);
     setPrintStatus(lang === 'KO' ? '출력 중...' : 'Printing...');
     try {
-      const safeApprNo = purchaseInfo?.apprNo || '00000000';
+      const safeApprNo = purchaseInfo?.apprNo || `NONVAN-${Date.now().toString().slice(-6)}`;
       const totalAmt = purchaseInfo?.amount || 0;
       const resolvedDiscount =
         (propDiscountAmount ?? purchaseInfo?.discountAmount ?? 0) +

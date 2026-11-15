@@ -119,7 +119,7 @@ export const MaintenanceOverlay: React.FC<MaintenanceOverlayProps> = ({
         </div>
 
         <div style={{ paddingTop: '16px', fontSize: '12px', color: '#86868b', fontFamily: 'monospace' }}>
-          GOLFOS Kiosk Engine {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'v0.3.0'}
+          GOLFOS Kiosk Engine {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'v1.0.0'}
         </div>
       </div>
     </div>

@@ -7,7 +7,7 @@ import fs from 'fs'
 const rootVersionPath = path.resolve(__dirname, '../VERSION')
 const appVersion = fs.existsSync(rootVersionPath)
   ? fs.readFileSync(rootVersionPath, 'utf-8').trim()
-  : '0.3.0'
+  : '1.0.0'
 
 // https://vitejs.dev/config/
 export default defineConfig({
