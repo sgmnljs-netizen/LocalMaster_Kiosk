@@ -122,11 +122,28 @@ try {
         $iniFixed = [regex]::Replace($iniFixed, "(?m)^Sign_YN\s*=\s*N", "Sign_YN=Y")
         $iniFixed = [regex]::Replace($iniFixed, "(?m)^Sign_SelfYN\s*=\s*N", "Sign_SelfYN=Y")
         $iniFixed = [regex]::Replace($iniFixed, "(?m)^Sign_Port\s*=\s*\S+", "Sign_Port=")
-        if ($iniFixed -ne $iniRaw) {
+        $kcpIniChanged = ($iniFixed -ne $iniRaw)
+        if ($kcpIniChanged) {
             [System.IO.File]::WriteAllText($kcpIniPath, $iniFixed, $cp949)
             Stop-Process -Name "NHNKCPSecureVCATMonit","NHNKCPSecureVCAT" -Force -ErrorAction SilentlyContinue
             Start-Sleep -Milliseconds 500
-            if (Test-Path $kcpExePath) {
+        }
+        $kcpRunning = Get-Process -Name "NHNKCPSecureVCAT" -ErrorAction SilentlyContinue
+        if ($kcpIniChanged -or (-not $kcpRunning)) {
+            $kcpTask = Get-ScheduledTask -TaskName "GolfOS_KCP_VCAT" -ErrorAction SilentlyContinue
+            if ($kcpTask) {
+                Start-ScheduledTask -TaskName "GolfOS_KCP_VCAT" -ErrorAction SilentlyContinue
+            } else {
+                schtasks /run /tn "GolfOS_KCP_VCAT" 2>$null | Out-Null
+            }
+            for ($k = 0; $k -lt 6; $k++) {
+                Start-Sleep -Milliseconds 500
+                $kcpRunning = Get-Process -Name "NHNKCPSecureVCAT" -ErrorAction SilentlyContinue
+                if ($kcpRunning) { break }
+            }
+            $sshSessionId = 0
+            try { $sshSessionId = (Get-Process -Id $PID -ErrorAction SilentlyContinue).SessionId } catch { $sshSessionId = 0 }
+            if ((-not $kcpRunning) -and (Test-Path $kcpExePath) -and ($sshSessionId -ne 0)) {
                 Start-Process -FilePath $kcpExePath -WorkingDirectory "C:\NHNKCPSecureVCAT" -ErrorAction SilentlyContinue
             }
         }

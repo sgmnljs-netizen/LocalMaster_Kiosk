@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   canonicalizeKioskMenuId,
   isKioskMenuEnabled,
@@ -107,6 +107,16 @@ describe('W3-KSK-stores: 키오스크 설정 및 하드웨어 헬스 스토어 �
     it('normalizeApiUrl 및 멀티 VAN 포트/상태 엔드포인트 매핑이 정확하다', () => {
       expect(normalizeApiUrl('http://192.168.0.50:8000///')).toBe('http://192.168.0.50:8000/api');
       expect(normalizeApiUrl('http://192.168.0.50:8000/api/')).toBe('http://192.168.0.50:8000/api');
+
+      vi.stubGlobal('window', {
+        location: { protocol: 'http:', hostname: '192.168.0.89' },
+      });
+      try {
+        expect(normalizeApiUrl('')).toBe('http://192.168.0.89:8000/api');
+        expect(normalizeApiUrl(undefined)).toBe('http://192.168.0.89:8000/api');
+      } finally {
+        vi.unstubAllGlobals();
+      }
 
       expect(normalizeVanProviderType('nhn_kcp')).toBe('KCP_VAN');
       expect(normalizeVanProviderType('nice')).toBe('NICE_VAN');

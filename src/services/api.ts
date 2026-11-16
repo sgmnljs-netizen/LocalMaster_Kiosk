@@ -31,7 +31,7 @@ import {
 } from './paymentResilience';
 
 // 기본 백엔드 주소 및 가맹점 코드 (동적 헬퍼 폴백용)
-const BASE_URL = normalizeApiUrl(import.meta.env.VITE_BASE_URL || 'http://localhost:8000/api');
+const BASE_URL = normalizeApiUrl(import.meta.env.VITE_BASE_URL);
 export const STORE_CODE =
   getKioskSettings().storeCode ||
   (typeof window !== 'undefined' ? localStorage.getItem('LM_STORE_CD') : null) ||
@@ -777,7 +777,7 @@ class HybridAPIClient {
     if (settings?.apiUrl) {
       return normalizeApiUrl(settings.apiUrl);
     }
-    return normalizeApiUrl(import.meta.env.VITE_BASE_URL || 'http://localhost:8000/api');
+    return normalizeApiUrl(import.meta.env.VITE_BASE_URL);
   }
 
   public getWsBaseUrl(): string {
