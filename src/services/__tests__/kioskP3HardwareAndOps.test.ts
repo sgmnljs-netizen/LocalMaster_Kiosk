@@ -92,7 +92,6 @@ describe('Kiosk P3 Pre-Commercialization: Windows Ops, Multi-VAN Heartbeat & Adm
     expect(updatePs1).toContain('Register-ScheduledTask');
     expect(updatePs1).toContain('Start-Process');
     // Must stay pure ASCII so Windows PowerShell 5.1 never breaks on UTF-8 without BOM
-    // eslint-disable-next-line no-control-regex
     expect(/^[\x00-\x7F]*$/.test(updatePs1)).toBe(true);
 
     const deployEdge = fs.readFileSync(path.join(WORKSPACE_ROOT, 'scripts/deploy_edge.sh'), 'utf-8');
