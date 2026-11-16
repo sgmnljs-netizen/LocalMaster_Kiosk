@@ -321,7 +321,7 @@ export class TimeMaster {
       (Boolean(bay.facility_type) && String(bay.facility_type).toUpperCase() !== 'BAY');
     const gapMin = isTimeSlot
       ? 0
-      : (typeof bay.inter_gap_min === 'number' && bay.inter_gap_min >= 0
+      : (typeof bay.inter_gap_min === 'number' && Number.isFinite(bay.inter_gap_min) && bay.inter_gap_min >= 0
           ? bay.inter_gap_min
           : INTER_RESERVATION_GAP_MIN);
     if (typeof bay.available_from_epoch_ms === 'number' && bay.available_from_epoch_ms > 0) {
@@ -696,7 +696,7 @@ export const buildBayAllocationPreview = (
     const fallbackGapMin =
       isTimeSlotTarget || isNonBay
         ? 0
-        : (typeof targetBay?.inter_gap_min === 'number' && targetBay.inter_gap_min >= 0
+        : (typeof targetBay?.inter_gap_min === 'number' && Number.isFinite(targetBay.inter_gap_min) && targetBay.inter_gap_min >= 0
             ? targetBay.inter_gap_min
             : INTER_RESERVATION_GAP_MIN);
 
@@ -760,8 +760,11 @@ export const buildBayAllocationPreview = (
   let isTruncated = false;
   let truncateReason: 'NEXT_RESERVATION' | 'STORE_CLOSE' | null = null;
 
+  // Why: max_assignable_min === 0 또는 마감 임박(closeAvailMin === 0)도 null(무제한)로 누락하지 않고 0분 단축(isTruncated: true)으로 정확히 반영
   const bayMaxMin =
-    typeof resolvedBay?.max_assignable_min === 'number' && resolvedBay.max_assignable_min > 0
+    typeof resolvedBay?.max_assignable_min === 'number' &&
+    Number.isFinite(resolvedBay.max_assignable_min) &&
+    resolvedBay.max_assignable_min >= 0
       ? Math.floor(resolvedBay.max_assignable_min)
       : null;
   const nextLimitResStartTime = resolvedBay?.next_limit_res_start_time
@@ -781,7 +784,7 @@ export const buildBayAllocationPreview = (
         { is24h: options.isStore24h, storeOpenTime: options.storeOpenTime }
       );
       const closeAvailMin = Math.max(0, minsUntilClose - safePrepareMin);
-      if (closeAvailMin > 0 && closeAvailMin < effectiveDurationMin) {
+      if (closeAvailMin >= 0 && closeAvailMin < effectiveDurationMin) {
         effectiveDurationMin = closeAvailMin;
         isTruncated = true;
         truncateReason = 'STORE_CLOSE';
