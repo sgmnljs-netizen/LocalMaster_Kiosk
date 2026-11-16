@@ -306,6 +306,10 @@ export function getKioskSettings(): KioskSettings {
       ...parsed,
       adminPin: '',
       adminPinDigest: resolvedDigest,
+      hasCustomAdminPin:
+        typeof parsed.hasCustomAdminPin === 'boolean' ? parsed.hasCustomAdminPin : undefined,
+      isMaintenanceMode:
+        typeof parsed.isMaintenanceMode === 'boolean' ? parsed.isMaintenanceMode : false,
       storeCode: typeof parsed.storeCode === 'string' && parsed.storeCode ? parsed.storeCode : fallbackStoreCd,
       apiUrl: effectiveApi,
       menuOverrides: safeMenuOverrides,
@@ -554,38 +558,50 @@ export function saveKioskSettings(
       settings.topDashboardMode ?? current.topDashboardMode,
       current.topDashboardMode ?? DEFAULT_KIOSK_SETTINGS.topDashboardMode
     ),
+    isMaintenanceMode:
+      typeof (settings.isMaintenanceMode ?? current.isMaintenanceMode) === 'boolean'
+        ? Boolean(settings.isMaintenanceMode ?? current.isMaintenanceMode)
+        : false,
+    qrCouponOnlyMode:
+      typeof (settings.qrCouponOnlyMode ?? current.qrCouponOnlyMode) === 'boolean'
+        ? Boolean(settings.qrCouponOnlyMode ?? current.qrCouponOnlyMode)
+        : true,
     bayNumberOrder: normalizeBayNumberOrder(
       settings.bayNumberOrder ?? current.bayNumberOrder,
       current.bayNumberOrder ?? DEFAULT_KIOSK_SETTINGS.bayNumberOrder ?? 'ASC'
     ),
   };
   if (typeof localStorage !== 'undefined') {
-    const prevLmStore = (localStorage.getItem('LM_STORE_CD') || '').trim();
-    const hadSettingsEntry = localStorage.getItem(STORAGE_KEY) !== null;
-    const previousPersistedStore = (prevLmStore || (hadSettingsEntry ? current.storeCode : '')).trim();
-    if (previousPersistedStore && next.storeCode && previousPersistedStore !== next.storeCode) {
-      for (const cacheKey of [
-        'LM_STORE_INFO',
-        'LM_BAYS',
-        'LM_LOCKERS',
-        'LM_PRODUCTS',
-        'LM_MEMBERS',
-        'LM_PAR3_SLOTS',
-        'LM_ZONES',
-        'LM_KIOSK_ZONES',
-        'LM_HOLD_RESERVATIONS',
-        'LM_RESERVATIONS',
-        'face_terminal_ip',
-      ]) {
-        localStorage.removeItem(cacheKey);
+    try {
+      const prevLmStore = (localStorage.getItem('LM_STORE_CD') || '').trim();
+      const hadSettingsEntry = localStorage.getItem(STORAGE_KEY) !== null;
+      const previousPersistedStore = (prevLmStore || (hadSettingsEntry ? current.storeCode : '')).trim();
+      if (previousPersistedStore && next.storeCode && previousPersistedStore !== next.storeCode) {
+        for (const cacheKey of [
+          'LM_STORE_INFO',
+          'LM_BAYS',
+          'LM_LOCKERS',
+          'LM_PRODUCTS',
+          'LM_MEMBERS',
+          'LM_PAR3_SLOTS',
+          'LM_ZONES',
+          'LM_KIOSK_ZONES',
+          'LM_HOLD_RESERVATIONS',
+          'LM_RESERVATIONS',
+          'face_terminal_ip',
+        ]) {
+          localStorage.removeItem(cacheKey);
+        }
       }
-    }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    if (next.storeCode) {
-      localStorage.setItem('LM_STORE_CD', next.storeCode);
-    }
-    if (next.terminalId) {
-      localStorage.setItem('LM_KIOSK_TERMINAL_ID', next.terminalId);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      if (next.storeCode) {
+        localStorage.setItem('LM_STORE_CD', next.storeCode);
+      }
+      if (next.terminalId) {
+        localStorage.setItem('LM_KIOSK_TERMINAL_ID', next.terminalId);
+      }
+    } catch {
+      // ignore storage quota or sandbox restrictions
     }
   }
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
