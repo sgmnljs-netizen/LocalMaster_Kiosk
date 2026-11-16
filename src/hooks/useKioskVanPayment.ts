@@ -92,6 +92,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   const isTimeoutRef = useRef<boolean>(false);
   const stateRef = useRef<VanPaymentState>('IDLE');
   const inFlightRef = useRef<boolean>(false);
+  const attemptSeqRef = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true);
 
   const updateVanState = useCallback((next: VanPaymentState) => {
@@ -131,6 +132,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
   }, [clearTimer, updateVanState]);
 
   const cancelPayment = useCallback(() => {
+    attemptSeqRef.current += 1;
     isTimeoutRef.current = false;
     inFlightRef.current = false;
     kioskVanClient.cancelCurrentRequest();
@@ -143,6 +145,21 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
 
   const startPayment = useCallback(
     async (params: CardPaymentRequestParams): Promise<CardApprovalResult> => {
+      if (!Number.isFinite(params.amount) || params.amount <= 0) {
+        return {
+          success: false,
+          auth_code: '',
+          approved_at: new Date().toISOString(),
+          card_no_masked: '',
+          issuer_name: '',
+          acquirer_name: '',
+          terminal_id: kioskVanClient.getConfig().terminalId,
+          amount: 0,
+          installment_months: params.installmentMonths ?? 0,
+          error_code: 'E_INVALID_AMOUNT',
+          error_message: '결제 금액은 0원보다 커야 합니다.',
+        };
+      }
       if (inFlightRef.current) {
         return {
           success: false,
@@ -159,6 +176,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         };
       }
       reset();
+      const attemptId = ++attemptSeqRef.current;
       inFlightRef.current = true;
       isTimeoutRef.current = false;
       const totalTimeout = sanitizeVanTimeoutSeconds(
@@ -193,7 +211,7 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         const res = await kioskVanClient.requestCardPayment(
           { ...params, timeoutSeconds: totalTimeout },
           (newState) => {
-          if (!isMountedRef.current) return;
+          if (!isMountedRef.current || attemptSeqRef.current !== attemptId) return;
           if (newState === 'CANCELLED' && isTimeoutRef.current) {
             updateVanState('TIMEOUT');
           } else {
@@ -201,6 +219,9 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
           }
         });
 
+        if (attemptSeqRef.current !== attemptId) {
+          return res;
+        }
         clearTimer();
         if (!isMountedRef.current) {
           return res;
@@ -234,6 +255,21 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         setResult(res);
         return res;
       } catch (err: unknown) {
+        if (attemptSeqRef.current !== attemptId) {
+          return {
+            success: false,
+            auth_code: '',
+            approved_at: new Date().toISOString(),
+            card_no_masked: '',
+            issuer_name: '',
+            acquirer_name: '',
+            terminal_id: kioskVanClient.getConfig().terminalId,
+            amount: params.amount,
+            installment_months: 0,
+            error_code: 'E_USER_CANCEL',
+            error_message: '이전 결제가 취소되었습니다.',
+          };
+        }
         clearTimer();
         const errMsg = err instanceof Error ? err.message : '단말기 통신 중 오류가 발생했습니다.';
         const failResult: CardApprovalResult = {
@@ -256,7 +292,9 @@ export function useKioskVanPayment(): UseKioskVanPaymentReturn {
         }
         return failResult;
       } finally {
-        inFlightRef.current = false;
+        if (attemptSeqRef.current === attemptId) {
+          inFlightRef.current = false;
+        }
       }
     },
     [reset, clearTimer, updateVanState]
