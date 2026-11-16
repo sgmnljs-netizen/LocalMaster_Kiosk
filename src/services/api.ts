@@ -1452,27 +1452,34 @@ class HybridAPIClient {
   // 백엔드 서버가 다운된 상태에서도 타석 하드웨어를 가동합니다.
   // =========================================================================
   async activateMiddlewareDirect(bayNo: number, durationMin: number, memberName: string = '손님'): Promise<boolean> {
+    const safeBayNo = Math.floor(Number(bayNo));
+    const safeDurationMin = Number.isFinite(Number(durationMin)) ? Math.max(0, Math.floor(Number(durationMin))) : 0;
+    if (!Number.isFinite(safeBayNo) || safeBayNo <= 0 || safeDurationMin <= 0) {
+      return false;
+    }
+
     const endTime = new Date();
-    endTime.setMinutes(endTime.getMinutes() + durationMin);
+    endTime.setMinutes(endTime.getMinutes() + safeDurationMin);
     const endTimeStr = `${String(endTime.getHours()).padStart(2, '0')}:${String(endTime.getMinutes()).padStart(2, '0')}`;
 
     try {
-      const response = await fetch(`${MIDDLEWARE_URL}/api/seat/${bayNo}/assign`, {
+      const response = await fetch(`${MIDDLEWARE_URL}/api/seat/${encodeURIComponent(String(safeBayNo))}/assign`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'X-API-Key': MIDDLEWARE_API_KEY_CLIENT
         },
+        signal: AbortSignal.timeout(4000),
         body: JSON.stringify({
           priority: 5,
-          time: durationMin,
+          time: safeDurationMin,
           balls: 0,
           member_name: memberName,
           memberName: memberName,
           user_name: memberName,
           userName: memberName,
-          product_name: `일일 타석권 ${durationMin}분`,
-          productName: `일일 타석권 ${durationMin}분`,
+          product_name: `일일 타석권 ${safeDurationMin}분`,
+          productName: `일일 타석권 ${safeDurationMin}분`,
           end_time: endTimeStr,
           endTime: endTimeStr
         })
@@ -4755,14 +4762,18 @@ class HybridAPIClient {
 
   // 18. 결제 취소 시 보류 상태(HOLD) 예약 해제/삭제 API
   async cancelHoldReservation(resId: string): Promise<{ success: boolean; message: string }> {
+    const trimmedResId = String(resId || '').trim();
+    if (!trimmedResId) {
+      return { success: false, message: '유효하지 않은 예약 ID입니다.' };
+    }
     const isDemo = isDemoEnvironment();
     const isConnected = !isDemo ? true : await this.checkConnection();
     const storeCd = this.getStoreCd();
 
-    if (isConnected && !resId.startsWith('R-HOLD-')) {
+    if (isConnected && !trimmedResId.startsWith('R-HOLD-')) {
       try {
         const res = await fetchWithPaymentRetry(
-          `${this.getBaseUrl()}/reservations/${resId}/cancel`,
+          `${this.getBaseUrl()}/reservations/${encodeURIComponent(trimmedResId)}/cancel`,
           {
             method: 'PATCH',
             headers: this.getSecureHeaders({ 
@@ -4775,7 +4786,7 @@ class HybridAPIClient {
         );
         if (res.ok) {
           const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
-          const filtered = holds.filter((h) => h.res_id !== resId);
+          const filtered = holds.filter((h) => h.res_id !== trimmedResId);
           localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
           return { success: true, message: '보류 예약이 취소되었습니다.' };
         }
@@ -4786,7 +4797,7 @@ class HybridAPIClient {
 
     // 로컬 보류 예약 미러 정리 (네트워크 순단 시에도 잔여 캐시 제거)
     const holds = JSON.parse(localStorage.getItem('LM_HOLD_RESERVATIONS') || '[]') as EdgeHoldReservation[];
-    const filtered = holds.filter((h) => h.res_id !== resId);
+    const filtered = holds.filter((h) => h.res_id !== trimmedResId);
     localStorage.setItem('LM_HOLD_RESERVATIONS', JSON.stringify(filtered));
     return { success: true, message: '보류 예약 취소 완료 (Edge DB)' };
   }

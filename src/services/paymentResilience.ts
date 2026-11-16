@@ -170,7 +170,11 @@ export async function fetchWithPaymentRetry(
 ): Promise<Response> {
   const delays = options.retryDelaysMs ?? getRetryDelaysMs();
   const maxRetries = delays.length;
-  const timeoutMs = options.timeoutMs ?? PAYMENT_RESILIENCE_CONFIG.FETCH_TIMEOUT_MS;
+  const rawTimeout = options.timeoutMs;
+  const timeoutMs =
+    typeof rawTimeout === 'number' && Number.isFinite(rawTimeout) && rawTimeout > 0
+      ? Math.floor(rawTimeout)
+      : PAYMENT_RESILIENCE_CONFIG.FETCH_TIMEOUT_MS;
   const label = options.label || '결제 전산 등록';
 
   const baseHeaders: Record<string, string> = {};
