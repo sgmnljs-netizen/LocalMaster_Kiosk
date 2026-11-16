@@ -1232,7 +1232,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                   </div>
                 </div>
 
-                {typeof selectedBay.max_assignable_min === 'number' && selectedBay.max_assignable_min > 0 && (
+                {typeof selectedBay.max_assignable_min === 'number' && Number.isFinite(selectedBay.max_assignable_min) && selectedBay.max_assignable_min >= 0 && (
                   <div
                     style={{
                       paddingTop: '12px',
@@ -1244,7 +1244,9 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                       wordBreak: 'keep-all',
                     }}
                   >
-                    다음 예약({selectedBay.next_limit_res_start_time || '예정'}) 전 최대 {selectedBay.max_assignable_min}분 이용 가능
+                    {selectedBay.max_assignable_min > 0
+                      ? `다음 예약(${selectedBay.next_limit_res_start_time || '예정'}) 전 최대 ${selectedBay.max_assignable_min}분 이용 가능`
+                      : `다음 예약(${selectedBay.next_limit_res_start_time || '예정'}) 임박 — 즉시 이용 불가`}
                   </div>
                 )}
               </div>

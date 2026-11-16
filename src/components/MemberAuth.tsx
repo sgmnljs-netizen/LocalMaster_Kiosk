@@ -818,9 +818,11 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                 ? `${authAllocationPreview.startHhmm} 대기 시작`
                 : `${authAllocationPreview.startHhmm} 즉시 시작`}
             </span>
-            {resolvedTargetBay && typeof resolvedTargetBay.max_assignable_min === 'number' && resolvedTargetBay.max_assignable_min > 0 && (
+            {resolvedTargetBay && typeof resolvedTargetBay.max_assignable_min === 'number' && Number.isFinite(resolvedTargetBay.max_assignable_min) && resolvedTargetBay.max_assignable_min >= 0 && (
               <span style={{ fontSize: '17px', fontWeight: 700, color: '#b45309', whiteSpace: 'nowrap' }}>
-                다음 예약({resolvedTargetBay.next_limit_res_start_time || '예정'}) 전 최대 {resolvedTargetBay.max_assignable_min}분
+                {resolvedTargetBay.max_assignable_min > 0
+                  ? `다음 예약(${resolvedTargetBay.next_limit_res_start_time || '예정'}) 전 최대 ${resolvedTargetBay.max_assignable_min}분`
+                  : `다음 예약(${resolvedTargetBay.next_limit_res_start_time || '예정'}) 임박 · 이용 불가`}
               </span>
             )}
           </div>

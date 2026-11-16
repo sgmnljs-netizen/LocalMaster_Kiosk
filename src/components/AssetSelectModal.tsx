@@ -247,6 +247,12 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
   });
 
   const bayShortLabel = selectedBayNo !== null ? `${String(selectedBayNo).padStart(2, '0')}번 타석` : '선택 타석';
+  const hasZeroAssignableDuration =
+    selectedAssetObj !== null &&
+    finalPreview.isTruncated &&
+    finalPreview.effectiveDurationMin !== null &&
+    finalPreview.effectiveDurationMin <= 0;
+  const isConfirmDisabled = selectedAssetId === null || hasZeroAssignableDuration;
 
   return (
     <div
@@ -376,7 +382,7 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
         </div>
 
         {/* 연쇄 배정 / 다음 예약 시간 제약 안내 바 */}
-        {currentBayObj && typeof currentBayObj.max_assignable_min === 'number' && currentBayObj.max_assignable_min > 0 && (
+        {currentBayObj && typeof currentBayObj.max_assignable_min === 'number' && Number.isFinite(currentBayObj.max_assignable_min) && currentBayObj.max_assignable_min >= 0 && (
           <div 
             style={{
               background: '#fffbeb',
@@ -392,7 +398,9 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <AlertTriangle size={24} style={{ color: '#d97706', flexShrink: 0 }} />
               <span style={{ fontSize: '20px', fontWeight: 800, color: '#b45309', lineHeight: 1.35 }}>
-                다음 예약({currentBayObj.next_limit_res_start_time || '예정'}) 전까지 최대 [{currentBayObj.max_assignable_min}분] 이용 가능
+                {currentBayObj.max_assignable_min > 0
+                  ? `다음 예약(${currentBayObj.next_limit_res_start_time || '예정'}) 전까지 최대 [${currentBayObj.max_assignable_min}분] 이용 가능`
+                  : `다음 예약(${currentBayObj.next_limit_res_start_time || '예정'}) 임박 — 즉시 이용 불가(타석 변경 필요)`}
               </span>
             </div>
             <button
@@ -989,10 +997,10 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
             key={selectedAssetId !== null ? `cta-ready-${selectedAssetId}` : 'cta-idle'}
             type="button"
             data-testid="asset-confirm-cta-btn"
-            disabled={selectedAssetId === null}
-            onClick={() => selectedAssetId !== null && onConfirm(selectedAssetId)}
+            disabled={isConfirmDisabled}
+            onClick={() => !isConfirmDisabled && selectedAssetId !== null && onConfirm(selectedAssetId)}
             className={
-              selectedAssetId !== null
+              !isConfirmDisabled
                 ? `asset-cta-btn ${finalPreview.isWaitlist ? 'asset-cta-ready-amber' : 'asset-cta-ready'}`
                 : 'asset-cta-btn'
             }
@@ -1000,7 +1008,7 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
               flex: 2.5,
               height: '108px',
               borderRadius: '999px',
-              ...(selectedAssetId === null
+              ...(isConfirmDisabled
                 ? {
                     background: '#f1f5f9',
                     border: '1.5px solid #e2e8f0',
@@ -1009,18 +1017,18 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
                 : {
                     border: 'none',
                   }),
-              color: selectedAssetId !== null ? '#ffffff' : '#64748b',
+              color: !isConfirmDisabled ? '#ffffff' : '#64748b',
               fontSize: '30px',
               fontWeight: 900,
               letterSpacing: '-0.8px',
-              cursor: selectedAssetId !== null ? 'pointer' : 'not-allowed',
+              cursor: !isConfirmDisabled ? 'pointer' : 'not-allowed',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               padding: '0 32px',
             }}
           >
-            {selectedAssetId !== null && (
+            {!isConfirmDisabled && (
               <span className="asset-cta-sheen-clip" aria-hidden="true" />
             )}
             <span
@@ -1060,16 +1068,18 @@ export const AssetSelectModal: React.FC<AssetSelectModalProps> = ({
                   </span>
                 )}
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.15 }}>
-                  {selectedAssetName
-                    ? (lang === 'KO'
-                        ? (selectedBayNo !== null && finalPreview.endHhmm
-                            ? `${bayShortLabel} · ${finalPreview.timeRangeLabel} ${finalPreview.modeActionLabel}`
-                            : `${selectedAssetName} (${selectedAssetMin}분) ${finalPreview.modeActionLabel}`)
-                        : `Confirm ${finalPreview.modeCode} [${bayShortLabel} · ${finalPreview.timeRangeLabel}]`)
-                    : (lang === 'KO' ? '위 보유 이용권을 눌러주세요' : 'Please tap a pass card above first')}
+                  {hasZeroAssignableDuration
+                    ? (lang === 'KO' ? '이용 가능 시간 부족 (타석 변경 필요)' : 'Insufficient Time Left — Change Bay')
+                    : selectedAssetName
+                      ? (lang === 'KO'
+                          ? (selectedBayNo !== null && finalPreview.endHhmm
+                              ? `${bayShortLabel} · ${finalPreview.timeRangeLabel} ${finalPreview.modeActionLabel}`
+                              : `${selectedAssetName} (${selectedAssetMin}분) ${finalPreview.modeActionLabel}`)
+                          : `Confirm ${finalPreview.modeCode} [${bayShortLabel} · ${finalPreview.timeRangeLabel}]`)
+                      : (lang === 'KO' ? '위 보유 이용권을 눌러주세요' : 'Please tap a pass card above first')}
                 </span>
               </span>
-              {selectedAssetId !== null && (
+              {!isConfirmDisabled && (
                 <ArrowRight
                   size={32}
                   strokeWidth={3}
