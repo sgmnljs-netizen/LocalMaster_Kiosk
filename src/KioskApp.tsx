@@ -2745,7 +2745,11 @@ export default function KioskApp() {
             style={{ 
               flex: step === 'MAIN_DASHBOARD' ? 1 : undefined,
               height: step === 'MAIN_DASHBOARD' ? 'auto' : '1920px', 
-              padding: (step === 'MAIN_DASHBOARD' || step === 'PAYMENT') ? '22px 30px 26px 30px' : '30px 30px 130px 30px',
+              padding: (step === 'MAIN_DASHBOARD' || step === 'PAYMENT')
+                ? '22px 30px 26px 30px'
+                : (step === 'PRACTICE_SELECT' || step === 'TEEBOX_MAP')
+                  ? '14px 16px 110px 16px'
+                  : '30px 30px 130px 30px',
               transition: 'height 0.3s cubic-bezier(0.25, 1, 0.5, 1)'
             }}
           >

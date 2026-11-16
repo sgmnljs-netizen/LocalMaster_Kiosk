@@ -540,6 +540,27 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
   const selectedBayStatus = selectedBay ? resolveCanonicalBayStatus(selectedBay) : '';
   const isOccupied = !!selectedBay && ['OCCUPIED', 'USE', 'IN_USE', 'PREPARE'].includes(selectedBayStatus);
 
+  // 상단 현황판 자동 모드: 3개 층 이하 & 층당 20석 이하이면 2줄 대형 칩(AUTO), 4개 층 이상 또는 21석 이상 초대형 층은 1줄 컴팩트 폴백
+  const maxBaysPerFloor = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const b of practiceBays) {
+      const fk = resolveBayFloorKey(b);
+      counts.set(fk, (counts.get(fk) || 0) + 1);
+    }
+    let maxVal = 0;
+    counts.forEach((v) => {
+      if (v > maxVal) maxVal = v;
+    });
+    return maxVal;
+  }, [practiceBays]);
+
+  const topDashboardMode =
+    settings.topDashboardMode === 'HIDDEN'
+      ? 'HIDDEN'
+      : floorList.length >= 4 || maxBaysPerFloor > 20
+        ? 'COMPACT_1ROW'
+        : 'AUTO';
+
   return (
     <div 
       onClickCapture={() => {
@@ -552,10 +573,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         flexDirection: 'column',
         height: '100%',
         width: '100%',
-        gap: '42px',
+        gap: '14px',
         boxSizing: 'border-box',
         position: 'relative',
-        paddingBottom: '130px'
+        paddingBottom: '0px'
       }}
     >
       {/* 0. 애플 모션 스타일 전용 CSS 스타일 태그 주입 */}
@@ -608,12 +629,14 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         }
       `}</style>
 
-      {/* 1. 상단 실시간 타석 종합 전광판 (Apple Bento Panel) */}
-      <div style={{ width: '100%', background: '#ffffff', borderRadius: '24px', border: '1px solid rgba(229, 229, 234, 0.8)', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)' }}>
+      {/* 1. 상단 실시간 타석 종합 전광판 (Apple Bento Panel — <=3층/20석 2줄 대형 칩, 초대형 매장 자동 1줄 컴팩트 폴백) */}
+      <div style={{ width: '100%', flexShrink: 0, background: '#ffffff', borderRadius: '24px', border: '1px solid rgba(229, 229, 234, 0.8)', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)' }}>
         <TopTeeboxDashboard 
           bays={practiceBays} 
           onBayClick={handleBayTouch} 
           lang={lang} 
+          modeOverride={topDashboardMode}
+          compact
           bayNumberOrder={effectiveBayOrder}
           selectedBayNo={selectedBayNo}
           selectedBayNos={selectedBayNos}
@@ -631,10 +654,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           borderRadius: '24px',
           border: '1px solid rgba(229, 229, 234, 0.8)',
           boxShadow: '0 8px 30px rgba(0, 0, 0, 0.04)',
-          padding: '28px 32px',
+          padding: '18px 14px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '20px'
+          gap: '14px'
         }}
       >
         {/* 배정 모드 토글 스위치 (iOS Segmented Control Style) */}
@@ -881,10 +904,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(5, 1fr)',
-            gap: '16px',
-            padding: '20px',
+            gap: '10px',
+            padding: '10px',
             background: '#f5f5f7',
-            borderRadius: '20px',
+            borderRadius: '18px',
             border: '1px solid #e5e5ea',
             minHeight: '340px'
           }}
@@ -923,8 +946,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
             justifyContent: 'space-between', 
             alignItems: 'center', 
             borderTop: '1px solid var(--bg-tertiary)', 
-            paddingTop: '18px',
-            marginTop: '8px'
+            paddingTop: '14px',
+            marginTop: '2px'
           }}
         >
           <div>
@@ -957,8 +980,10 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                 </span>
               </div>
             ) : (
-              <span style={{ fontSize: '15px', color: 'var(--text-secondary)', fontWeight: 700 }}>
-                {lang === 'KO' ? '배정받으실 빈 타석 타일을 클릭해 주세요.' : 'Please tap an available teebox tile.'}
+              <span style={{ fontSize: '17px', color: '#475569', fontWeight: 700, letterSpacing: '-0.2px' }}>
+                {lang === 'KO'
+                  ? '원하시는 빈 타석을 터치하면 즉시 배정됩니다 (사용 중 타석은 대기 예약 가능)'
+                  : 'Tap an available teebox to assign immediately, or an occupied one to join the waitlist.'}
               </span>
             )}
           </div>

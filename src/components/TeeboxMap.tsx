@@ -473,17 +473,18 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
       }}
       style={{
         width: '100%',
-        maxWidth: '1020px',
-        margin: '15px auto 120px auto',
-        padding: '36px 40px',
+        maxWidth: '100%',
+        margin: '0 auto',
+        padding: '20px 14px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '22px',
+        gap: '16px',
         background: '#ffffff',
-        borderRadius: '32px',
+        borderRadius: '26px',
         border: '1px solid rgba(0,0,0,0.08)',
         boxShadow: '0 24px 60px rgba(0,0,0,0.1)',
-        color: '#1d1d1f'
+        color: '#1d1d1f',
+        boxSizing: 'border-box',
       }}
     >
       {/* 타석 맵 헤더 */}
@@ -1015,10 +1016,10 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(5, 1fr)",
-          gap: "16px",
+          gap: "10px",
           background: "#f5f5f7",
-          padding: "20px",
-          borderRadius: "20px",
+          padding: "10px",
+          borderRadius: "18px",
           border: "1px solid #e5e5ea",
           minHeight: "340px"
         }}

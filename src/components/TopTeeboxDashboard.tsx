@@ -21,6 +21,7 @@ interface TopTeeboxDashboardProps {
   onBayClick: (bayNo: number) => void;
   lang: 'KO' | 'EN';
   modeOverride?: KioskTopDashboardMode;
+  compact?: boolean;
   bayNumberOrder?: BayNumberOrder;
   onClose?: () => void;
   selectedBayNo?: number | null;
@@ -32,6 +33,7 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
   onBayClick,
   lang,
   modeOverride,
+  compact = false,
   bayNumberOrder,
   onClose,
   selectedBayNo,
@@ -82,8 +84,20 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
     // 모드 및 타석 수에 따른 타일 치수·타이포그래피 동적 계산
     const isCompactSingleRow = displayMode === 'COMPACT_1ROW' && floorBayCount > 12;
     const isMultiRowAuto = displayMode === 'AUTO' && floorBayCount > 12;
-    const tileHeight = isCompactSingleRow ? '54px' : isMultiRowAuto ? '56px' : (sortedFloors.length >= 3 ? '62px' : '68px');
-    const numFontSize = isCompactSingleRow ? '22px' : isMultiRowAuto ? '26px' : '28px';
+    const tileHeight = compact
+      ? (isCompactSingleRow ? '42px' : isMultiRowAuto ? '52px' : '56px')
+      : isCompactSingleRow
+        ? '54px'
+        : isMultiRowAuto
+          ? '56px'
+          : (sortedFloors.length >= 3 ? '62px' : '68px');
+    const numFontSize = compact
+      ? (isCompactSingleRow ? (floorBayCount > 16 ? '18px' : '20px') : isMultiRowAuto ? '24px' : '26px')
+      : isCompactSingleRow
+        ? '22px'
+        : isMultiRowAuto
+          ? '26px'
+          : '28px';
 
     let bgCol = '#e5e7eb';
     let borderCol = 'transparent';
@@ -191,21 +205,21 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
         width: '100%',
         height: 'auto',
         background: '#ffffff',
-        borderRadius: '0 0 40px 40px',
+        borderRadius: compact ? '24px' : '0 0 40px 40px',
         display: 'flex',
         flexDirection: 'column',
-        padding: '24px 36px 28px 36px',
+        padding: compact ? '18px 24px 20px 24px' : '24px 36px 28px 36px',
         boxSizing: 'border-box',
         justifyContent: 'space-between',
         position: 'relative',
-        boxShadow: '0 14px 32px rgba(0, 0, 0, 0.04)',
-        borderBottom: '1px solid rgba(0, 0, 0, 0.08)',
+        boxShadow: compact ? 'none' : '0 14px 32px rgba(0, 0, 0, 0.04)',
+        borderBottom: compact ? 'none' : '1px solid rgba(0, 0, 0, 0.08)',
         overflow: 'hidden',
         flexShrink: 0,
       }}
     >
       {/* 헤더 및 통계 요약 (좌측: 타이틀 / 우측: 이용 가능 타석 대형 뱃지 + 우측 상단 Undo2 원형 되돌아가기 버튼) */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1, marginBottom: '18px', gap: '12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1, marginBottom: compact ? '12px' : '18px', gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', whiteSpace: 'nowrap', minWidth: 0 }}>
           <span 
             style={{ 
@@ -218,10 +232,10 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
             }} 
             className="animate-pulse-ring"
           />
-          <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.6px', margin: 0, whiteSpace: 'nowrap' }}>
+          <h2 style={{ fontSize: compact ? '25px' : '28px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.6px', margin: 0, whiteSpace: 'nowrap' }}>
             {lang === 'KO' ? '실시간 타석 종합 현황판' : 'Live Teebox Status'}
           </h2>
-          <span style={{ fontSize: '15px', fontWeight: 700, color: '#64748b', marginLeft: '4px', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: compact ? '14.5px' : '15px', fontWeight: 700, color: '#64748b', marginLeft: '4px', whiteSpace: 'nowrap' }}>
             {lang === 'KO' ? '· 빈 타석(초록색)을 터치하면 즉시 배정됩니다' : '· Tap a green bay to assign immediately'}
           </span>
         </div>
@@ -236,8 +250,8 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
               type="button"
               onClick={onClose}
               style={{
-                width: '50px',
-                height: '50px',
+                width: compact ? '46px' : '50px',
+                height: compact ? '46px' : '50px',
                 borderRadius: '50%',
                 background: 'linear-gradient(145deg, #ffffff 0%, #f1f5f9 100%)',
                 border: '2px solid #cbd5e1',
@@ -257,14 +271,14 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
               onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.92)'; }}
               onTouchEnd={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
             >
-              <CornerUpLeft size={26} strokeWidth={2.8} />
+              <CornerUpLeft size={compact ? 23 : 26} strokeWidth={2.8} />
             </button>
           )}
         </div>
       </div>
 
       {/* 층별 지능형 반응형 그리드 (12개 이하 1줄 대형 와이드 / 13개 이상 2줄 균등 분할) */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', zIndex: 1, width: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? '10px' : '14px', zIndex: 1, width: '100%' }}>
         {sortedFloors.map(floor => {
           const floorBays = floorsMap[floor];
           const bayCount = floorBays.length;
@@ -283,21 +297,21 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
           return (
             <div key={floor} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
               {/* 상단 층수 라벨 배지 및 요약 정보 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: compact ? '6px' : '8px' }}>
                 <span 
                   style={{ 
-                    fontSize: '17px', 
+                    fontSize: compact ? '15px' : '17px', 
                     fontWeight: 800, 
                     color: '#ffffff', 
                     background: '#111827', 
-                    padding: '4px 14px', 
+                    padding: compact ? '3px 12px' : '4px 14px', 
                     borderRadius: '999px',
                     letterSpacing: '-0.2px'
                   }}
                 >
                   {floor}
                 </span>
-                <span style={{ fontSize: '18px', color: '#047857', fontWeight: 800 }}>
+                <span style={{ fontSize: compact ? '16px' : '18px', color: '#047857', fontWeight: 800 }}>
                   {lang === 'KO' ? `이용 가능 ${availableCount}석` : `${availableCount} Available`}
                 </span>
               </div>
@@ -310,7 +324,9 @@ export const TopTeeboxDashboard: React.FC<TopTeeboxDashboardProps> = ({
                     bayCount <= 6 && displayMode === 'AUTO'
                       ? `repeat(${cols}, minmax(68px, 110px))`
                       : `repeat(${cols}, minmax(0, 1fr))`,
-                  gap: displayMode === 'COMPACT_1ROW' && bayCount > 14 ? '5px' : '8px',
+                  gap: compact
+                    ? (displayMode === 'COMPACT_1ROW' && bayCount > 12 ? '5px' : '7px')
+                    : (displayMode === 'COMPACT_1ROW' && bayCount > 14 ? '5px' : '8px'),
                   width: '100%',
                 }}
               >
