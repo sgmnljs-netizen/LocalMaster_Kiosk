@@ -233,7 +233,7 @@ describe('🏛️ 키오스크 타석 배정 퍼널 시인성·어포던스 & �
     expect(html).toContain('최대 60분 단축');
   });
 
-  it('AS-04: 사용 중인 타석(OCCUPIED) 선택 시 전 영역이 고대비 [대기 예약] 모드와 대기 시작~종료 예정 시각(12:25 ~ 13:57) 및 앰버 CTA 비콘으로 전환된다', () => {
+  it('AS-04: 사용 중인 타석(OCCUPIED) 선택 시 전 영역이 고대비 [대기 예약] 모드와 대기 시작~종료 예정 시각(12:26 ~ 13:58, +1분 구분 텀 반영) 및 앰버 CTA 비콘으로 전환된다', () => {
     const rawHtml = renderToString(
       React.createElement(AssetSelectModal, {
         authMember: mockMember,
@@ -253,9 +253,9 @@ describe('🏛️ 키오스크 타석 배정 퍼널 시인성·어포던스 & �
     const html = rawHtml.replace(/<!--.*?-->/g, '');
 
     expect(html).toContain('대기 예약 · 약 25분 대기');
-    expect(html).toContain('12:25 ~ 13:57');
+    expect(html).toContain('12:26 ~ 13:58');
     expect(html).toContain('asset-cta-ready-amber');
-    expect(html).toContain('07번 타석 · 12:25 ~ 13:57 대기 예약');
+    expect(html).toContain('07번 타석 · 12:26 ~ 13:58 대기 예약');
   });
 
   it('AS-05: 단일 유효 이용권(1장) 보유 시에도 자동 선택되지 않고 1.6:1 직사각형(480x296) 유리 광택 카드로 시작하며, 카드 선택 즉시 하단 배정 버튼 비콘(asset-cta-ready)으로 시선이 전환된다', () => {
@@ -357,7 +357,7 @@ describe('🏛️ 키오스크 타석 배정 퍼널 시인성·어포던스 & �
     expect(memberAuthWaitlistHtml).toContain('member-auth-allocation-banner');
     expect(memberAuthWaitlistHtml).toContain('대기 예약 · 약 25분 대기');
     expect(memberAuthWaitlistHtml).toContain('2F · 07번 타석');
-    expect(memberAuthWaitlistHtml).toContain('12:25 대기 시작');
+    expect(memberAuthWaitlistHtml).toContain('12:26 대기 시작');
 
     const paymentWaitlistHtml = renderToString(
       React.createElement(PaymentTerminal, {
@@ -378,7 +378,7 @@ describe('🏛️ 키오스크 타석 배정 퍼널 시인성·어포던스 & �
     expect(paymentWaitlistHtml).toContain('payment-allocation-mode-badge');
     expect(paymentWaitlistHtml).toContain('⏳ 대기 예약 · 약 25분 대기');
     expect(paymentWaitlistHtml).toContain('2F · 07번 타석');
-    expect(paymentWaitlistHtml).toContain('이용 예정 12:25 ~ 13:57');
+    expect(paymentWaitlistHtml).toContain('이용 예정 12:26 ~ 13:58');
     expect(paymentWaitlistHtml).not.toContain('즉시 배정 · 타석 이용권');
 
     const waitlistSlipHtml = renderToString(
@@ -386,10 +386,10 @@ describe('🏛️ 키오스크 타석 배정 퍼널 시인성·어포던스 & �
         bayNo: 7,
         floor: 2,
         durationMin: 90,
-        startTime: '12:25',
-        endTime: '13:57',
+        startTime: '12:26',
+        endTime: '13:58',
         checkinMode: 'WAITLIST_ASSIGNED',
-        noticeMessage: '현재 이용 중인 타석의 [대기 예약]이 완료되었습니다. 앞 세션 종료 후 [12:25]부터 입장해 주세요.',
+        noticeMessage: '현재 이용 중인 타석의 [대기 예약]이 완료되었습니다. 앞 세션 종료 후 [12:26]부터 입장해 주세요.',
         onClose: vi.fn(),
       })
     ).replace(/<!--.*?-->/g, '');
@@ -399,7 +399,7 @@ describe('🏛️ 키오스크 타석 배정 퍼널 시인성·어포던스 & �
     expect(waitlistSlipHtml).not.toContain('⏳');
     expect(waitlistSlipHtml).toContain('2F');
     expect(waitlistSlipHtml).toContain('920px');
-    expect(waitlistSlipHtml).toContain('앞 세션 종료 후 [12:25]부터 입장해 주세요');
+    expect(waitlistSlipHtml).toContain('앞 세션 종료 후 [12:26]부터 입장해 주세요');
 
     const preview = TimeMaster.buildBayAllocationPreview({
       bay: mockOpenKunsanBay[0],

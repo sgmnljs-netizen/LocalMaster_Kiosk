@@ -253,6 +253,8 @@ export interface Bay {
   lock_terminal_id?: string | null;
   lock_expired_at?: string | null;
   status_info?: BayStatusInfo | null;
+  facility_type?: string | null;
+  booking_mode?: string | null;
   bay_name?: string;
   simulator_type?: string;
   handedness?: string;
@@ -276,6 +278,9 @@ export interface Bay {
   total_wait_minutes?: number;
   available_from_time?: string | null;
   available_from_epoch_ms?: number | null;
+  inter_gap_min?: number;
+  next_queue_start_time?: string | null;
+  next_queue_start_epoch_ms?: number | null;
   max_assignable_min?: number | null;
   next_limit_res_start_time?: string | null;
   prepare_time_min?: number;

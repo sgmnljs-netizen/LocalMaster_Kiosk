@@ -28,12 +28,15 @@ const MS_PER_MINUTE = 60 * 1000;
 describe('Kiosk Smart Gap Merge, 2-Line Tile Display & Truncate Guard QA', () => {
   let api: typeof import('../api').api;
   let TeeboxTileCard: typeof import('../../components/TeeboxTileCard').TeeboxTileCard;
+  let PracticeSelect: typeof import('../../components/PracticeSelect').PracticeSelect;
 
   beforeAll(async () => {
     const apiMod = await import('../api');
     api = apiMod.api;
     const tileMod = await import('../../components/TeeboxTileCard');
     TeeboxTileCard = tileMod.TeeboxTileCard;
+    const practiceMod = await import('../../components/PracticeSelect');
+    PracticeSelect = practiceMod.PracticeSelect;
   });
 
   beforeEach(() => {
@@ -79,11 +82,12 @@ describe('Kiosk Smart Gap Merge, 2-Line Tile Display & Truncate Guard QA', () =>
     expect(TimeMaster.formatAvailableFromTime(mergedBay)).toBe('14:40');
   });
 
-  it('G03: TeeboxTileCard 렌더링 시 3번째 줄 "대기예약 (HH:mm)" 문구가 제거되고 2줄(남은 시간 + 빈타석 예정 시각)만 명확히 표시된다', () => {
+  it('G03: TeeboxTileCard 렌더링 시 대기 유무(0명 vs 1명+)·일시정지별 남은시간/종료시각(~HH:mm) 및 ~종료 방어 가드가 정확히 동작한다', () => {
     const baseMs = new Date('2026-10-20T13:00:00+09:00').getTime();
     TimeMaster.syncServerTime(baseMs);
 
-    const occupiedBay: Bay = {
+    // 1) 대기 2명 이상: 남은 대기 / 종료 예정 ~14:40
+    const queuedBay: Bay = {
       bay_id: 2,
       bay_no: 7,
       floor_no: 1,
@@ -98,21 +102,152 @@ describe('Kiosk Smart Gap Merge, 2-Line Tile Display & Truncate Guard QA', () =>
       next_res_start_time: '13:40',
     };
 
-    const html = renderToStaticMarkup(
+    const queuedHtml = renderToStaticMarkup(
       React.createElement(TeeboxTileCard, {
-        bay: occupiedBay,
+        bay: queuedBay,
         isSelected: false,
         onSelect: () => {},
         lang: 'KO',
       })
     );
 
-    expect(html).toContain('남은 대기');
-    expect(html).toContain('100분');
-    expect(html).toContain('시작 시각');
-    expect(html).toContain('14:40');
-    expect(html).toContain('대기 2명');
-    expect(html).not.toContain('대기예약');
+    expect(queuedHtml).toContain('남은 대기');
+    expect(queuedHtml).toContain('100분');
+    expect(queuedHtml).toContain('종료 예정');
+    expect(queuedHtml).toContain('~14:40');
+    expect(queuedHtml).toContain('대기 2명');
+    expect(queuedHtml).not.toContain('대기예약');
+
+    // 2) 대기자 0명 단순 사용중: 남은 시간 / 종료 시각 ~17:31 (모달 입장 +1분과 독립)
+    const simpleOccupiedBay: Bay = {
+      bay_id: 3,
+      bay_no: 6,
+      floor_no: 1,
+      type: 'RIGHT',
+      status: 'OCCUPIED',
+      minutes_left: 13,
+      waiting_res_count: 0,
+      waiting_res_total_min: 0,
+      total_wait_minutes: 13,
+      available_from_time: '17:31',
+      next_queue_start_time: '17:32',
+    };
+
+    const simpleHtml = renderToStaticMarkup(
+      React.createElement(TeeboxTileCard, {
+        bay: simpleOccupiedBay,
+        isSelected: false,
+        onSelect: () => {},
+        lang: 'KO',
+      })
+    );
+
+    expect(simpleHtml).toContain('사용중');
+    expect(simpleHtml).toContain('남은 시간');
+    expect(simpleHtml).toContain('13분');
+    expect(simpleHtml).toContain('종료 시각');
+    expect(simpleHtml).toContain('~17:31');
+    expect(simpleHtml).not.toContain('17:32');
+
+    // 3) 일시정지 & 시각 미상('종료' 폴백) 방어 가드
+    const pausedBay: Bay = {
+      bay_id: 4,
+      bay_no: 8,
+      floor_no: 1,
+      type: 'RIGHT',
+      status: 'OCCUPIED',
+      is_paused: true,
+      minutes_left: 10,
+      total_wait_minutes: 10,
+    };
+
+    const pausedHtml = renderToStaticMarkup(
+      React.createElement(TeeboxTileCard, {
+        bay: pausedBay,
+        isSelected: false,
+        onSelect: () => {},
+        lang: 'KO',
+      })
+    );
+
+    expect(pausedHtml).toContain('일시 정지');
+    expect(pausedHtml).toContain('볼회수중');
+    expect(pausedHtml).toContain('현재 상태');
+    expect(pausedHtml).toContain('정지중');
+
+    const fallbackBay: Bay = {
+      bay_id: 5,
+      bay_no: 9,
+      floor_no: 1,
+      type: 'RIGHT',
+      status: 'OCCUPIED',
+      minutes_left: 0,
+      total_wait_minutes: 0,
+    };
+
+    const fallbackHtml = renderToStaticMarkup(
+      React.createElement(TeeboxTileCard, {
+        bay: fallbackBay,
+        isSelected: false,
+        onSelect: () => {},
+        lang: 'KO',
+      })
+    );
+
+    expect(fallbackHtml).toContain('종료');
+    expect(fallbackHtml).not.toContain('~종료');
+  });
+
+  it('G03-B: PracticeSelect 배정 분기 모달 입장 예정 시각(+1분 포함 next_queue_start_time)과 타일 앞세션 종료 시각(~HH:mm)이 정확히 분리 정렬된다', () => {
+    const baysFixture: Bay[] = [
+      {
+        bay_id: 6,
+        bay_no: 6,
+        floor_no: 1,
+        floor: '1F',
+        type: 'RIGHT',
+        status: 'OCCUPIED',
+        minutes_left: 13,
+        waiting_res_count: 0,
+        waiting_res_total_min: 0,
+        total_wait_minutes: 13,
+        available_from_time: '17:31',
+        next_queue_start_time: '17:32',
+        inter_gap_min: 1,
+      },
+      {
+        bay_id: 7,
+        bay_no: 7,
+        floor_no: 1,
+        floor: '1F',
+        type: 'RIGHT',
+        status: 'OCCUPIED',
+        minutes_left: 13,
+        waiting_res_count: 0,
+        waiting_res_total_min: 0,
+        total_wait_minutes: 13,
+        available_from_time: '17:31',
+        next_queue_start_time: '17:32',
+        inter_gap_min: 1,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      React.createElement(PracticeSelect, {
+        bays: baysFixture,
+        lang: 'KO',
+        initialSelectedBayNo: 6,
+        onBaySelected: () => {},
+        onCancel: () => {},
+        onRefreshBays: () => {},
+      })
+    );
+
+    expect(html).toContain('17:32 입장 예정');
+    expect(html).not.toContain('17:31 입장 예정');
+    expect(html).toContain('남은 시간');
+    expect(html).toContain('종료 시각');
+    expect(html).toContain('~17:31');
   });
 
   it('G04: 중간 빈타석(60분 가용)에 90분 이용권 배정 요청 시 NEXT_RESERVATION_LIMIT 단축 확인 프롬프트를 반환한다', async () => {

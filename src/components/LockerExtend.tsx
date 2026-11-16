@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { CalendarRange, Check, KeyRound, ShieldAlert } from 'lucide-react';
+import { ArrowRight, CalendarRange, Check, Clock, Compass, KeyRound, ShieldAlert } from 'lucide-react';
 import { api, Locker, Member, Product } from '../services/api';
 import { TimeMaster } from '../utils/timeMaster';
 import {
@@ -430,14 +430,14 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
               onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
               onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
             >
-              <span style={{ fontSize: '24px' }}>⛳</span>
+              <Compass size={22} />
               <span>{isEn ? 'Return to Main Dashboard' : '메인 화면으로 돌아가기'}</span>
             </button>
           </div>
         </div>
       ) : (
         /* 라카 보유 회원용 2열 Bento Grid */
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.25fr', gap: '32px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.25fr)', gap: '24px' }}>
           
           {/* 좌측: 사물함 현황 */}
           <div style={{ 
@@ -509,8 +509,8 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                         {badgeLabel}
                       </div>
                       <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '17px', color: '#4b5563', fontWeight: 700 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '17px', color: '#4b5563', fontWeight: 700, whiteSpace: 'nowrap' }}>
                             {isEn ? 'Expires' : '만료일'}
                           </span>
                           {zoneLabel && (
@@ -520,14 +520,15 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                               color: '#0071e3',
                               background: 'rgba(0, 113, 227, 0.08)',
                               padding: '3px 10px',
-                              borderRadius: '6px'
+                              borderRadius: '6px',
+                              whiteSpace: 'nowrap',
                             }}>
                               {zoneLabel}
                             </span>
                           )}
                         </div>
-                        <div style={{ fontSize: '22px', fontWeight: 900, color: isExpired ? '#ff3b30' : '#1d1d1f', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <span>{formattedEndDt}</span>
+                        <div style={{ fontSize: '21px', fontWeight: 900, color: isExpired ? '#ff3b30' : '#1d1d1f', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{formattedEndDt}</span>
                           {isExpired ? (
                             <span style={{ fontSize: '15px', padding: '4px 10px', background: '#fff0f0', color: '#ff3b30', borderRadius: '6px', fontWeight: 700 }}>
                               {isEn ? 'Expired' : '만료됨'}
@@ -561,12 +562,12 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
           </div>
 
           {/* 우측: 연장 상품 매대 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', minWidth: 0 }}>
             <h4 style={{ fontSize: '22px', fontWeight: 800, color: '#1d1d1f', margin: 0, letterSpacing: '-0.3px' }}>
               {isEn ? 'Select Extension Plan' : '연장 상품 선택'}
             </h4>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0 }}>
               {visibleLockerProducts.length > 0 ? visibleLockerProducts.map(prod => {
                 const renewalWindow = evaluateLockerRenewalWindow(prod, selectedLockerDiffDays, lang);
                 const canExtend = myLockers.length > 0 && renewalWindow.canRenewNow;
@@ -587,45 +588,48 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                     key={prod.prod_cd}
                     data-testid="locker-prod-card"
                     data-disabled={canExtend ? 'false' : 'true'}
-                    className="locker-product-card"
+                    className={`locker-product-card${canExtend ? ' shop-tactile-card' : ''}`}
                     onClick={() => handleExtendClick(prod)}
                     style={{
-                      padding: '26px 28px',
+                      padding: '22px 24px',
                       borderRadius: '24px',
                       background: '#ffffff',
-                      border: '1.5px solid #e5e5ea',
+                      border: canExtend ? '1.5px solid #dbeafe' : '1.5px solid #e5e5ea',
                       cursor: canExtend ? 'pointer' : 'not-allowed',
                       opacity: canExtend ? 1 : 0.65,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.03)',
-                      transition: 'all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)'
+                      gap: '14px',
+                      boxShadow: canExtend ? '0 8px 22px rgba(0, 113, 227, 0.08)' : '0 4px 16px rgba(0,0,0,0.03)',
+                      transition: 'all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)',
+                      boxSizing: 'border-box',
+                      maxWidth: '100%',
                     }}
                     onMouseOver={(e) => {
                       if (canExtend) {
                         e.currentTarget.style.transform = 'translateY(-2px)';
-                        e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.08)';
+                        e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,113,227,0.14)';
                         e.currentTarget.style.borderColor = '#0071e3';
                       }
                     }}
                     onMouseOut={(e) => {
                       if (canExtend) {
                         e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.03)';
-                        e.currentTarget.style.borderColor = '#e5e5ea';
+                        e.currentTarget.style.boxShadow = '0 8px 22px rgba(0, 113, 227, 0.08)';
+                        e.currentTarget.style.borderColor = '#dbeafe';
                       }
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
-                      <div style={{ background: '#f5f5f7', padding: '14px', borderRadius: '18px' }}>
-                        <CalendarRange size={30} color={canExtend ? '#0071e3' : '#9ca3af'} strokeWidth={2} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+                      <div style={{ background: canExtend ? '#eff6ff' : '#f5f5f7', padding: '12px', borderRadius: '16px', flexShrink: 0 }}>
+                        <CalendarRange size={28} color={canExtend ? '#0071e3' : '#9ca3af'} strokeWidth={2} />
                       </div>
-                      <div>
-                        <h4 style={{ fontSize: '24px', fontWeight: 800, color: '#1d1d1f', margin: '0 0 4px 0' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <h4 style={{ fontSize: '22px', fontWeight: 800, color: '#1d1d1f', margin: '0 0 4px 0', wordBreak: 'keep-all' }}>
                           {prod.display_nm || parseProductJsonSafe(prod.meta_data).display_nm || parseProductJsonSafe(prod.meta_data).short_nm || prod.prod_nm}
                         </h4>
-                        <p style={{ fontSize: '18px', color: '#4b5563', margin: 0, fontWeight: 600 }}>
+                        <p style={{ fontSize: '17px', color: '#4b5563', margin: 0, fontWeight: 600 }}>
                           {isEn
                             ? `Extend ${extendDays} days${effDiscountRate > 0 ? ` (${effDiscountRate}% grade discount)` : ''}`
                             : `사물함 ${extendDays}일 연장${effDiscountRate > 0 ? ` (${effDiscountRate}% 등급할인 적용)` : ''}`}
@@ -638,39 +642,66 @@ export const LockerExtend: React.FC<LockerExtendProps> = ({
                               color: '#ea580c',
                               background: '#fff7ed',
                               border: '1px solid #fed7aa',
-                              display: 'inline-block',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
                               padding: '4px 10px',
                               borderRadius: '8px',
                               margin: '8px 0 0 0',
                               fontWeight: 800,
                             }}
                           >
-                            ⏳ {renewalWindow.badgeText}
+                            <Clock size={14} />
+                            <span>{renewalWindow.badgeText}</span>
                           </p>
                         ) : projected ? (
-                          <p style={{ fontSize: '16px', color: '#0071e3', margin: '6px 0 0 0', fontWeight: 800 }}>
-                            {isEn
-                              ? `New Expiry: ${projected.currentYmd} → ${projected.nextYmd}`
-                              : `연장 후 만료예정일: ${projected.currentYmd} → ${projected.nextYmd}`}
+                          <p style={{ fontSize: '14.5px', color: '#0071e3', margin: '6px 0 0 0', fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+                            {isEn ? 'New Expiry: ' : '연장 후 만료예정일: '}
+                            <span style={{ whiteSpace: 'nowrap' }}>{projected.currentYmd} → {projected.nextYmd}</span>
                           </p>
                         ) : null}
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px', flexShrink: 0 }}>
                       {hasSaleDiscount && (
                         <span style={{ fontSize: '14px', color: '#86868b', textDecoration: 'line-through', fontWeight: 600 }}>
                           {prod.standard_price.toLocaleString()}{isEn ? ' KRW' : '원'}
                         </span>
                       )}
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
-                        <span style={{ fontSize: '38px', fontWeight: 900, color: hasSaleDiscount ? '#059669' : '#1d1d1f', letterSpacing: '-1.5px' }}>
+                        <span style={{ fontSize: '36px', fontWeight: 900, color: hasSaleDiscount ? '#059669' : '#1d1d1f', letterSpacing: '-1.5px', fontVariantNumeric: 'tabular-nums' }}>
                           {finalPrice.toLocaleString()}
                         </span>
                         <span style={{ fontSize: '20px', fontWeight: 700, color: '#86868b', marginLeft: '3px' }}>
                           {isEn ? 'KRW' : '원'}
                         </span>
                       </div>
+                      {canExtend ? (
+                        <span className="decision-tactile-btn decision-btn-blue locker-tactile-cta">
+                          <span style={{ position: 'relative', zIndex: 2 }}>
+                            {isEn ? 'Extend & Pay' : '연장 결제'}
+                          </span>
+                          <ArrowRight size={17} strokeWidth={2.6} className="decision-btn-arrow" style={{ position: 'relative', zIndex: 2 }} />
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            height: '40px',
+                            padding: '0 16px',
+                            borderRadius: '999px',
+                            background: '#f1f5f9',
+                            color: '#64748b',
+                            fontSize: '14px',
+                            fontWeight: 800,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          {isEn ? 'Not Open Yet' : '연장 대기'}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );

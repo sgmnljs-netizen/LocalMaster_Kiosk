@@ -14,7 +14,7 @@ import { Par3Allocation } from './components/Par3Allocation';
 import { TopTeeboxDashboard } from './components/TopTeeboxDashboard';
 import { KioskLiveClock } from './components/KioskLiveClock';
 import { PracticeSelect } from './components/PracticeSelect';
-import { TimeMaster } from './utils/timeMaster';
+import { INTER_RESERVATION_GAP_MIN, TimeMaster } from './utils/timeMaster';
 import { CompanionSetupModal, CompanionTargetItem } from './components/CompanionSetupModal';
 import { ErrorMessageModal, ErrorModalData } from './components/ErrorMessageModal';
 import { CheckinSelect } from './components/CheckinSelect';
@@ -1863,19 +1863,30 @@ export default function KioskApp() {
           storeOpenTime,
         });
         const PAYMENT_BUFFER_MIN = 2;
-        const prepareMin = storePrepareMin;
-        const maxWaitMin = targets.reduce((maxW, t) => {
+        const maxWaitOffsetMin = targets.reduce((maxW, t) => {
           const bObj = bays.find(b => b.bay_no === t.bayNo);
           if (bObj && (bObj.status === 'OCCUPIED' || bObj.status === 'PREPARE')) {
-            const w = TimeMaster.getRemainingMinutes(bObj, now, bObj.end_epoch_ms);
-            return Math.max(maxW, w);
+            const w = TimeMaster.getTotalWaitMinutes(bObj, now);
+            const isSlot =
+              String(bObj.booking_mode || '').toUpperCase() === 'TIME_SLOT' ||
+              (Boolean(bObj.facility_type) && String(bObj.facility_type).toUpperCase() !== 'BAY');
+            const gap = isSlot ? 0 : (typeof bObj.inter_gap_min === 'number' ? bObj.inter_gap_min : INTER_RESERVATION_GAP_MIN);
+            return Math.max(maxW, w + (w > 0 ? gap : 0));
           }
           return maxW;
         }, 0);
+        const hasContinuousBay = targets.some((t) => {
+          const bObj = bays.find(b => b.bay_no === t.bayNo);
+          return !bObj || (
+            String(bObj.booking_mode || '').toUpperCase() !== 'TIME_SLOT' &&
+            (!bObj.facility_type || String(bObj.facility_type).toUpperCase() === 'BAY')
+          );
+        });
+        const prepareMin = hasContinuousBay ? storePrepareMin : 0;
         const reqDuration = Math.max(...targets.map(t => t.durationMin ?? DEFAULT_SESSION_MIN));
-        const maxUserMin = Math.max(0, diffMin - (maxWaitMin + prepareMin + PAYMENT_BUFFER_MIN));
+        const maxUserMin = Math.max(0, diffMin - (maxWaitOffsetMin + prepareMin + PAYMENT_BUFFER_MIN));
 
-        if (diffMin < reqDuration + maxWaitMin + prepareMin) {
+        if (diffMin < reqDuration + maxWaitOffsetMin + prepareMin) {
           if (maxUserMin < 10) {
             showErrorModal(`영업 마감시간(${storeCloseTime}) 임박(최소 이용시간 10분 미만)으로 동반자 일일권 결제를 진행할 수 없습니다.`);
             return;
@@ -2025,13 +2036,24 @@ export default function KioskApp() {
         currentEndTime = TimeMaster.formatAvailableFromTime(selectedBay);
       }
 
+      const isSelectedTimeSlot = Boolean(
+        selectedBay && (
+          String(selectedBay.booking_mode || '').toUpperCase() === 'TIME_SLOT' ||
+          (Boolean(selectedBay.facility_type) && String(selectedBay.facility_type).toUpperCase() !== 'BAY')
+        )
+      );
+      const interGapMin =
+        waitMin > 0 && !isSelectedTimeSlot
+          ? (typeof selectedBay?.inter_gap_min === 'number' ? selectedBay.inter_gap_min : INTER_RESERVATION_GAP_MIN)
+          : 0;
+
       // 결제 소요 버퍼: 카드 투입 및 통신에 약 1~2분 소요되므로 백엔드 409 및 망취소 방어를 위해 2분 버퍼 확보
       const PAYMENT_BUFFER_MIN = 2;
-      const prepareMin = storePrepareMin;
-      const totalOffsetMin = waitMin + prepareMin + PAYMENT_BUFFER_MIN;
+      const prepareMin = isSelectedTimeSlot ? 0 : storePrepareMin;
+      const totalOffsetMin = waitMin + interGapMin + prepareMin + PAYMENT_BUFFER_MIN;
       const maxUserMin = Math.max(0, diffMin - totalOffsetMin);
 
-      if (diffMin < prodDuration + waitMin + prepareMin) {
+      if (diffMin < prodDuration + waitMin + interGapMin + prepareMin) {
         if (maxUserMin < 10) {
           showErrorModal(`영업 마감시간(${storeCloseTime}) 임박(최소 이용시간 10분 미만)으로 일일권을 구매하여 배정할 수 없습니다.`);
           return;
@@ -3221,8 +3243,9 @@ export default function KioskApp() {
                 <div style={{
                   position: 'fixed',
                   top: 0, left: 0, right: 0, bottom: 0,
-                  backgroundColor: 'rgba(15, 23, 42, 0.75)',
-                  backdropFilter: 'blur(10px)',
+                  backgroundColor: 'rgba(15, 23, 42, 0.38)',
+                  backdropFilter: 'blur(3px)',
+                  WebkitBackdropFilter: 'blur(3px)',
                   zIndex: 9000,
                   display: 'flex',
                   alignItems: 'center',
@@ -3230,38 +3253,6 @@ export default function KioskApp() {
                   padding: '24px'
                 }}>
                   <div style={{ maxWidth: '1000px', width: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {!authMember && (
-                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                        <button
-                          type="button"
-                          data-testid="product-shop-member-auth-btn"
-                          onClick={() => {
-                            authReturnStepRef.current = 'PRODUCT_SHOP';
-                            setInitialAuthMode('SMART_TAG');
-                            setStep('MEMBER_AUTH');
-                          }}
-                          style={{
-                            height: '48px',
-                            padding: '0 22px',
-                            borderRadius: '999px',
-                            background: '#1d1d1f',
-                            color: '#ffffff',
-                            border: 'none',
-                            fontSize: '15px',
-                            fontWeight: 800,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.16)',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <UserCheck size={18} />
-                          <span>회원 인증 / 로그인</span>
-                        </button>
-                      </div>
-                    )}
                     <ProductShop
                       memberNo={authMember?.member_no}
                       memberName={authMember?.member_name}
@@ -3281,6 +3272,11 @@ export default function KioskApp() {
                       storeOpenTime={storeOpenTime}
                       storeCloseTime={storeCloseTime}
                       isStore24h={isStore24h}
+                      onMemberAuthClick={!authMember ? () => {
+                        authReturnStepRef.current = 'PRODUCT_SHOP';
+                        setInitialAuthMode('SMART_TAG');
+                        setStep('MEMBER_AUTH');
+                      } : undefined}
                       onProductSelected={handleProductSelected}
                       onCancel={() => {
                         const bayToRelease = selectedBayNo ?? selectedBayNoRef.current;

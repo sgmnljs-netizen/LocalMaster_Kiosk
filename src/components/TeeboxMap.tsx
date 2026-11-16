@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ArrowLeftRight, Check, Compass, ShieldAlert, Timer } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, Check, Compass, Home, ShieldAlert, Timer } from 'lucide-react';
 import { api, Bay, Member } from '../services/api';
 import { TeeboxTileCard } from './TeeboxTileCard';
 import { TimeMaster } from '../utils/timeMaster';
@@ -678,7 +678,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
                 onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
                 onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
               >
-                <span style={{ fontSize: '24px' }}>⛳</span>
+                <Compass size={22} />
                 <span>{lang === 'KO' ? '연습타석 배정하기' : 'Assign Practice Teebox'}</span>
               </button>
             )}
@@ -702,7 +702,7 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
               onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
               onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
             >
-              <span style={{ fontSize: '24px' }}>🏠</span>
+              <Home size={22} />
               <span>{lang === 'KO' ? '메인 화면으로 돌아가기' : 'Return to Main Dashboard'}</span>
             </button>
           </div>
@@ -1066,51 +1066,59 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
               <div
                 style={{
-                  background: '#f5f5f7',
-                  border: '1.5px solid #e5e5ea',
-                  borderRadius: '20px',
-                  padding: '16px 28px',
+                  background: '#ffffff',
+                  border: '1.5px solid #86efac',
+                  borderRadius: '22px',
+                  padding: '14px 26px',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '20px'
+                  gap: '22px',
+                  boxShadow: '0 8px 22px rgba(5, 150, 105, 0.10)',
                 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>이전 타석</span>
-                  <span style={{ fontSize: '26px', fontWeight: 900, color: '#1d1d1f' }}>{currentBay.bay_no}번</span>
+                  <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 700 }}>이전 타석</span>
+                  <span style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', fontVariantNumeric: 'tabular-nums' }}>{currentBay.bay_no}번</span>
                 </div>
                 <ArrowLeftRight size={26} style={{ color: '#059669' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <span style={{ fontSize: '14px', color: '#059669', fontWeight: 700 }}>이동할 타석</span>
-                  <span style={{ fontSize: '26px', fontWeight: 900, color: '#059669' }}>{selectedBayNo}번</span>
+                  <span style={{ fontSize: '13px', color: '#059669', fontWeight: 800 }}>이동할 타석</span>
+                  <span style={{ fontSize: '28px', fontWeight: 900, color: '#047857', fontVariantNumeric: 'tabular-nums' }}>{selectedBayNo}번</span>
                 </div>
-                <div style={{ width: '1px', height: '36px', background: '#e5e5ea', margin: '0 6px' }} />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontSize: '17px', color: '#1d1d1f', fontWeight: 800 }}>남은 {currentRemMin}분 100% 보전</span>
-                  <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 600 }}>선점 락: {countdown}초 남음</span>
+                <div style={{ width: '1px', height: '40px', background: '#e2e8f0', margin: '0 4px' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontSize: '18px', color: '#1d1d1f', fontWeight: 900, fontVariantNumeric: 'tabular-nums' }}>
+                    남은 {currentRemMin}분 100% 보전
+                  </span>
+                  <span style={{ fontSize: '14px', color: '#475569', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    {currentBay.end_time ? `${formatEndTime(currentBay.end_time)} 종료 · ` : ''}선점 락: {countdown}초 남음
+                  </span>
                 </div>
               </div>
             </div>
           ) : selectedBayNo !== null ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div 
-                style={{ 
-                  background: '#f5f5f7', 
-                  border: '1.5px solid #e5e5ea', 
-                  padding: '14px 24px', 
-                  borderRadius: '16px', 
-                  fontSize: '19px', 
+              <div
+                style={{
+                  background: '#ffffff',
+                  border: '1.5px solid #86efac',
+                  padding: '14px 24px',
+                  borderRadius: '18px',
+                  fontSize: '19px',
                   fontWeight: 800,
                   color: '#1d1d1f',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '10px'
+                  gap: '10px',
+                  boxShadow: '0 6px 18px rgba(5, 150, 105, 0.10)',
                 }}
               >
-                <Check size={22} style={{ color: '#059669' }} />
-                <span>선택된 타석: <strong style={{ color: '#059669', fontSize: '24px' }}>{selectedBayNo}</strong>번</span>
+                <Check size={22} strokeWidth={3} style={{ color: '#059669' }} />
+                <span>
+                  선택된 타석: <strong style={{ color: '#047857', fontSize: '26px', fontVariantNumeric: 'tabular-nums' }}>{selectedBayNo}</strong>번
+                </span>
               </div>
-              <span style={{ fontSize: '16px', color: '#86868b', fontWeight: 700 }}>
+              <span style={{ fontSize: '15px', color: '#64748b', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                 (배정 대기 시간: {countdown}초 남음)
               </span>
             </div>
@@ -1130,25 +1138,51 @@ export const TeeboxMap: React.FC<TeeboxMapProps> = ({
         </div>
 
         <div style={{ display: 'flex', gap: '14px' }}>
-          <button
-            onClick={handleConfirm}
-            disabled={selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused}
-            style={{ 
-              padding: '0 44px',
-              height: '68px', 
-              borderRadius: '999px', 
-              fontSize: '22px', 
-              fontWeight: 800,
-              border: 'none',
-              background: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? '#e5e5ea' : '#1d1d1f',
-              color: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? '#86868b' : '#ffffff',
-              boxShadow: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 'none' : '0 8px 24px rgba(0, 0, 0, 0.16)',
-              cursor: (selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused) ? 'not-allowed' : 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-          >
-            {preoccupyLoading ? '선점 처리 중...' : isMoveMode ? '타석 이동 확정' : '선택 완료'}
-          </button>
+          {(() => {
+            const isConfirmDisabled =
+              selectedBayNo === null || preoccupyLoading || isTimeRestricted || hasNoActiveBay || isGlobalPaused;
+            return (
+              <button
+                onClick={handleConfirm}
+                disabled={isConfirmDisabled}
+                className={
+                  isConfirmDisabled
+                    ? undefined
+                    : 'decision-tactile-btn decision-btn-emerald kiosk-action-tactile-btn'
+                }
+                style={
+                  isConfirmDisabled
+                    ? {
+                        padding: '0 40px',
+                        height: '70px',
+                        borderRadius: '999px',
+                        fontSize: '22px',
+                        fontWeight: 800,
+                        border: 'none',
+                        background: '#e5e7eb',
+                        color: '#64748b',
+                        cursor: 'not-allowed',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '10px',
+                      }
+                    : {
+                        height: '70px',
+                        padding: '0 40px',
+                        fontSize: '22px',
+                      }
+                }
+              >
+                <span style={{ position: 'relative', zIndex: 2 }}>
+                  {preoccupyLoading ? '선점 처리 중...' : isMoveMode ? '타석 이동 확정' : '선택 완료'}
+                </span>
+                {!isConfirmDisabled && (
+                  <ArrowRight size={22} strokeWidth={2.6} className="decision-btn-arrow" style={{ position: 'relative', zIndex: 2 }} />
+                )}
+              </button>
+            );
+          })()}
         </div>
       </div>
         </>

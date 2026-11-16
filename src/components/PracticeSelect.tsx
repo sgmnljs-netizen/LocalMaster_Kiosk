@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ArrowLeftRight, Check, Compass, Layers, ShieldAlert, Timer, UserCheck, CreditCard, X, Hand } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, Check, Compass, Layers, ShieldAlert, Timer, UserCheck, CreditCard, Users, X } from 'lucide-react';
 import { api, Bay } from '../services/api';
 import { TopTeeboxDashboard } from './TopTeeboxDashboard';
 import { TeeboxTileCard } from './TeeboxTileCard';
@@ -323,9 +323,9 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         await api.releaseBay(selectedBayNo).catch(console.error);
         onRefreshBays();
       }
-      // 🛡️ [SSOT 시간 동기화] 상단 미니보드 & 메인 타일과 100% 동일한 TimeMaster SSOT 산식 적용
+      // 🛡️ [SSOT 시간 동기화] 배정 분기 모달 입장 시각은 차기 대기 시작 시각(+1분 구분 텀·브레이크 이월 포함)으로 전 퍼널 통일
       const totalWaitMin = Math.max(1, TimeMaster.getTotalWaitMinutes(bay));
-      const startTimeStr = TimeMaster.formatAvailableFromTime(bay);
+      const startTimeStr = TimeMaster.formatNextQueueStartTime(bay);
 
       setErrorMsg('');
       setChainedInfo({ startTimeStr, minutesWait: totalWaitMin });
@@ -952,31 +952,49 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
         >
           <div>
             {(allocMode === 'SINGLE' ? selectedBayNo !== null : selectedBayNos.length > 0) ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div 
-                  style={{ 
-                    background: 'rgba(5, 150, 105, 0.08)', 
-                    border: '1px solid rgba(5, 150, 105, 0.3)',
-                    padding: '8px 16px', 
-                    borderRadius: '12px', 
-                    fontSize: '16px', 
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '14px',
+                  background: '#ffffff',
+                  border: '1.5px solid #86efac',
+                  padding: '10px 18px',
+                  borderRadius: '18px',
+                  boxShadow: '0 6px 16px rgba(5, 150, 105, 0.10)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Check size={18} strokeWidth={3} style={{ color: '#059669' }} />
+                  <span style={{ fontSize: '15px', fontWeight: 700, color: '#475569' }}>
+                    {lang === 'KO' ? '선택 타석' : 'Selected'}
+                  </span>
+                  <strong
+                    style={{
+                      color: '#047857',
+                      fontSize: '22px',
+                      fontWeight: 900,
+                      letterSpacing: '-0.4px',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {allocMode === 'SINGLE' ? `${selectedBayNo}${lang === 'KO' ? '번' : ''}` : `${selectedBayNos.join(', ')}${lang === 'KO' ? '번' : ''}`}
+                  </strong>
+                </div>
+                <div style={{ width: '1px', height: '20px', background: '#e2e8f0' }} />
+                <span
+                  style={{
+                    fontSize: '14px',
+                    color: '#c2410c',
+                    background: '#fff7ed',
+                    border: '1px solid #fed7aa',
+                    padding: '4px 10px',
+                    borderRadius: '999px',
                     fontWeight: 800,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
+                    fontVariantNumeric: 'tabular-nums',
                   }}
                 >
-                  <Check size={16} style={{ color: '#059669' }} />
-                  <span style={{ color: '#111827' }}>
-                    {lang === 'KO' ? '선택된 타석:' : 'Selected:'}{' '}
-                    <strong style={{ color: '#059669', fontSize: '20px' }}>
-                      {allocMode === 'SINGLE' ? selectedBayNo : selectedBayNos.join(', ')}
-                    </strong>
-                    {lang === 'KO' ? '번' : ''}
-                  </span>
-                </div>
-                <span style={{ fontSize: '14px', color: '#ea580c', fontWeight: 700 }}>
-                  ({lang === 'KO' ? `배정 제한시간: ${countdown}초` : `Limit: ${countdown}s`})
+                  {lang === 'KO' ? `배정 제한시간 ${countdown}초` : `Limit ${countdown}s`}
                 </span>
               </div>
             ) : (
@@ -994,14 +1012,18 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                 onClick={handleReleaseAll}
                 disabled={preoccupyLoading}
                 style={{
-                  padding: '12px 22px',
-                  borderRadius: '14px',
-                  border: '1px solid #d1d5db',
+                  height: '62px',
+                  padding: '0 24px',
+                  borderRadius: '999px',
+                  border: '1.5px solid #cbd5e1',
                   background: '#ffffff',
-                  color: '#374151',
+                  color: '#334155',
                   fontSize: '16px',
                   fontWeight: 800,
-                  cursor: 'pointer'
+                  cursor: preoccupyLoading ? 'not-allowed' : 'pointer',
+                  boxShadow: 'inset 0 -3px 0 rgba(15, 23, 42, 0.05)',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
                 }}
               >
                 {lang === 'KO' ? '선택 초기화' : 'Clear Selection'}
@@ -1009,21 +1031,45 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               <button
                 onClick={handleConfirmClick}
                 disabled={preoccupyLoading}
-                style={{
-                  padding: '12px 28px',
-                  borderRadius: '14px',
-                  border: 'none',
-                  background: '#059669',
-                  color: '#ffffff',
-                  fontSize: '17px',
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                  boxShadow: '0 6px 16px rgba(5, 150, 105, 0.28)'
-                }}
+                className={
+                  preoccupyLoading
+                    ? undefined
+                    : 'decision-tactile-btn decision-btn-emerald kiosk-action-tactile-btn'
+                }
+                style={
+                  preoccupyLoading
+                    ? {
+                        height: '62px',
+                        padding: '0 30px',
+                        borderRadius: '999px',
+                        border: 'none',
+                        background: '#e5e7eb',
+                        color: '#64748b',
+                        fontSize: '18px',
+                        fontWeight: 900,
+                        cursor: 'not-allowed',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }
+                    : {
+                        height: '62px',
+                        minWidth: '230px',
+                        padding: '0 28px',
+                        fontSize: '18px',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }
+                }
               >
-                {allocMode === 'GROUP'
-                  ? (lang === 'KO' ? `👥 ${selectedBayNos.length}개 타석 동반 배정 진행` : `Confirm ${selectedBayNos.length} Group Bays`)
-                  : (lang === 'KO' ? '선택 타석 배정 진행' : 'Proceed to Allocate')}
+                {allocMode === 'GROUP' && <Users size={19} style={{ position: 'relative', zIndex: 2 }} />}
+                <span style={{ position: 'relative', zIndex: 2 }}>
+                  {allocMode === 'GROUP'
+                    ? (lang === 'KO' ? `${selectedBayNos.length}개 타석 동반 배정 진행` : `Confirm ${selectedBayNos.length} Group Bays`)
+                    : (lang === 'KO' ? '선택 타석 배정 진행' : 'Proceed to Allocate')}
+                </span>
+                {!preoccupyLoading && (
+                  <ArrowRight size={20} strokeWidth={2.6} className="decision-btn-arrow" style={{ position: 'relative', zIndex: 2 }} />
+                )}
               </button>
             </div>
           )}
@@ -1143,10 +1189,8 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                   gap: '14px',
                   borderRadius: '26px',
                   background: !isOccupied ? '#f0fdf4' : '#fffbeb',
-                  border: !isOccupied ? '2.5px solid #34d399' : '2.5px solid #f59e0b',
-                  boxShadow: !isOccupied
-                    ? '0 10px 28px rgba(5, 150, 105, 0.08)'
-                    : '0 10px 28px rgba(217, 119, 6, 0.12)',
+                  border: !isOccupied ? '1.5px solid #86efac' : '1.5px solid #fcd34d',
+                  boxShadow: '0 4px 14px rgba(15, 23, 42, 0.04)',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '24px' }}>
@@ -1178,7 +1222,7 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                     ) : (
                       <>
                         <span style={{ fontSize: '36px', fontWeight: 950, color: '#b45309', letterSpacing: '-0.8px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', lineHeight: 1.1 }}>
-                          {chainedInfo?.startTimeStr || TimeMaster.formatAvailableFromTime(selectedBay)} 입장 예정
+                          {chainedInfo?.startTimeStr || TimeMaster.formatNextQueueStartTime(selectedBay)} 입장 예정
                         </span>
                         <span style={{ fontSize: '20px', fontWeight: 800, color: '#92400e', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                           {`약 ${chainedInfo?.minutesWait ?? Math.max(1, TimeMaster.getTotalWaitMinutes(selectedBay))}분 대기 후 바로 입장`}
@@ -1206,49 +1250,76 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
               </div>
             )}
 
-            {/* Card Buttons (Apple Pure White & Deep Charcoal Minimalist Style - 초대형 고시인성) */}
+            {/* Card Buttons (3D 입체 택타일 버튼 · 교차 유리 광택 스윕 & 화살표 넛지) */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '22px' }}>
               {/* Type 1: 회원권 */}
-              <div 
+              <div
+                className={`decision-choice-card ${!isOccupied ? 'decision-card-emerald' : 'decision-card-amber'}`}
                 onClick={() => handleDecisionConfirm('MEMBERSHIP')}
                 style={{
-                  padding: '40px 28px',
+                  padding: '32px 26px 26px 26px',
                   borderRadius: '32px',
-                  cursor: 'pointer',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   textAlign: 'center',
-                  gap: '20px',
-                  background: '#ffffff',
-                  border: '2px solid #e5e7eb',
-                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.06)',
-                  transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
-                  position: 'relative',
-                  boxSizing: 'border-box',
+                  gap: '18px',
                 }}
-                onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.borderColor = '#059669'; }}
-                onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
-                onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.borderColor = '#059669'; }}
-                onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
               >
-                {/* 애플 에메랄드 그린 대형 원형 아이콘 */}
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <div style={{ background: 'linear-gradient(145deg, #10b981 0%, #059669 100%)', padding: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 24px rgba(5, 150, 105, 0.26)' }}>
-                    <UserCheck size={44} strokeWidth={2.4} style={{ color: '#ffffff' }} />
+                {/* 대상 뱃지 + 이중 헤일로 아이콘 */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+                  <span
+                    style={{
+                      fontSize: '15px',
+                      fontWeight: 800,
+                      padding: '5px 14px',
+                      borderRadius: '999px',
+                      backgroundColor: !isOccupied ? '#d1fae5' : '#fef3c7',
+                      color: !isOccupied ? '#065f46' : '#92400e',
+                      letterSpacing: '-0.2px',
+                    }}
+                  >
+                    {lang === 'KO' ? '기존 회원 · 간편 인증' : 'Existing Member'}
+                  </span>
+                  <div
+                    style={{
+                      padding: '9px',
+                      borderRadius: '50%',
+                      background: !isOccupied ? 'rgba(16, 185, 129, 0.14)' : 'rgba(245, 158, 11, 0.16)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: !isOccupied
+                          ? 'linear-gradient(145deg, #10b981 0%, #059669 100%)'
+                          : 'linear-gradient(145deg, #f59e0b 0%, #d97706 100%)',
+                        padding: '22px',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: !isOccupied
+                          ? '0 10px 24px rgba(5, 150, 105, 0.28)'
+                          : '0 10px 24px rgba(217, 119, 6, 0.28)',
+                      }}
+                    >
+                      <UserCheck size={42} strokeWidth={2.4} style={{ color: '#ffffff' }} />
+                    </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <span style={{ fontSize: '34px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.9px', lineHeight: 1.2, wordBreak: 'keep-all' }}>
                     {lang === 'KO'
                       ? (!isOccupied ? '보유 회원권으로 배정' : '보유 회원권 대기')
                       : 'Membership Pass'}
                   </span>
-                  <span style={{ fontSize: '20px', color: '#6e6e73', fontWeight: 700, lineHeight: 1.45, whiteSpace: 'pre-line', wordBreak: 'keep-all' }}>
-                    {lang === 'KO' 
+                  <span style={{ fontSize: '19.5px', color: '#515154', fontWeight: 700, lineHeight: 1.45, whiteSpace: 'pre-line', wordBreak: 'keep-all' }}>
+                    {lang === 'KO'
                       ? (!isOccupied
                           ? '보유 중인 기간·횟수권으로\n회원 인증 후 바로 입장'
                           : '보유 중인 기간·횟수권으로\n회원 인증 후 대기 예약')
@@ -1256,54 +1327,88 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                   </span>
                 </div>
 
-                {/* 풀폭 대형 필 버튼 */}
-                <div style={{ width: '100%', height: '72px', borderRadius: '999px', background: !isOccupied ? '#059669' : '#d97706', color: '#ffffff', fontSize: '22px', fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', boxShadow: !isOccupied ? '0 8px 20px rgba(5, 150, 105, 0.28)' : '0 8px 20px rgba(217, 119, 6, 0.28)', whiteSpace: 'nowrap' }}>
-                  <Hand size={22} style={{ color: '#ffffff' }} />
-                  <span>{!isOccupied ? '회원 인증 즉시 배정' : '회원 인증 대기 예약'}</span>
+                {/* 3D 입체 택타일 풀폭 CTA 버튼 */}
+                <div
+                  className={`decision-tactile-btn ${!isOccupied ? 'decision-btn-emerald' : 'decision-btn-amber'}`}
+                  style={{ '--decision-sheen-delay': '0s' } as React.CSSProperties}
+                >
+                  <span style={{ position: 'relative', zIndex: 2 }}>
+                    {!isOccupied ? '회원 인증 즉시 배정' : '회원 인증 대기 예약'}
+                  </span>
+                  <ArrowRight
+                    size={27}
+                    strokeWidth={3}
+                    className="decision-btn-arrow"
+                    aria-hidden="true"
+                    style={{ position: 'relative', zIndex: 2, flexShrink: 0 }}
+                  />
                 </div>
               </div>
 
               {/* Type 2: 일일권 */}
-              <div 
+              <div
+                className="decision-choice-card decision-card-blue"
                 onClick={() => handleDecisionConfirm('DAILY')}
                 style={{
-                  padding: '40px 28px',
+                  padding: '32px 26px 26px 26px',
                   borderRadius: '32px',
-                  cursor: 'pointer',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   textAlign: 'center',
-                  gap: '20px',
-                  background: '#ffffff',
-                  border: '2px solid #e5e7eb',
-                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.06)',
-                  transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
-                  position: 'relative',
-                  boxSizing: 'border-box',
+                  gap: '18px',
                 }}
-                onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.borderColor = '#1d1d1f'; }}
-                onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
-                onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; e.currentTarget.style.borderColor = '#1d1d1f'; }}
-                onTouchEnd={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
               >
-                {/* 애플 딥 차콜 대형 원형 아이콘 */}
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <div style={{ background: '#1d1d1f', padding: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 24px rgba(0, 0, 0, 0.16)' }}>
-                    <CreditCard size={44} strokeWidth={2.4} style={{ color: '#ffffff' }} />
+                {/* 대상 뱃지 + 이중 헤일로 아이콘 */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+                  <span
+                    style={{
+                      fontSize: '15px',
+                      fontWeight: 800,
+                      padding: '5px 14px',
+                      borderRadius: '999px',
+                      backgroundColor: '#dbeafe',
+                      color: '#0058b9',
+                      letterSpacing: '-0.2px',
+                    }}
+                  >
+                    {lang === 'KO' ? '비회원 · 카드 즉시결제' : 'Guest · Card Checkout'}
+                  </span>
+                  <div
+                    style={{
+                      padding: '9px',
+                      borderRadius: '50%',
+                      background: 'rgba(0, 113, 227, 0.14)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: 'linear-gradient(145deg, #1a8cff 0%, #0071e3 100%)',
+                        padding: '22px',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 10px 24px rgba(0, 113, 227, 0.28)',
+                      }}
+                    >
+                      <CreditCard size={42} strokeWidth={2.4} style={{ color: '#ffffff' }} />
+                    </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <span style={{ fontSize: '34px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.9px', lineHeight: 1.2, wordBreak: 'keep-all' }}>
                     {lang === 'KO'
                       ? (!isOccupied ? '일일권 즉시 결제' : '일일권 대기 결제')
                       : 'Daily Pass Payment'}
                   </span>
-                  <span style={{ fontSize: '20px', color: '#6e6e73', fontWeight: 700, lineHeight: 1.45, whiteSpace: 'pre-line', wordBreak: 'keep-all' }}>
-                    {lang === 'KO' 
+                  <span style={{ fontSize: '19.5px', color: '#515154', fontWeight: 700, lineHeight: 1.45, whiteSpace: 'pre-line', wordBreak: 'keep-all' }}>
+                    {lang === 'KO'
                       ? (!isOccupied
                           ? '비회원 또는 회원 인증 없이\n일일 타석권 결제 후 입장'
                           : '비회원 또는 회원 인증 없이\n결제 후 지정 시각 대기 입장')
@@ -1311,10 +1416,21 @@ export const PracticeSelect: React.FC<PracticeSelectProps> = ({
                   </span>
                 </div>
 
-                {/* 애플 딥 차콜 풀폭 대형 필 버튼 */}
-                <div style={{ width: '100%', height: '72px', borderRadius: '999px', background: '#1d1d1f', color: '#ffffff', fontSize: '22px', fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', boxShadow: '0 8px 20px rgba(0, 0, 0, 0.18)', whiteSpace: 'nowrap' }}>
-                  <Hand size={22} style={{ color: '#ffffff' }} />
-                  <span>{!isOccupied ? '일일권 바로 결제' : '일일권 대기 결제'}</span>
+                {/* 3D 로열 사파이어 블루 입체 풀폭 CTA 버튼 */}
+                <div
+                  className="decision-tactile-btn decision-btn-blue"
+                  style={{ '--decision-sheen-delay': '1.1s' } as React.CSSProperties}
+                >
+                  <span style={{ position: 'relative', zIndex: 2 }}>
+                    {!isOccupied ? '일일권 바로 결제' : '일일권 대기 결제'}
+                  </span>
+                  <ArrowRight
+                    size={27}
+                    strokeWidth={3}
+                    className="decision-btn-arrow"
+                    aria-hidden="true"
+                    style={{ position: 'relative', zIndex: 2, flexShrink: 0 }}
+                  />
                 </div>
               </div>
             </div>

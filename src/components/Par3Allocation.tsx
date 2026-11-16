@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Calendar, User, Users, Clock, ArrowLeft, CreditCard, Check, HelpCircle, CreditCard as CardIcon, Loader2, RefreshCw, X, Plus, Ticket, UserCheck, UserPlus } from 'lucide-react';
+import { Calendar, User, Users, Clock, ArrowLeft, ArrowRight, CreditCard, Check, HelpCircle, CreditCard as CardIcon, Loader2, RefreshCw, X, Plus, Ticket, UserCheck, UserPlus } from 'lucide-react';
 import { api, isDemoEnvironment, Par3Slot, Product, KioskZone, Member, MemberAsset, KioskCompanionItem, isPeriodMembershipAsset } from '../services/api';
 import { ReceiptPrinter, ReceiptData } from './ReceiptPrinter';
 import { MemberAuth } from './MemberAuth';
@@ -1360,7 +1360,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#059669', marginTop: '2px' }}>
                           <Ticket size={12} />
                           <span style={{ fontSize: '12px', fontWeight: 800 }}>
-                            🎟️ {p.use_ticket_name} 사용 (결제액 면제)
+                            {p.use_ticket_name} 사용 (결제액 면제)
                           </span>
                         </div>
                       )}
@@ -1368,8 +1368,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                       {/* 회원 등급 할인 배지 */}
                       {!p.use_ticket_id && p.is_member && (p.discount_rate || 0) > 0 && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#059669', marginTop: '2px' }}>
+                          <UserCheck size={12} />
                           <span style={{ fontSize: '12px', fontWeight: 800 }}>
-                            👑 회원 등급 {p.discount_rate! < 1 ? Math.round(p.discount_rate! * 100) : p.discount_rate}% 할인 적용 (₩{calculatePlayerPrice(p, getCoursePriceLabel()).toLocaleString()})
+                            회원 등급 {p.discount_rate! < 1 ? Math.round(p.discount_rate! * 100) : p.discount_rate}% 할인 적용 (₩{calculatePlayerPrice(p, getCoursePriceLabel()).toLocaleString()})
                           </span>
                         </div>
                       )}
@@ -1398,7 +1399,7 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
               )}
             </div>
 
-            {/* 인원 추가 버튼 (4명 미만일 때만 활성화 - 애플 럭셔리 캡슐 CTA 디자인) */}
+            {/* 인원 추가 버튼 (4명 미만일 때만 활성화 - 택타일 카드 계층) */}
             {players.length < 4 && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', flexShrink: 0 }}>
                 {/* 1. 대표/동반 회원 인증 CTA (Primary) */}
@@ -1408,10 +1409,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                     setModalPhone('');
                   }}
                   style={{
-                    height: '74px',
-                    borderRadius: '18px',
+                    height: '78px',
+                    borderRadius: '20px',
                     border: 'none',
-                    background: '#1d1d1f',
+                    background: 'linear-gradient(180deg, #2c2c2e 0%, #1d1d1f 100%)',
                     color: '#ffffff',
                     cursor: 'pointer',
                     display: 'flex',
@@ -1419,18 +1420,18 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '4px',
-                    padding: '8px 12px',
-                    boxShadow: '0 6px 18px rgba(0, 0, 0, 0.14)',
+                    padding: '8px 14px',
+                    boxShadow: 'inset 0 1.5px 0 rgba(255, 255, 255, 0.18), inset 0 -4px 0 rgba(0, 0, 0, 0.45), 0 8px 18px rgba(0, 0, 0, 0.16)',
                     transition: 'all 0.15s ease'
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <UserCheck size={18} style={{ color: '#34c759' }} />
-                    <span style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.3px', color: '#ffffff', whiteSpace: 'nowrap' }}>
+                    <UserCheck size={18} style={{ color: '#34d399' }} />
+                    <span style={{ fontSize: '17px', fontWeight: 900, letterSpacing: '-0.3px', color: '#ffffff', whiteSpace: 'nowrap' }}>
                       {players.length === 0 ? '대표 회원 인증' : '회원 동반자 추가'}
                     </span>
                   </div>
-                  <span style={{ fontSize: '12px', color: '#a1a1a6', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '12px', color: '#cbd5e1', fontWeight: 600, whiteSpace: 'nowrap' }}>
                     회원 혜택 · 이용권 사용
                   </span>
                 </button>
@@ -1442,10 +1443,10 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                     setModalPhone('');
                   }}
                   style={{
-                    height: '74px',
-                    borderRadius: '18px',
-                    border: '1.5px solid #d2d2d7',
-                    background: '#f5f5f7',
+                    height: '78px',
+                    borderRadius: '20px',
+                    border: '1.5px solid #cbd5e1',
+                    background: '#ffffff',
                     color: '#1d1d1f',
                     cursor: 'pointer',
                     display: 'flex',
@@ -1453,17 +1454,18 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '4px',
-                    padding: '8px 12px',
+                    padding: '8px 14px',
+                    boxShadow: 'inset 0 -3px 0 rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.05)',
                     transition: 'all 0.15s ease'
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <UserPlus size={18} style={{ color: '#1d1d1f' }} />
-                    <span style={{ fontSize: '16px', fontWeight: 900, letterSpacing: '-0.3px', color: '#1d1d1f', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: '17px', fontWeight: 900, letterSpacing: '-0.3px', color: '#1d1d1f', whiteSpace: 'nowrap' }}>
                       {players.length === 0 ? '대표 비회원 추가' : '비회원 동반자 추가'}
                     </span>
                   </div>
-                  <span style={{ fontSize: '12px', color: '#86868b', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700, whiteSpace: 'nowrap' }}>
                     일일권 · 현장 즉시 결제
                   </span>
                 </button>
@@ -1505,8 +1507,9 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 900, color: '#1d1d1f' }}>
-                💳 할부 개월 선택
+              <span style={{ fontSize: '14px', fontWeight: 900, color: '#1d1d1f', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <CreditCard size={16} color="#1d1d1f" />
+                할부 개월 선택
               </span>
               <span style={{ fontSize: '12px', fontWeight: 700, color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '999px' }}>
                 5만원 이상 할부 가능
@@ -1540,63 +1543,118 @@ export const Par3Allocation: React.FC<Par3AllocationProps> = ({
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: '0' }}>
-            <span style={{ fontSize: '15px', color: '#86868b', fontWeight: 800, letterSpacing: '0.5px' }}>최종 선택 내역</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', whiteSpace: 'nowrap' }}>
-                {selectedSlot ? `${selectedSlot.time} 티오프` : '시간대 미선택'} <span style={{ color: '#d2d2d7', margin: '0 6px' }}>|</span> 총 {players.length}명
-              </span>
-              {selectedSlot && players.length === 0 && (
-                <span style={{ fontSize: '14px', color: '#ff3b30', background: '#fff2f2', padding: '4px 10px', borderRadius: '8px', fontWeight: 800, whiteSpace: 'nowrap' }}>
-                  안내: 이용자 추가 필요
+        {(() => {
+          const isBookingDisabled = loading || !selectedSlot || players.length === 0;
+          const selectedCourseName = zones.find((z) => z.zone_code === course)?.zone_name || course;
+          return (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '20px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  flex: 1,
+                  minWidth: '0',
+                  background: '#ffffff',
+                  border: selectedSlot ? '1.5px solid #bfdbfe' : '1px solid #e5e7eb',
+                  borderRadius: '18px',
+                  padding: '12px 18px',
+                  boxShadow: selectedSlot ? '0 4px 14px rgba(0, 113, 227, 0.06)' : 'none',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '13px',
+                    color: '#64748b',
+                    fontWeight: 800,
+                    letterSpacing: '0.2px',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  최종 선택 내역 ({selectedCourseName})
                 </span>
-              )}
-            </div>
-          </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '24px', fontWeight: 900, color: '#1d1d1f', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                    {selectedSlot ? `${selectedSlot.time} 티오프` : '시간대 미선택'}{' '}
+                    <span style={{ color: '#cbd5e1', margin: '0 6px' }}>|</span>{' '}
+                    <span style={{ color: players.length > 0 ? '#0071e3' : '#64748b' }}>총 {players.length}명</span>
+                  </span>
+                  {selectedSlot && players.length === 0 && (
+                    <span style={{ fontSize: '14px', color: '#ff3b30', background: '#fff2f2', padding: '4px 10px', borderRadius: '8px', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                      안내: 이용자 추가 필요
+                    </span>
+                  )}
+                </div>
+              </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-              <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>
-                총 결제 금액{calculateTotalGradeDiscount() > 0 ? ` (회원할인 -₩${calculateTotalGradeDiscount().toLocaleString()})` : ''}
-                {currentTotalAmount >= MIN_INSTALLMENT_AMOUNT ? ` · ${installmentMonths === 0 ? '일시불' : `${installmentMonths}개월 할부`}` : ''}
-              </span>
-              <span style={{ 
-                fontSize: '34px', 
-                fontWeight: 950, 
-                color: '#1d1d1f',
-                letterSpacing: '-1px'
-              }}>
-                ₩{currentTotalAmount.toLocaleString()}
-              </span>
-            </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexShrink: 0 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                  <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 700 }}>
+                    총 결제 금액{calculateTotalGradeDiscount() > 0 ? ` (회원할인 -₩${calculateTotalGradeDiscount().toLocaleString()})` : ''}
+                    {currentTotalAmount >= MIN_INSTALLMENT_AMOUNT ? ` · ${installmentMonths === 0 ? '일시불' : `${installmentMonths}개월 할부`}` : ''}
+                  </span>
+                  <span style={{
+                    fontSize: '34px',
+                    fontWeight: 900,
+                    color: '#1d1d1f',
+                    letterSpacing: '-1px',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>
+                    ₩{currentTotalAmount.toLocaleString()}
+                  </span>
+                </div>
 
-            <button
-              onClick={handleConfirmBooking}
-              disabled={loading || !selectedSlot || players.length === 0}
-              style={{
-                height: '68px',
-                fontSize: '20px',
-                fontWeight: 900,
-                padding: '0 44px',
-                borderRadius: '999px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                background: loading || !selectedSlot || players.length === 0 ? '#e5e5ea' : '#1d1d1f',
-                color: loading || !selectedSlot || players.length === 0 ? '#86868b' : '#ffffff',
-                border: 'none',
-                cursor: loading || !selectedSlot || players.length === 0 ? 'not-allowed' : 'pointer',
-                boxShadow: loading || !selectedSlot || players.length === 0 ? 'none' : '0 8px 24px rgba(0, 0, 0, 0.16)',
-                transition: 'all 0.15s ease',
-                flexShrink: 0
-              }}
-            >
-              <CreditCard size={24} />
-              {loading ? '예약 중...' : '선점 및 결제'}
-            </button>
-          </div>
-        </div>
+                <button
+                  onClick={handleConfirmBooking}
+                  disabled={isBookingDisabled}
+                  className={
+                    isBookingDisabled
+                      ? undefined
+                      : `decision-tactile-btn kiosk-action-tactile-btn ${currentTotalAmount > 0 ? 'decision-btn-blue' : 'decision-btn-emerald'}`
+                  }
+                  style={
+                    isBookingDisabled
+                      ? {
+                          height: '74px',
+                          fontSize: '21px',
+                          fontWeight: 900,
+                          padding: '0 40px',
+                          borderRadius: '999px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          background: '#e5e5ea',
+                          color: '#86868b',
+                          border: 'none',
+                          cursor: 'not-allowed',
+                          flexShrink: 0,
+                        }
+                      : {
+                          height: '74px',
+                          padding: '0 40px',
+                          fontSize: '21px',
+                          flexShrink: 0,
+                        }
+                  }
+                >
+                  {currentTotalAmount === 0 ? (
+                    <Check size={22} strokeWidth={2.8} style={{ position: 'relative', zIndex: 2 }} />
+                  ) : (
+                    <CreditCard size={22} style={{ position: 'relative', zIndex: 2 }} />
+                  )}
+                  <span style={{ position: 'relative', zIndex: 2 }}>
+                    {loading ? '예약 중...' : '선점 및 결제'}
+                  </span>
+                  {!isBookingDisabled && (
+                    <ArrowRight size={22} strokeWidth={2.6} className="decision-btn-arrow" style={{ position: 'relative', zIndex: 2 }} />
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* 3종 통합 회원 인증 (안면 인식 / QR / 전화번호) 오버레이 모달 */}

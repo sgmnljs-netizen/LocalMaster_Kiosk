@@ -131,7 +131,7 @@ describe('Wave 3 (20261115) Kiosk Utils & Electron Fit Boundary Audit', () => {
 
     expect(preview.isGroupMode).toBe(true);
     expect(preview.isWaitlist).toBe(true);
-    expect(preview.startHhmm).toBe('14:40');
-    expect(preview.endHhmm).toBe('15:35');
+    expect(preview.startHhmm).toBe('14:41');
+    expect(preview.endHhmm).toBe('15:36');
   });
 });

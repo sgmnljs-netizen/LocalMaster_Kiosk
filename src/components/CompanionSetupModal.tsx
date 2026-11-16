@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Timer, X, AlertCircle, UserCheck } from 'lucide-react';
+import { UserPlus, Timer, X, AlertCircle, UserCheck, ArrowRight, CreditCard } from 'lucide-react';
 import { api, Member, MemberAsset, Bay, isPeriodMembershipAsset } from '../services/api';
 import { getKioskSettings } from '../stores/kioskSettings';
 import { TimeMaster } from '../utils/timeMaster';
@@ -546,7 +546,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
             </div>
             <div>
               <h2 style={{ fontSize: '26px', fontWeight: 900, margin: 0, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
-                {lang === 'KO' ? '👥 동반자 타석 동시 배정 설정' : '👥 Companion Bay Allocation Setup'}
+                {lang === 'KO' ? '동반자 타석 동시 배정 설정' : 'Companion Bay Allocation Setup'}
               </h2>
               <p style={{ fontSize: '15px', color: '#6e6e73', fontWeight: 600, margin: '4px 0 0 0' }}>
                 {lang === 'KO' ? `선택하신 ${selectedBayNos.length}개 타석의 사용 정보를 설정해주세요.` : `Configure details for ${selectedBayNos.length} selected teeboxes.`}
@@ -642,7 +642,7 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
             <div style={{ background: '#f5f5f7', borderRadius: '24px', padding: '28px', border: '1px solid #e5e5ea', display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ fontSize: '20px', fontWeight: 900, margin: 0, color: '#1d1d1f', letterSpacing: '-0.4px' }}>
-                  📌 {currentTarget.bayNo}번 타석 설정 ({currentTarget.isLeader ? '대표자' : `동반자 ${activeBayIdx}`})
+                  {currentTarget.bayNo}번 타석 설정 ({currentTarget.isLeader ? '대표자' : `동반자 ${activeBayIdx}`})
                 </h3>
                 {currentTarget.isLeader ? (
                   <span style={{ background: '#1d1d1f', color: '#ffffff', padding: '6px 14px', borderRadius: '999px', fontSize: '13px', fontWeight: 800 }}>
@@ -911,7 +911,10 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
                       boxShadow: currentTarget.ticketType === 'DAILY' ? '0 6px 16px rgba(0, 0, 0, 0.08)' : 'none'
                     }}
                   >
-                    <div style={{ fontWeight: 900, fontSize: '17px', color: '#1d1d1f' }}>💳 일일 타석권 결제</div>
+                    <div style={{ fontWeight: 900, fontSize: '17px', color: '#1d1d1f', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <CreditCard size={18} color="#1d1d1f" />
+                      <span>일일 타석권 결제</span>
+                    </div>
                     <div style={{ fontSize: '13px', color: '#1d1d1f', fontWeight: 800, marginTop: '4px' }}>{dailyPrice.toLocaleString()} 원 ({currentTarget.durationMin}분 이용)</div>
                   </button>
                 </div>
@@ -921,37 +924,70 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div 
+        <div
           style={{
-            padding: '24px 36px',
+            padding: '22px 36px',
             borderTop: '1px solid #e5e5ea',
             background: '#ffffff',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            gap: '20px',
           }}
         >
-          <div>
-            <span style={{ fontSize: '14px', color: '#86868b', fontWeight: 700 }}>총 결제 필요 금액</span>
-            <div style={{ fontSize: '30px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-0.8px' }}>
-              {totalPrice.toLocaleString()} <span style={{ fontSize: '20px', fontWeight: 800 }}>원</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: 0, flex: '1 1 0' }}>
+            <div
+              style={{
+                background: '#f8fafc',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '16px',
+                padding: '10px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '2px',
+                minWidth: 0,
+                maxWidth: '240px',
+              }}
+            >
+              <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 800, whiteSpace: 'nowrap' }}>배정 타석 확인</span>
+              <span
+                style={{
+                  fontSize: '16px',
+                  fontWeight: 900,
+                  color: '#1d1d1f',
+                  fontVariantNumeric: 'tabular-nums',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                총 {targets.length}개 ({targets.map((t) => `${t.bayNo}번`).join(', ')})
+              </span>
+            </div>
+            <div style={{ flexShrink: 0 }}>
+              <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 700, whiteSpace: 'nowrap' }}>총 결제 필요 금액</span>
+              <div style={{ fontSize: '28px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.8px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                {totalPrice.toLocaleString()} <span style={{ fontSize: '18px', fontWeight: 800 }}>원</span>
+              </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '14px' }}>
+          <div style={{ display: 'flex', gap: '12px', flexShrink: 0 }}>
             <button
               type="button"
               onClick={onCancel}
               style={{
-                height: '60px',
-                padding: '0 32px',
+                height: '66px',
+                padding: '0 26px',
                 borderRadius: '999px',
-                border: '1px solid #d2d2d7',
-                background: '#f5f5f7',
-                color: '#1d1d1f',
-                fontSize: '18px',
+                border: '1.5px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#334155',
+                fontSize: '17px',
                 fontWeight: 800,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                boxShadow: 'inset 0 -3px 0 rgba(15, 23, 42, 0.05)',
               }}
             >
               이전으로
@@ -959,20 +995,19 @@ export const CompanionSetupModal: React.FC<CompanionSetupModalProps> = ({
             <button
               type="button"
               onClick={handleConfirmAll}
+              className={`decision-tactile-btn kiosk-action-tactile-btn ${totalPrice > 0 ? 'decision-btn-blue' : 'decision-btn-emerald'}`}
               style={{
-                height: '60px',
-                padding: '0 40px',
-                borderRadius: '999px',
-                border: 'none',
-                background: '#1d1d1f',
-                color: '#ffffff',
-                fontSize: '18px',
-                fontWeight: 900,
-                cursor: 'pointer',
-                boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)'
+                height: '66px',
+                minWidth: '215px',
+                padding: '0 30px',
+                fontSize: '19px',
+                whiteSpace: 'nowrap',
               }}
             >
-              {totalPrice > 0 ? '일괄 결제 진행' : '다중 배정 확정'}
+              <span style={{ position: 'relative', zIndex: 2 }}>
+                {totalPrice > 0 ? '일괄 결제 진행' : '다중 배정 확정'}
+              </span>
+              <ArrowRight size={20} strokeWidth={2.6} className="decision-btn-arrow" style={{ position: 'relative', zIndex: 2 }} />
             </button>
           </div>
         </div>

@@ -4,6 +4,9 @@
  * - HH:mm / HHmm 종료시간 파싱 및 자정 경과(+24h) 보정
  * - 백엔드 minutes_left SSOT 기반 잔여시간 산출
  */
+export const DEFAULT_BAY_PREPARE_TIME_MIN = 3;
+export const INTER_RESERVATION_GAP_MIN = 1;
+
 export class TimeMaster {
   private static serverOffsetMs: number = 0;
   private static readonly KST_UTC_OFFSET_MS: number = 9 * 3600 * 1000;
@@ -288,6 +291,53 @@ export class TimeMaster {
   }
 
   /**
+   * [SSOT] 이용 중인 타석의 다음 줄서기/배정 시작 예정 시각 (`HH:mm`) 반환
+   * - 백엔드 SSOT next_queue_start_time / next_queue_start_epoch_ms (+1분 구분 텀 포함) 최우선 적용
+   * - 폴백 시 빈타석 예정 시각(available_from_time / end + waiting)에 +1분 구분 텀(TIME_SLOT 0분) 반영
+   */
+  static formatNextQueueStartTime(
+    bay?: {
+      available_from_time?: string | null;
+      available_from_epoch_ms?: number | null;
+      inter_gap_min?: number | null;
+      next_queue_start_time?: string | null;
+      next_queue_start_epoch_ms?: number | null;
+      booking_mode?: string | null;
+      facility_type?: string | null;
+      waiting_res_total_min?: number | null;
+      end_time?: string | null;
+      end_epoch_ms?: number | null;
+    } | null
+  ): string {
+    if (!bay) return '종료';
+    if (bay.next_queue_start_time && String(bay.next_queue_start_time).trim()) {
+      return TimeMaster.formatEndTime(bay.next_queue_start_time, bay.next_queue_start_epoch_ms);
+    }
+    if (typeof bay.next_queue_start_epoch_ms === 'number' && bay.next_queue_start_epoch_ms > 0) {
+      return TimeMaster.formatEndTime(null, bay.next_queue_start_epoch_ms);
+    }
+    const isTimeSlot =
+      String(bay.booking_mode || '').toUpperCase() === 'TIME_SLOT' ||
+      (Boolean(bay.facility_type) && String(bay.facility_type).toUpperCase() !== 'BAY');
+    const gapMin = isTimeSlot
+      ? 0
+      : (typeof bay.inter_gap_min === 'number' && bay.inter_gap_min >= 0
+          ? bay.inter_gap_min
+          : INTER_RESERVATION_GAP_MIN);
+    if (typeof bay.available_from_epoch_ms === 'number' && bay.available_from_epoch_ms > 0) {
+      return TimeMaster.formatEndTime(null, bay.available_from_epoch_ms + gapMin * 60 * 1000);
+    }
+    const availFormatted = TimeMaster.formatAvailableFromTime(bay);
+    if (availFormatted && availFormatted !== '종료') {
+      const parsed = TimeMaster.parseSessionEnd(availFormatted, TimeMaster.getSyncedDate());
+      if (parsed) {
+        return TimeMaster.formatEndTime(null, parsed.getTime() + gapMin * 60 * 1000);
+      }
+    }
+    return availFormatted;
+  }
+
+  /**
    * [SSOT] 타석이 실제로 빈 타석이 되는 예정 시각 (HH:mm) 포맷팅
    * - 백엔드 Smart Gap Merge 결과(available_from_time / available_from_epoch_ms) 최우선 적용
    * - 로컬 폴백 시 end_epoch_ms + waiting_res_total_min 계산
@@ -512,6 +562,9 @@ export interface BayAllocationPreviewProbe extends BayStatusProbe {
   floor_no?: number | string | null;
   available_from_time?: string | null;
   available_from_epoch_ms?: number | null;
+  inter_gap_min?: number | null;
+  next_queue_start_time?: string | null;
+  next_queue_start_epoch_ms?: number | null;
   total_wait_minutes?: number | null;
   waiting_res_total_min?: number | null;
   minutes_left?: number;
@@ -634,22 +687,45 @@ export const buildBayAllocationPreview = (
     targetBay: BayAllocationPreviewProbe | null | undefined,
     fallbackWaitMin: number
   ): number => {
+    const isTimeSlotTarget =
+      Boolean((targetBay as { booking_mode?: string | null } | null | undefined)?.booking_mode) &&
+      String((targetBay as { booking_mode?: string | null }).booking_mode).toUpperCase() === 'TIME_SLOT';
+    const isNonBay =
+      Boolean((targetBay as { facility_type?: string | null } | null | undefined)?.facility_type) &&
+      String((targetBay as { facility_type?: string | null }).facility_type).toUpperCase() !== 'BAY';
+    const fallbackGapMin =
+      isTimeSlotTarget || isNonBay
+        ? 0
+        : (typeof targetBay?.inter_gap_min === 'number' && targetBay.inter_gap_min >= 0
+            ? targetBay.inter_gap_min
+            : INTER_RESERVATION_GAP_MIN);
+
     if (!targetBay) {
-      return refNowMs + fallbackWaitMin * 60 * 1000;
+      return refNowMs + (fallbackWaitMin + fallbackGapMin) * 60 * 1000;
+    }
+    if (
+      !targetBay.is_paused &&
+      typeof targetBay.next_queue_start_epoch_ms === 'number' &&
+      targetBay.next_queue_start_epoch_ms > 0
+    ) {
+      return Math.max(refNowMs, targetBay.next_queue_start_epoch_ms);
     }
     if (
       !targetBay.is_paused &&
       typeof targetBay.available_from_epoch_ms === 'number' &&
       targetBay.available_from_epoch_ms > 0
     ) {
-      return Math.max(refNowMs, targetBay.available_from_epoch_ms);
+      return Math.max(refNowMs, targetBay.available_from_epoch_ms + fallbackGapMin * 60 * 1000);
     }
-    const availStr = TimeMaster.formatAvailableFromTime(targetBay);
-    const parsedAvail = availStr && availStr !== '종료' ? TimeMaster.parseSessionEnd(availStr, refNow) : null;
-    if (parsedAvail && !Number.isNaN(parsedAvail.getTime())) {
-      return Math.max(refNowMs, parsedAvail.getTime());
+    const queueStartStr = TimeMaster.formatNextQueueStartTime(targetBay);
+    const parsedQueueStart =
+      queueStartStr && queueStartStr !== '종료'
+        ? TimeMaster.parseSessionEnd(queueStartStr, refNow)
+        : null;
+    if (parsedQueueStart && !Number.isNaN(parsedQueueStart.getTime())) {
+      return Math.max(refNowMs, parsedQueueStart.getTime());
     }
-    return refNowMs + fallbackWaitMin * 60 * 1000;
+    return refNowMs + (fallbackWaitMin + fallbackGapMin) * 60 * 1000;
   };
 
   let startEpochMs = refNowMs;

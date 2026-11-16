@@ -355,34 +355,37 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                   : isPreCheckedInWait
                     ? (lang === 'KO' ? '사전체크인 확인표 출력' : 'Print Pre-Checkin Slip')
                     : isReadyToEnter
-                      ? (lang === 'KO' ? '⛳ 체크인 및 타석 입실 시작' : 'Start Session Now')
+                      ? (lang === 'KO' ? '체크인 및 타석 입실 시작' : 'Start Session Now')
                       : isFutureTime
-                        ? (lang === 'KO' ? '📌 사전 체크인 접수' : 'Pre Check-in')
-                        : (lang === 'KO' ? '📌 체크인 및 입실 시작' : 'Complete Check-in');
+                        ? (lang === 'KO' ? '사전 체크인 접수' : 'Pre Check-in')
+                        : (lang === 'KO' ? '체크인 및 입실 시작' : 'Complete Check-in');
+
+                const endFormatted = formatResTime(res.end_time) || '종료';
+                const isActionTactile = !isTicketPrintState && !isProcessing;
 
                 return (
                   <div
                     key={res.res_id}
                     style={{
-                      background: '#f5f5f7',
+                      background: isReadyToEnter ? 'linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%)' : '#f5f5f7',
                       borderRadius: '26px',
-                      border: isReadyToEnter ? '2px solid #0071e3' : '1.5px solid #e5e5ea',
+                      border: isReadyToEnter ? '2px solid #60a5fa' : isTicketPrintState ? '1.5px solid #cbd5e1' : '1.5px solid #e2e8f0',
                       padding: '26px',
                       display: 'flex',
                       flexDirection: 'column',
                       justifyContent: 'space-between',
                       gap: '18px',
-                      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.04)'
+                      boxShadow: isReadyToEnter ? '0 10px 26px rgba(0, 113, 227, 0.12)' : '0 8px 24px rgba(0, 0, 0, 0.04)'
                     }}
                   >
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px' }}>
                         <span
                           style={{
-                            fontSize: '26px',
+                            fontSize: '30px',
                             fontWeight: 900,
                             color: '#1d1d1f',
-                            letterSpacing: '-0.6px'
+                            letterSpacing: '-0.7px'
                           }}
                         >
                           {formatResourceTitle(res)}
@@ -403,7 +406,9 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                                 ? '1px solid rgba(0, 113, 227, 0.25)'
                                 : '1px solid #fcd34d',
                             padding: '5px 12px',
-                            borderRadius: '999px'
+                            borderRadius: '999px',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
                           }}
                         >
                           {badgeLabel}
@@ -413,30 +418,54 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                       <div
                         style={{
                           background: '#ffffff',
-                          borderRadius: '18px',
-                          border: '1px solid #e5e5ea',
-                          padding: '16px 18px',
+                          borderRadius: '20px',
+                          border: isReadyToEnter
+                            ? '1.5px solid #93c5fd'
+                            : isTicketPrintState
+                              ? '1.5px solid #d1fae5'
+                              : '1.5px solid #e2e8f0',
+                          padding: '18px 20px',
                           display: 'flex',
                           flexDirection: 'column',
                           gap: '10px',
-                          fontSize: '15px',
-                          color: '#515154'
+                          boxShadow: '0 4px 12px rgba(15, 23, 42, 0.03)',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Clock size={17} color="#1d1d1f" />
-                          <span>
-                            예약시간:{' '}
-                            <strong style={{ color: '#1d1d1f', fontWeight: 800 }}>
-                              {formatResTime(res.start_time) || '정시'} ~ {formatResTime(res.end_time) || '종료'}
-                            </strong>{' '}
-                            ({res.duration_min}분)
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 800, color: '#64748b' }}>
+                            <Clock size={15} color="#475569" />
+                            {lang === 'KO' ? '예약 이용 시간' : 'Reserved Time'}
+                          </span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 700, color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                            <Calendar size={14} color="#94a3b8" />
+                            {res.res_date}
                           </span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Calendar size={17} color="#86868b" />
-                          <span>
-                            예약일자: <strong style={{ color: '#1d1d1f', fontWeight: 700 }}>{res.res_date}</strong>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                          <strong
+                            style={{
+                              fontSize: '28px',
+                              fontWeight: 900,
+                              color: isReadyToEnter ? '#0071e3' : isTicketPrintState ? '#047857' : '#1d1d1f',
+                              letterSpacing: '-0.8px',
+                              lineHeight: 1.1,
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
+                            {startFormatted} ~ {endFormatted}
+                          </strong>
+                          <span
+                            style={{
+                              fontSize: '14px',
+                              fontWeight: 800,
+                              color: '#1d1d1f',
+                              background: '#f1f5f9',
+                              padding: '4px 11px',
+                              borderRadius: '999px',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
+                            {res.duration_min}분
                           </span>
                         </div>
                       </div>
@@ -447,22 +476,39 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                         type="button"
                         onClick={() => handleVerifyCheckin(res.res_id)}
                         disabled={isProcessing}
-                        style={{
-                          width: '100%',
-                          height: '60px',
-                          borderRadius: '999px',
-                          background: isTicketPrintState ? '#ffffff' : '#1d1d1f',
-                          color: isTicketPrintState ? '#1d1d1f' : '#ffffff',
-                          fontSize: '17px',
-                          fontWeight: 800,
-                          border: isTicketPrintState ? '1.5px solid #d2d2d7' : 'none',
-                          cursor: isProcessing ? 'wait' : 'pointer',
-                          display: 'flex',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          gap: '10px',
-                          boxShadow: isTicketPrintState ? '0 2px 8px rgba(0, 0, 0, 0.04)' : '0 8px 20px rgba(0, 0, 0, 0.16)'
-                        }}
+                        className={
+                          isActionTactile
+                            ? `decision-tactile-btn kiosk-action-tactile-btn ${isReadyToEnter ? 'decision-btn-blue' : 'decision-btn-emerald'}`
+                            : undefined
+                        }
+                        style={
+                          isActionTactile
+                            ? {
+                                width: '100%',
+                                minWidth: 0,
+                                height: '72px',
+                                padding: '0 24px',
+                                fontSize: '20px',
+                              }
+                            : {
+                                width: '100%',
+                                height: '66px',
+                                borderRadius: '999px',
+                                background: isProcessing ? '#e5e7eb' : '#ffffff',
+                                color: isProcessing ? '#64748b' : '#1d1d1f',
+                                fontSize: '18px',
+                                fontWeight: 800,
+                                border: isProcessing ? 'none' : '1.5px solid #cbd5e1',
+                                cursor: isProcessing ? 'wait' : 'pointer',
+                                display: 'flex',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                gap: '10px',
+                                boxShadow: isProcessing
+                                  ? 'none'
+                                  : 'inset 0 -3px 0 rgba(15, 23, 42, 0.06), 0 4px 12px rgba(0, 0, 0, 0.05)',
+                              }
+                        }
                       >
                         {isProcessing ? (
                           <>
@@ -476,9 +522,9 @@ export const CheckinSelect: React.FC<CheckinSelectProps> = ({
                           </>
                         ) : (
                           <>
-                            <CheckCircle2 size={20} />
-                            {buttonLabel}
-                            <ArrowRight size={20} />
+                            <CheckCircle2 size={22} style={{ position: 'relative', zIndex: 2 }} />
+                            <span style={{ position: 'relative', zIndex: 2 }}>{buttonLabel}</span>
+                            <ArrowRight size={22} strokeWidth={2.6} className="decision-btn-arrow" style={{ position: 'relative', zIndex: 2 }} />
                           </>
                         )}
                       </button>

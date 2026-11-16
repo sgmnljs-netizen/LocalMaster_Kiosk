@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ShoppingBag, X, Layers, Hand, Clock } from 'lucide-react';
+import { ArrowRight, Clock, Compass, Layers, ShieldAlert, ShoppingBag, UserCheck, X } from 'lucide-react';
 import { api, Bay, Product } from '../services/api';
 import {
   buildKioskProductSpecSummary,
@@ -11,21 +11,27 @@ import {
 import { isKioskChannelProduct } from '../utils/kioskPurchaseEligibility';
 import { TimeMaster } from '../utils/timeMaster';
 
-/** 샴페인 플래티넘 메탈 스마트 IC 칩 (EMV Chip) 그래픽 */
-const EmvChip: React.FC = () => (
-  <svg width="36" height="26" viewBox="0 0 36 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
-    <rect width="36" height="26" rx="5" fill="url(#shop-chip-grad)" stroke="#ca8a04" strokeWidth="1.2" />
-    <path d="M11 0V26M25 0V26M0 13H36M11 8H25M11 18H25" stroke="#a16207" strokeWidth="0.9" strokeLinecap="round" opacity="0.6" />
-    <rect x="13" y="8.5" width="10" height="9" rx="2" fill="#fef9c3" stroke="#ca8a04" strokeWidth="0.8" />
-    <defs>
-      <linearGradient id="shop-chip-grad" x1="0" y1="0" x2="36" y2="26" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#fef9c3" />
-        <stop offset="0.5" stopColor="#fef08a" />
-        <stop offset="1" stopColor="#fde047" />
-      </linearGradient>
-    </defs>
-  </svg>
-);
+const resolveProductTypeMeta = (
+  resolvedLogicType: string,
+  isWaitlist: boolean
+): { label: string; dotColor: string } => {
+  if (resolvedLogicType === 'DAILY') {
+    return { label: '일일 타석권', dotColor: isWaitlist ? '#d97706' : '#0071e3' };
+  }
+  if (resolvedLogicType === 'COUNT') {
+    return { label: '횟수 이용권', dotColor: '#0071e3' };
+  }
+  if (resolvedLogicType === 'TIME') {
+    return { label: '시간 정액권', dotColor: '#0891b2' };
+  }
+  if (resolvedLogicType === 'LESSON') {
+    return { label: '프로 레슨권', dotColor: '#7c3aed' };
+  }
+  if (resolvedLogicType === 'RETAIL' || resolvedLogicType === 'RENTAL') {
+    return { label: '부가 서비스', dotColor: '#475569' };
+  }
+  return { label: '정기 회원권', dotColor: '#059669' };
+};
 
 interface ProductShopProps {
   memberNo?: string;
@@ -48,6 +54,7 @@ interface ProductShopProps {
   isStore24h?: boolean;
   nowOverride?: Date;
   initialProducts?: Product[];
+  onMemberAuthClick?: () => void;
   onProductSelected: (product: Product) => void;
   onCancel: () => void;
 }
@@ -80,6 +87,7 @@ export const ProductShop: React.FC<ProductShopProps> = ({
   isStore24h = false,
   nowOverride,
   initialProducts,
+  onMemberAuthClick,
   onProductSelected,
   onCancel
 }) => {
@@ -199,10 +207,13 @@ export const ProductShop: React.FC<ProductShopProps> = ({
 
   return (
     <div 
+      className={isDailyPurpose ? 'kiosk-ultra-scrollbar' : undefined}
       style={{
         width: '100%',
         maxWidth: '980px',
-        margin: isDailyPurpose ? '0 auto' : '0 auto 140px auto',
+        maxHeight: isDailyPurpose ? 'calc(100vh - 170px)' : undefined,
+        overflowY: isDailyPurpose ? 'auto' : undefined,
+        margin: isDailyPurpose ? '0 auto 76px auto' : '0 auto 140px auto',
         padding: '44px 48px',
         display: 'flex',
         flexDirection: 'column',
@@ -215,87 +226,122 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         fontFamily: '-apple-system, BlinkMacSystemFont, "Pretendard", "Malgun Gothic", sans-serif'
       }}
     >
-      {/* 상품 매대 헤더 (스페이스 블랙 원형 아이콘 + 에메랄드 인디케이터 닷 + 우측 56px 볼드 원형 닫기 버튼) */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <div style={{
-              background: '#1d1d1f',
+      {/* 상품 매대 헤더 (Apple HIG 통일 — 이중 헤일로 아이콘 + 38px 타이틀 + 60px 닫기 버튼) */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+          <div
+            style={{
+              padding: '7px',
               borderRadius: '50%',
-              width: '56px',
-              height: '56px',
+              background: isDailyPurpose ? 'rgba(0, 113, 227, 0.12)' : 'rgba(5, 150, 105, 0.12)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 8px 20px rgba(17, 24, 39, 0.16)'
-            }}>
+              flexShrink: 0,
+            }}
+          >
+            <div
+              style={{
+                background: isDailyPurpose
+                  ? 'linear-gradient(145deg, #1a8cff 0%, #0071e3 100%)'
+                  : 'linear-gradient(145deg, #10b981 0%, #059669 100%)',
+                borderRadius: '50%',
+                width: '56px',
+                height: '56px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: isDailyPurpose
+                  ? '0 8px 20px rgba(0, 113, 227, 0.25)'
+                  : '0 8px 20px rgba(5, 150, 105, 0.25)',
+              }}
+            >
               <ShoppingBag size={26} color="#ffffff" strokeWidth={2.5} />
             </div>
-            <div style={{
-              position: 'absolute',
-              top: 2,
-              right: 2,
-              width: '14px',
-              height: '14px',
-              borderRadius: '50%',
-              background: '#10b981',
-              border: '2.5px solid #ffffff'
-            }} />
           </div>
           <div>
-            <h2 style={{ fontSize: '34px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.8px', lineHeight: 1.15 }}>
+            <h2 style={{ fontSize: '38px', fontWeight: 900, color: '#1d1d1f', margin: 0, letterSpacing: '-0.9px', lineHeight: 1.15 }}>
               {isDailyPurpose ? '일일 타석권 선택 및 결제' : '회원권 및 정기 서비스 구매'}
             </h2>
             {memberName ? (
-              <p style={{ fontSize: '15px', color: '#64748b', fontWeight: 600, marginTop: '6px', margin: '6px 0 0 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '2px 9px', borderRadius: '999px', fontSize: '12px', fontWeight: 800 }}>
+              <p style={{ fontSize: '17px', color: '#4b5563', fontWeight: 700, margin: '6px 0 0 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '3px 10px', borderRadius: '999px', fontSize: '13px', fontWeight: 800 }}>
                   인증 완료
                 </span>
                 <span>회원번호: <strong style={{ color: '#0f172a', fontWeight: 800 }}>{memberNo} ({memberName})</strong> 님 전용 구매</span>
               </p>
             ) : (
-              <p style={{ fontSize: '15px', color: '#d97706', fontWeight: 700, marginTop: '5px', margin: '5px 0 0 0' }}>
-                {isDailyPurpose 
-                  ? '※ 원하시는 이용 시간(N분)을 선택하여 결제를 진행해 주세요.'
-                  : '※ 회원 전용 상품으로 정기 회원권 및 부가 서비스를 구매하실 수 있습니다.'}
+              <p style={{ fontSize: '18px', color: '#515154', fontWeight: 700, margin: '6px 0 0 0' }}>
+                {isDailyPurpose
+                  ? '원하시는 이용 시간을 선택하시면 바로 결제로 이어집니다.'
+                  : '회원 전용 상품으로 정기 회원권 및 부가 서비스를 구매하실 수 있습니다.'}
               </p>
             )}
             {isDailyPurpose && typeof maxAssignableMin === 'number' && maxAssignableMin > 0 && (
-              <p style={{ fontSize: '14px', color: '#dc2626', fontWeight: 800, marginTop: '4px', margin: '4px 0 0 0' }}>
-                ⚠️ 선택하신 타석은 다음 예약({nextLimitResStartTime || '예정'}) 전까지 최대 [{maxAssignableMin}분] 이용 가능합니다.
+              <p style={{ fontSize: '15px', color: '#b45309', fontWeight: 800, margin: '6px 0 0 0' }}>
+                선택하신 타석은 다음 예약({nextLimitResStartTime || '예정'}) 전까지 최대 [{maxAssignableMin}분] 이용 가능합니다.
               </p>
             )}
           </div>
         </div>
 
-        {/* 닫기 버튼 (56px 애플 볼드 원형 버튼 표준) */}
-        <button 
-          onClick={onCancel}
-          aria-label="돌아가기"
-          style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            background: '#f5f5f7',
-            border: '1.5px solid #e5e5ea',
-            color: '#1d1d1f',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-            transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
-            flexShrink: 0
-          }}
-          onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.92)'; e.currentTarget.style.background = '#e5e5ea'; }}
-          onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = '#f5f5f7'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = '#f5f5f7'; }}
-        >
-          <X size={28} strokeWidth={2.4} />
-        </button>
+        {/* 우측 액션: 모달 내 회원 인증 버튼 + 60px 애플 볼드 원형 닫기 버튼 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+          {onMemberAuthClick && !memberNo && (
+            <button
+              type="button"
+              data-testid="product-shop-member-auth-btn"
+              onClick={onMemberAuthClick}
+              style={{
+                height: '54px',
+                padding: '0 20px',
+                borderRadius: '999px',
+                background: '#f5f5f7',
+                border: '1.5px solid #d1d5db',
+                color: '#1d1d1f',
+                fontSize: '16px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                whiteSpace: 'nowrap',
+                boxShadow: '0 3px 10px rgba(0, 0, 0, 0.05)',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <UserCheck size={19} strokeWidth={2.5} />
+              <span>회원 인증 / 로그인</span>
+            </button>
+          )}
+          <button 
+            onClick={onCancel}
+            aria-label="돌아가기"
+            style={{
+              width: '60px',
+              height: '60px',
+              borderRadius: '50%',
+              background: '#f1f5f9',
+              border: '2px solid #cbd5e1',
+              color: '#334155',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+              transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
+              flexShrink: 0
+            }}
+            onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.92)'; e.currentTarget.style.background = '#e2e8f0'; }}
+            onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = '#f1f5f9'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = '#f1f5f9'; }}
+          >
+            <X size={28} strokeWidth={2.6} />
+          </button>
+        </div>
       </div>
 
-      {/* 일일 타석 배정 모드 시 선택 타석 + 즉시배정/대기예약 시맨틱 요약 바 */}
+      {/* 일일 타석 배정 모드 시 2열 Double-Check 배정 티켓 (AssetSelectModal 동일 위계) */}
       {isDailyPurpose && selectedBay && (() => {
         const shopPreview = TimeMaster.buildBayAllocationPreview({
           bay: selectedBay,
@@ -310,46 +356,77 @@ export const ProductShop: React.FC<ProductShopProps> = ({
           <div
             data-testid="product-shop-allocation-banner"
             style={{
-              borderRadius: '20px',
-              padding: '14px 22px',
+              borderRadius: '24px',
+              padding: '16px 20px',
               background: shopPreview.isWaitlist ? '#fffbeb' : '#f0fdf4',
-              border: shopPreview.isWaitlist ? '2px solid #f59e0b' : '1.5px solid #34d399',
+              border: shopPreview.isWaitlist ? '2px solid #f59e0b' : '2px solid #6ee7b7',
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '14px',
-              flexWrap: 'wrap',
+              flexDirection: 'column',
+              gap: '10px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span
-                style={{
-                  padding: '6px 15px',
-                  borderRadius: '999px',
-                  background: shopPreview.isWaitlist ? '#d97706' : '#059669',
-                  color: '#ffffff',
-                  fontSize: '16px',
-                  fontWeight: 900,
-                }}
-              >
-                {shopPreview.modeBadgeText}
-              </span>
-              <span style={{ fontSize: '24px', fontWeight: 950, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                {shopPreview.bayWithFloorLabel}
-              </span>
-            </div>
-            <span
+            <div
               style={{
-                fontSize: '18px',
-                fontWeight: 900,
-                color: shopPreview.isWaitlist ? '#b45309' : '#047857',
-                fontVariantNumeric: 'tabular-nums',
+                background: '#ffffff',
+                borderRadius: '18px',
+                padding: '16px 24px',
+                border: shopPreview.isWaitlist ? '1.5px solid #fde68a' : '1.5px solid #a7f3d0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '20px',
               }}
             >
-              {shopPreview.isWaitlist
-                ? `⏰ ${shopPreview.startHhmm} 시작 예정 (상품 선택 시 종료 시각 표시)`
-                : `⚡ ${shopPreview.startHhmm} 즉시 시작 (상품 선택 시 종료 시각 표시)`}
-            </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '15px', fontWeight: 700, color: '#6e6e73' }}>선택 타석</span>
+                  <span
+                    style={{
+                      padding: '3px 11px',
+                      borderRadius: '999px',
+                      background: shopPreview.isWaitlist ? '#d97706' : '#059669',
+                      color: '#ffffff',
+                      fontSize: '13.5px',
+                      fontWeight: 900,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {shopPreview.modeBadgeText}
+                  </span>
+                </div>
+                <span style={{ fontSize: '36px', fontWeight: 950, color: '#1d1d1f', letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums', lineHeight: 1.05, whiteSpace: 'nowrap' }}>
+                  {shopPreview.bayWithFloorLabel}
+                </span>
+              </div>
+
+              <div style={{ width: '1.5px', height: '52px', background: '#e5e7eb', flexShrink: 0 }} />
+
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', textAlign: 'right', gap: '4px', minWidth: 0 }}>
+                <span style={{ fontSize: '15px', fontWeight: 700, color: '#6e6e73' }}>
+                  {shopPreview.isWaitlist ? '대기 시작 안내' : '입장 안내'}
+                </span>
+                <span
+                  style={{
+                    fontSize: '30px',
+                    fontWeight: 950,
+                    color: shopPreview.isWaitlist ? '#b45309' : '#059669',
+                    fontVariantNumeric: 'tabular-nums',
+                    letterSpacing: '-0.6px',
+                    lineHeight: 1.05,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {shopPreview.isWaitlist
+                    ? `${shopPreview.startHhmm} 입장 예정`
+                    : `${shopPreview.startHhmm} 즉시 시작`}
+                </span>
+                <span style={{ fontSize: '14.5px', fontWeight: 700, color: shopPreview.isWaitlist ? '#92400e' : '#047857', whiteSpace: 'nowrap' }}>
+                  {shopPreview.isWaitlist
+                    ? `약 ${shopPreview.waitMinutes}분 대기 · 아래 시간 선택 시 종료 시각 확정`
+                    : '아래 상품에서 이용 시간(종료 시각)을 선택하세요'}
+                </span>
+              </div>
+            </div>
           </div>
         );
       })()}
@@ -404,340 +481,504 @@ export const ProductShop: React.FC<ProductShopProps> = ({
         </div>
       )}
 
-      {/* 💳 애플 럭셔리 VIP 멤버십 카드 그리드 (2열) */}
-      <div 
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: '20px',
-          minHeight: '300px'
-        }}
-      >
-        {loading ? (
-          <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#86868b', fontWeight: 700 }}>
-            상품 정보를 로딩하고 있습니다...
-          </div>
-        ) : filteredProducts.length > 0 ? (
-          filteredProducts.map((prod) => {
-            const isDaily = checkIfDaily(prod);
-            const durationMin = getDurationMin(prod);
-            const specSummary = buildKioskProductSpecSummary(prod, {
-              allStoreFloors,
-              zoneLabelMap,
-              hasActiveMembership,
-            });
+      {/* 💳 Apple HIG 통일 카드 그리드 (활성 2열 균일 높이 + 이용 불가 하단 1줄 분리) */}
+      {loading ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '260px', fontSize: '20px', color: '#86868b', fontWeight: 700 }}>
+          상품 정보를 로딩하고 있습니다...
+        </div>
+      ) : filteredProducts.length > 0 ? (() => {
+        const preparedItems = filteredProducts.map((prod) => {
+          const isDaily = checkIfDaily(prod);
+          const durationMin = getDurationMin(prod);
+          const specSummary = buildKioskProductSpecSummary(prod, {
+            allStoreFloors,
+            zoneLabelMap,
+            hasActiveMembership,
+          });
+          const effectiveSalePrice =
+            prod.sale_price !== undefined && prod.sale_price !== null && prod.sale_price > 0
+              ? prod.sale_price
+              : prod.standard_price;
+          const hasSaleDiscount = prod.standard_price > effectiveSalePrice;
+          const hasGradeDiscount = Boolean(discountRate && discountRate > 0);
+          const gradeDiscountAmt = hasGradeDiscount ? Math.round(effectiveSalePrice * (discountRate! / 100)) : 0;
+          const finalPrice = Math.max(0, effectiveSalePrice - gradeDiscountAmt);
+          const hasAnyDiscount = hasSaleDiscount || hasGradeDiscount;
+          const priceFormatted = finalPrice.toLocaleString();
+          const customBadge = prod.meta_data?.pos_button?.badge || prod.meta_data?.badges?.[0] || prod.meta_data?.badge || null;
+          const genderInfo = normalizeTargetGenderLabel(prod);
+          const targetGenderNorm = genderInfo.code;
+          const genderBadge = genderInfo.label;
+          const dailyEligibility =
+            isDailyPurpose && isDaily
+              ? evaluateDailyPassEligibility(prod, {
+                  maxAssignableMin,
+                  nextLimitResStartTime,
+                  selectedBay,
+                  now: nowOverride,
+                  allStoreFloors,
+                  zoneLabelMap,
+                  isStoreClosed,
+                  storeClosedReason,
+                  storeOpenTime,
+                  storeCloseTime,
+                  isStore24h,
+                })
+              : null;
+          const isCardDisabled = Boolean(dailyEligibility && !dailyEligibility.eligible);
+          const displayName = prod.meta_data?.display_nm || prod.prod_nm;
+          const cardPreview =
+            isDailyPurpose && selectedBay && durationMin > 0
+              ? TimeMaster.buildBayAllocationPreview({
+                  bay: selectedBay,
+                  durationMin,
+                  prepareMin,
+                  storeCloseTime,
+                  storeOpenTime,
+                  isStore24h,
+                  now: nowOverride,
+                })
+              : null;
+          return {
+            prod,
+            durationMin,
+            specSummary,
+            hasGradeDiscount,
+            finalPrice,
+            hasAnyDiscount,
+            priceFormatted,
+            customBadge,
+            targetGenderNorm,
+            genderBadge,
+            dailyEligibility,
+            isCardDisabled,
+            displayName,
+            cardPreview,
+          };
+        });
 
-            // 1. 실제 판매 기준 가격 (sale_price 우선 참조) 및 정상가 취소선 계산
-            const effectiveSalePrice =
-              prod.sale_price !== undefined && prod.sale_price !== null && prod.sale_price > 0
-                ? prod.sale_price
-                : prod.standard_price;
-            const hasSaleDiscount = prod.standard_price > effectiveSalePrice;
-            const hasGradeDiscount = Boolean(discountRate && discountRate > 0);
-            const gradeDiscountAmt = hasGradeDiscount ? Math.round(effectiveSalePrice * (discountRate! / 100)) : 0;
-            const finalPrice = Math.max(0, effectiveSalePrice - gradeDiscountAmt);
-            const hasAnyDiscount = hasSaleDiscount || hasGradeDiscount;
-            const priceFormatted = finalPrice.toLocaleString();
+        const activeItems = preparedItems.filter((item) => !item.isCardDisabled);
+        const disabledItems = preparedItems.filter((item) => item.isCardDisabled);
 
-            // 2. 배지(badge), 성별 제한, 일일권 실시간 이용 적합성(시간/구역/요일) 동적 반영
-            const customBadge = prod.meta_data?.pos_button?.badge || prod.meta_data?.badges?.[0] || prod.meta_data?.badge || null;
-            const genderInfo = normalizeTargetGenderLabel(prod);
-            const targetGenderNorm = genderInfo.code;
-            const genderBadge = genderInfo.label;
+        const handleProductItemClick = (item: (typeof preparedItems)[number]) => {
+          const { prod, isCardDisabled, dailyEligibility, targetGenderNorm } = item;
+          if (isCardDisabled && dailyEligibility) {
+            setWarningTitle(dailyEligibility.modalTitle || '이용 제한 안내');
+            setWarningMessage(dailyEligibility.modalMessage || '현재 선택하실 수 없는 상품입니다.');
+            return;
+          }
+          if (!memberNo && (prod.logic_type || '').toUpperCase() !== 'DAILY' && !checkIfDaily(prod)) {
+            setWarningTitle('회원 인증 필요');
+            setWarningMessage('회원 전용 상품입니다. 먼저 회원 인증을 진행해 주세요.');
+            return;
+          }
+          if (targetGenderNorm === 'M' || targetGenderNorm === 'F') {
+            const normMemGender = String(memberGender || '').toUpperCase();
+            const memG = normMemGender === 'MALE' || normMemGender === '남' ? 'M' : normMemGender === 'FEMALE' || normMemGender === '여' ? 'F' : normMemGender;
+            if (memG && memG !== targetGenderNorm) {
+              const reqLabel = targetGenderNorm === 'F' ? '여성' : '남성';
+              setWarningTitle('상품 구매 제한 안내');
+              setWarningMessage(`선택하신 상품은 [${reqLabel} 회원 전용] 상품입니다.\n다른 상품을 선택해 주세요.`);
+              return;
+            }
+          }
+          onProductSelected(prod);
+        };
 
-            const dailyEligibility =
-              isDailyPurpose && isDaily
-                ? evaluateDailyPassEligibility(prod, {
-                    maxAssignableMin,
-                    nextLimitResStartTime,
-                    selectedBay,
-                    now: nowOverride,
-                    allStoreFloors,
-                    zoneLabelMap,
-                    isStoreClosed,
-                    storeClosedReason,
-                    storeOpenTime,
-                    storeCloseTime,
-                    isStore24h,
-                  })
-                : null;
-            const isCardDisabled = Boolean(dailyEligibility && !dailyEligibility.eligible);
-            const displayName = prod.meta_data?.display_nm || prod.prod_nm;
-
-            return (
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            {activeItems.length > 0 && (
               <div
-                key={prod.prod_cd}
-                data-testid={`product-card-${prod.prod_cd}`}
-                data-duration={durationMin}
-                data-disabled={isCardDisabled ? 'true' : 'false'}
-                onClick={() => {
-                  if (isCardDisabled && dailyEligibility) {
-                    setWarningTitle(dailyEligibility.modalTitle || '이용 제한 안내');
-                    setWarningMessage(dailyEligibility.modalMessage || '현재 선택하실 수 없는 상품입니다.');
-                    return;
-                  }
-                  if (!memberNo && (prod.logic_type || '').toUpperCase() !== 'DAILY' && !checkIfDaily(prod)) {
-                    setWarningTitle('회원 인증 필요');
-                    setWarningMessage('회원 전용 상품입니다. 먼저 회원 인증을 진행해 주세요.');
-                    return;
-                  }
-                  if (targetGenderNorm === 'M' || targetGenderNorm === 'F') {
-                    const normMemGender = String(memberGender || '').toUpperCase();
-                    const memG = normMemGender === 'MALE' || normMemGender === '남' ? 'M' : normMemGender === 'FEMALE' || normMemGender === '여' ? 'F' : normMemGender;
-                    if (memG && memG !== targetGenderNorm) {
-                      const reqLabel = targetGenderNorm === 'F' ? '여성' : '남성';
-                      setWarningTitle('상품 구매 제한 안내');
-                      setWarningMessage(`선택하신 상품은 [${reqLabel} 회원 전용] 상품입니다.\n다른 상품을 선택해 주세요.`);
-                      return;
-                    }
-                  }
-                  onProductSelected(prod);
-                }}
                 style={{
-                  padding: '24px 26px 22px 26px',
-                  borderRadius: '24px',
-                  border: isCardDisabled ? '1.5px dashed #cbd5e1' : '1.5px solid #e2e8f0',
-                  background: isCardDisabled
-                    ? '#f8fafc'
-                    : 'linear-gradient(135deg, #ffffff 0%, #fbfcfd 45%, #f4f6f8 100%)',
-                  opacity: isCardDisabled ? 0.56 : 1,
-                  cursor: isCardDisabled ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  gap: '18px',
-                  boxShadow: isCardDisabled ? 'none' : '0 8px 24px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.03)',
-                  transition: 'all 0.22s cubic-bezier(0.25, 1, 0.5, 1)',
-                  position: 'relative',
-                  overflow: 'hidden',
-                  boxSizing: 'border-box'
-                }}
-                onMouseEnter={(e) => {
-                  if (isCardDisabled) return;
-                  e.currentTarget.style.borderColor = '#059669';
-                  e.currentTarget.style.transform = 'translateY(-3px)';
-                  e.currentTarget.style.boxShadow = '0 16px 36px rgba(5, 150, 105, 0.14), 0 2px 8px rgba(0, 0, 0, 0.04)';
-                }}
-                onMouseLeave={(e) => {
-                  if (isCardDisabled) return;
-                  e.currentTarget.style.borderColor = '#e2e8f0';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '0 8px 24px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.03)';
+                  display: 'grid',
+                  gridTemplateColumns: activeItems.length === 1 ? 'minmax(0, 480px)' : 'repeat(2, 1fr)',
+                  justifyContent: activeItems.length === 1 ? 'center' : 'stretch',
+                  gap: '20px',
                 }}
               >
-                {/* [1단: 카드 헤더 — 샴페인 플래티넘 스마트 IC 칩 & 각인 & 우측 뱃지] */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <EmvChip />
-                    <span style={{ fontSize: '12px', fontWeight: 900, color: '#64748b', letterSpacing: '1.2px' }}>
-                      {specSummary.headerTypeBadge}
-                    </span>
-                  </div>
+                {activeItems.map((item, idx) => {
+                  const {
+                    prod,
+                    durationMin,
+                    specSummary,
+                    hasGradeDiscount,
+                    hasAnyDiscount,
+                    priceFormatted,
+                    customBadge,
+                    targetGenderNorm,
+                    genderBadge,
+                    displayName,
+                    cardPreview,
+                  } = item;
+                  const isWaitlistCard = Boolean(cardPreview?.isWaitlist);
+                  const typeMeta = resolveProductTypeMeta(specSummary.resolvedLogicType, isWaitlistCard);
+                  const ctaColorClass =
+                    isDailyPurpose
+                      ? (isWaitlistCard ? 'decision-btn-amber' : 'decision-btn-blue')
+                      : 'decision-btn-emerald';
+                  const hasTimeBenefit =
+                    specSummary.resolvedLogicType !== 'RETAIL' &&
+                    specSummary.resolvedLogicType !== 'RENTAL' &&
+                    durationMin > 0;
+                  const nonTimeTokens = specSummary.benefitTokens.filter((tok) => {
+                    const combined = `${tok.label}${tok.highlight ?? ''}${tok.suffix ?? ''}`;
+                    return !(durationMin > 0 && combined.includes(`${durationMin}분`));
+                  });
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {genderBadge && (
-                      <span style={{
-                        fontSize: '12px',
-                        fontWeight: 800,
-                        padding: '5px 11px',
-                        borderRadius: '999px',
-                        background: targetGenderNorm === 'F' ? '#fdf2f8' : '#eff6ff',
-                        color: targetGenderNorm === 'F' ? '#db2777' : '#1d4ed8',
-                        border: targetGenderNorm === 'F' ? '1px solid #fbcfe8' : '1px solid #bfdbfe'
-                      }}>
-                        {genderBadge}
-                      </span>
-                    )}
-                    {isCardDisabled && dailyEligibility?.badgeLabel ? (
-                      <span style={{
-                        fontSize: '12px',
-                        fontWeight: 800,
-                        padding: '5px 12px',
-                        borderRadius: '999px',
-                        background: '#fef3c7',
-                        color: '#b45309',
-                        border: '1px solid #fcd34d'
-                      }}>
-                        {dailyEligibility.badgeLabel}
-                      </span>
-                    ) : customBadge ? (
-                      <span style={{
-                        fontSize: '12px',
-                        fontWeight: 800,
-                        padding: '5px 12px',
-                        borderRadius: '999px',
-                        background: '#ecfdf5',
-                        color: '#047857',
-                        border: '1px solid #a7f3d0'
-                      }}>
-                        {customBadge}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-
-                {/* [2단: 카드 본체 — 24px 볼드 상품명 & 1회 배정시간 시그니처 뱃지 & 유동적 혜택·제한 라인] */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', marginTop: '2px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                    <h3 style={{ fontSize: '24px', fontWeight: 900, color: '#0f172a', letterSpacing: '-0.6px', margin: 0, lineHeight: 1.2 }}>
-                      {displayName}
-                    </h3>
-
-                    {specSummary.resolvedLogicType !== 'RETAIL' && specSummary.resolvedLogicType !== 'RENTAL' && (
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        padding: '5px 11px',
-                        borderRadius: '8px',
-                        fontSize: '13px',
-                        fontWeight: 800,
-                        whiteSpace: 'nowrap',
-                        background: '#f1f5f9',
-                        color: '#1e293b',
-                        border: '1px solid #e2e8f0',
-                        flexShrink: 0
-                      }}>
-                        <Clock size={13} strokeWidth={2.4} style={{ color: '#059669' }} />
-                        <span>1회 {durationMin}분 배정</span>
-                      </span>
-                    )}
-                  </div>
-
-                  {/* 1열 가로 기본 제공량 요약 라인 (허위 '무제한' 제거) */}
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '7px',
-                    flexWrap: 'wrap',
-                    fontSize: '13px',
-                    color: '#475569',
-                    fontWeight: 700,
-                    padding: '2px 0'
-                  }}>
-                    {specSummary.benefitTokens.map((tok, tokIdx) => (
-                      <React.Fragment key={tokIdx}>
-                        {tokIdx > 0 && <span style={{ color: '#cbd5e1' }}>·</span>}
-                        <span>
-                          {tok.icon} {tok.label}
-                          {tok.highlight && <strong style={{ color: '#047857' }}>{tok.highlight}</strong>}
-                          {tok.suffix || ''}
-                        </span>
-                      </React.Fragment>
-                    ))}
-                  </div>
-
-                  {/* Exception-Only 유동 조건 칩: 실제 제한 옵션이 설정된 상품에만 노출 (일반 올패스 상품은 미렌더링) */}
-                  {specSummary.restrictionChips.length > 0 && (
+                  return (
                     <div
-                      data-testid={`product-restriction-chips-${prod.prod_cd}`}
+                      key={prod.prod_cd}
+                      data-testid={`product-card-${prod.prod_cd}`}
+                      data-duration={durationMin}
+                      data-disabled="false"
+                      className="shop-tactile-card"
+                      onClick={() => handleProductItemClick(item)}
                       style={{
+                        padding: '24px 24px 22px 24px',
+                        borderRadius: '26px',
+                        border: isWaitlistCard
+                          ? '2px solid #fcd34d'
+                          : isDailyPurpose
+                            ? '2px solid #bfdbfe'
+                            : '2px solid #a7f3d0',
+                        background: isWaitlistCard
+                          ? 'linear-gradient(180deg, #fffbeb 0%, #ffffff 42%)'
+                          : isDailyPurpose
+                            ? 'linear-gradient(180deg, #eff6ff 0%, #ffffff 42%)'
+                            : 'linear-gradient(180deg, #f0fdf8 0%, #ffffff 42%)',
+                        cursor: 'pointer',
                         display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        flexWrap: 'wrap',
-                        marginTop: '2px'
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        boxShadow: isWaitlistCard
+                          ? '0 12px 30px rgba(217, 119, 6, 0.10), inset 0 1px 0 #ffffff'
+                          : isDailyPurpose
+                            ? '0 12px 30px rgba(0, 113, 227, 0.09), inset 0 1px 0 #ffffff'
+                            : '0 12px 30px rgba(5, 150, 105, 0.09), inset 0 1px 0 #ffffff',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        boxSizing: 'border-box',
                       }}
                     >
-                      {specSummary.restrictionChips.map((chip) => {
-                        const chipStyle =
-                          chip.tone === 'amber'
-                            ? { background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }
-                            : chip.tone === 'emerald'
-                              ? { background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }
-                              : { background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' };
-                        return (
+                      {/* [1단: 컬러 닷 + 한글 유형 라벨 + 영문 스펙 서브태그 & 우측 배지] */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '10px' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                           <span
-                            key={chip.key}
                             style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              padding: '4px 10px',
-                              borderRadius: '8px',
+                              width: '10px',
+                              height: '10px',
+                              borderRadius: '50%',
+                              background: typeMeta.dotColor,
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span style={{ fontSize: '15px', fontWeight: 800, color: '#4b5563', letterSpacing: '-0.2px' }}>
+                            {typeMeta.label}
+                          </span>
+                          <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.8px' }}>
+                            {specSummary.headerTypeBadge}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {genderBadge && (
+                            <span style={{
                               fontSize: '12.5px',
                               fontWeight: 800,
-                              lineHeight: 1.2,
-                              whiteSpace: 'nowrap',
-                              ...chipStyle
-                            }}
-                          >
-                            <span>{chip.icon}</span>
-                            <span>{chip.label}</span>
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* [3단: 카드 푸터 — 이용요금 & 56px 딥 차콜 애플 필 구매 버튼] */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                      <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 700 }}>이용요금</span>
-                      {hasAnyDiscount && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '14px', color: '#94a3b8', textDecoration: 'line-through' }}>
-                            {prod.standard_price.toLocaleString()}원
-                          </span>
-                          {hasGradeDiscount ? (
-                            <span style={{ fontSize: '11px', fontWeight: 900, color: '#059669', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px' }}>
-                              {gradeName || 'VIP'} {discountRate}% 할인
+                              padding: '5px 12px',
+                              borderRadius: '999px',
+                              background: targetGenderNorm === 'F' ? '#fdf2f8' : '#eff6ff',
+                              color: targetGenderNorm === 'F' ? '#db2777' : '#1d4ed8',
+                              border: targetGenderNorm === 'F' ? '1px solid #fbcfe8' : '1px solid #bfdbfe'
+                            }}>
+                              {genderBadge}
                             </span>
-                          ) : (
-                            <span style={{ fontSize: '11px', fontWeight: 900, color: '#059669', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px' }}>
-                              할인가 적용
+                          )}
+                          {customBadge && (
+                            <span style={{
+                              fontSize: '12.5px',
+                              fontWeight: 800,
+                              padding: '5px 12px',
+                              borderRadius: '999px',
+                              background: '#ecfdf5',
+                              color: '#047857',
+                              border: '1px solid #a7f3d0'
+                            }}>
+                              {customBadge}
                             </span>
                           )}
                         </div>
-                      )}
-                    </div>
-                    <span style={{ fontSize: '30px', fontWeight: 950, color: hasAnyDiscount ? '#059669' : '#0f172a', letterSpacing: '-0.8px', lineHeight: 1 }}>
-                      {priceFormatted}원
-                    </span>
-                  </div>
+                      </div>
 
-                  <button
-                    disabled={isCardDisabled}
-                    style={{
-                      width: '100%',
-                      height: '56px',
-                      borderRadius: '999px',
-                      background: isCardDisabled ? '#e2e8f0' : '#1d1d1f',
-                      color: isCardDisabled ? '#64748b' : '#ffffff',
-                      border: 'none',
-                      fontSize: '17px',
-                      fontWeight: 800,
-                      letterSpacing: '-0.3px',
-                      cursor: isCardDisabled ? 'not-allowed' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      boxShadow: isCardDisabled ? 'none' : '0 6px 18px rgba(0, 0, 0, 0.14)',
-                      transition: 'all 0.2s cubic-bezier(0.25, 1, 0.5, 1)'
-                    }}
-                  >
-                    {isCardDisabled && dailyEligibility?.buttonLabel ? (
-                      <span>{dailyEligibility.buttonLabel}</span>
-                    ) : (
-                      <>
-                        <Hand size={18} className="animate-hand-tap" style={{ color: '#10b981' }} />
-                        <span>{priceFormatted}원 선택 및 결제</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+                      {/* [2단: 대형 상품명 + 시간·혜택 KPI + Exception-Only 제한 칩 (이모지 제거)] */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                        <h3 style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.8px', margin: 0, lineHeight: 1.2, wordBreak: 'keep-all' }}>
+                          {displayName}
+                        </h3>
+
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+                          {hasTimeBenefit && (
+                            <span
+                              style={{
+                                fontSize: '23px',
+                                fontWeight: 900,
+                                color: isWaitlistCard ? '#b45309' : (isDailyPurpose ? '#0071e3' : '#059669'),
+                                fontVariantNumeric: 'tabular-nums',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              1회 {durationMin}분
+                            </span>
+                          )}
+                          {nonTimeTokens.map((tok, tokIdx) => (
+                            <React.Fragment key={tokIdx}>
+                              {(hasTimeBenefit || tokIdx > 0) && (
+                                <span style={{ fontSize: '18px', color: '#cbd5e1', fontWeight: 700 }}>·</span>
+                              )}
+                              <span style={{ fontSize: '18px', color: '#475569', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                                {tok.label}
+                                {tok.highlight ? <strong style={{ color: '#047857' }}>{tok.highlight}</strong> : null}
+                                {tok.suffix || ''}
+                              </span>
+                            </React.Fragment>
+                          ))}
+                        </div>
+
+                        {specSummary.restrictionChips.length > 0 && (
+                          <div
+                            data-testid={`product-restriction-chips-${prod.prod_cd}`}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              flexWrap: 'wrap',
+                              marginTop: '4px'
+                            }}
+                          >
+                            {specSummary.restrictionChips.map((chip) => {
+                              const chipStyle =
+                                chip.tone === 'amber'
+                                  ? { background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }
+                                  : chip.tone === 'emerald'
+                                    ? { background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }
+                                    : { background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' };
+                              return (
+                                <span
+                                  key={chip.key}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    padding: '5px 11px',
+                                    borderRadius: '999px',
+                                    fontSize: '13.5px',
+                                    fontWeight: 800,
+                                    lineHeight: 1.2,
+                                    whiteSpace: 'nowrap',
+                                    ...chipStyle
+                                  }}
+                                >
+                                  {chip.label}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* [3단: 스노우 푸터 (AssetSelectModal 동일 골격 — 좌 요금 · 우 실시간 예상 이용시간)] */}
+                      <div
+                        style={{
+                          background: '#f5f5f7',
+                          borderRadius: '18px',
+                          padding: '14px 18px',
+                          border: '1px solid #e5e7eb',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '13.5px', color: '#6e6e73', fontWeight: 700 }}>이용요금</span>
+                            {hasAnyDiscount && (
+                              <>
+                                <span style={{ fontSize: '13.5px', color: '#94a3b8', textDecoration: 'line-through', fontWeight: 600 }}>
+                                  {prod.standard_price.toLocaleString()}원
+                                </span>
+                                <span style={{ fontSize: '11.5px', fontWeight: 900, color: '#059669', background: '#dcfce7', padding: '2px 7px', borderRadius: '6px' }}>
+                                  {hasGradeDiscount ? `${gradeName || 'VIP'} ${discountRate}%` : '할인가'}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          <span style={{ fontSize: '31px', fontWeight: 950, color: hasAnyDiscount ? '#059669' : '#0f172a', letterSpacing: '-0.8px', lineHeight: 1.05, fontVariantNumeric: 'tabular-nums' }}>
+                            {priceFormatted}원
+                          </span>
+                        </div>
+
+                        {cardPreview && cardPreview.endHhmm && (
+                          <div
+                            style={{
+                              flexShrink: 0,
+                              textAlign: 'right',
+                              paddingLeft: '14px',
+                              borderLeft: '1px solid #d1d5db',
+                            }}
+                          >
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#6e6e73', marginBottom: '2px' }}>
+                              {cardPreview.isWaitlist ? '대기 예상 시간' : '예상 이용 시간'}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: '23px',
+                                fontWeight: 950,
+                                color: cardPreview.isWaitlist ? '#b45309' : '#059669',
+                                fontVariantNumeric: 'tabular-nums',
+                                whiteSpace: 'nowrap',
+                                lineHeight: 1.1,
+                              }}
+                            >
+                              {cardPreview.timeRangeLabel}
+                            </div>
+                            {cardPreview.prepareMin > 0 && (
+                              <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginTop: '2px', whiteSpace: 'nowrap' }}>
+                                ({cardPreview.effectiveDurationMin}분 + 준비 {cardPreview.prepareMin}분)
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* [4단: 3D 입체 택타일 결제 버튼 (교차 유리 광택 스윕 + 화살표 넛지)] */}
+                      <button
+                        type="button"
+                        className={`decision-tactile-btn shop-tactile-btn ${ctaColorClass}`}
+                        style={{ '--decision-sheen-delay': `${(idx % 4) * 0.6}s` } as React.CSSProperties}
+                      >
+                        <span style={{ position: 'relative', zIndex: 2 }}>
+                          {priceFormatted}원 선택 및 결제
+                        </span>
+                        <ArrowRight
+                          size={23}
+                          strokeWidth={3}
+                          className="decision-btn-arrow"
+                          aria-hidden="true"
+                          style={{ position: 'relative', zIndex: 2, flexShrink: 0 }}
+                        />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })
-        ) : (
-          <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '240px', gap: '10px' }}>
-            <span style={{ fontSize: '18px', color: '#86868b', fontWeight: 700 }}>이 카테고리에는 판매 중인 상품이 없습니다.</span>
+            )}
+
+            {/* 이용 불가 상품 하단 1줄 분리 (AssetSelectModal disabledAssets 패턴 통일 — data-testid & reason 100% 보존) */}
+            {disabledItems.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                {disabledItems.map((item) => {
+                  const { prod, durationMin, specSummary, priceFormatted, dailyEligibility, displayName } = item;
+                  return (
+                    <div
+                      key={prod.prod_cd}
+                      data-testid={`product-card-${prod.prod_cd}`}
+                      data-duration={durationMin}
+                      data-disabled="true"
+                      onClick={() => handleProductItemClick(item)}
+                      style={{
+                        width: '100%',
+                        borderRadius: '20px',
+                        border: '1.5px dashed #cbd5e1',
+                        background: '#f5f5f7',
+                        opacity: 0.82,
+                        cursor: 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        padding: '16px 22px',
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '21px', fontWeight: 800, color: '#4b5563' }}>
+                            {displayName}
+                          </span>
+                          <span style={{ fontSize: '16px', fontWeight: 700, color: '#6e6e73', fontVariantNumeric: 'tabular-nums' }}>
+                            {priceFormatted}원
+                          </span>
+                          {dailyEligibility?.badgeLabel && (
+                            <span
+                              style={{
+                                fontSize: '12.5px',
+                                fontWeight: 800,
+                                padding: '3px 10px',
+                                borderRadius: '999px',
+                                background: '#fef3c7',
+                                color: '#b45309',
+                                border: '1px solid #fcd34d',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {dailyEligibility.badgeLabel}
+                            </span>
+                          )}
+                        </div>
+                        {specSummary.restrictionChips.length > 0 && (
+                          <div
+                            data-testid={`product-restriction-chips-${prod.prod_cd}`}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}
+                          >
+                            {specSummary.restrictionChips.map((chip) => (
+                              <span
+                                key={chip.key}
+                                style={{
+                                  fontSize: '12.5px',
+                                  fontWeight: 700,
+                                  color: '#475569',
+                                  background: '#e2e8f0',
+                                  padding: '3px 9px',
+                                  borderRadius: '999px',
+                                }}
+                              >
+                                {chip.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled
+                        style={{
+                          padding: '9px 16px',
+                          borderRadius: '999px',
+                          background: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          color: '#dc2626',
+                          fontSize: '15px',
+                          fontWeight: 800,
+                          whiteSpace: 'nowrap',
+                          cursor: 'not-allowed',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {dailyEligibility?.buttonLabel || '현재 선택 불가'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        );
+      })() : (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '240px', gap: '10px' }}>
+          <span style={{ fontSize: '18px', color: '#86868b', fontWeight: 700 }}>이 카테고리에는 판매 중인 상품이 없습니다.</span>
+        </div>
+      )}
 
       {/* 하단 구매 안내 문구 */}
       <div 
@@ -782,12 +1023,34 @@ export const ProductShop: React.FC<ProductShopProps> = ({
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
             border: '1px solid #e5e5ea'
           }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>
-              {warningMessage.includes('다음 예약') || warningTitle?.includes('시간')
-                ? '⏰'
-                : warningTitle?.includes('구역')
-                  ? '📍'
-                  : '🔒'}
+            <div
+              style={{
+                width: '72px',
+                height: '72px',
+                borderRadius: '50%',
+                margin: '0 auto 16px auto',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: warningMessage.includes('다음 예약') || warningTitle?.includes('시간')
+                  ? '#fffbeb'
+                  : warningTitle?.includes('구역')
+                    ? '#eff6ff'
+                    : '#fef2f2',
+                color: warningMessage.includes('다음 예약') || warningTitle?.includes('시간')
+                  ? '#d97706'
+                  : warningTitle?.includes('구역')
+                    ? '#0071e3'
+                    : '#dc2626',
+              }}
+            >
+              {warningMessage.includes('다음 예약') || warningTitle?.includes('시간') ? (
+                <Clock size={36} strokeWidth={2.4} />
+              ) : warningTitle?.includes('구역') ? (
+                <Compass size={36} strokeWidth={2.4} />
+              ) : (
+                <ShieldAlert size={36} strokeWidth={2.4} />
+              )}
             </div>
             <h3 style={{ fontSize: '22px', fontWeight: 900, color: '#1d1d1f', marginBottom: '12px' }}>
               {warningTitle ||

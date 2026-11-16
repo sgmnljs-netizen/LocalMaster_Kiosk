@@ -29,8 +29,8 @@
   - 타석 번호, 이용 시간(분) 등 핵심 수치는 **44px ~ 48px SF Pro Display 대형 울트라 볼드 (`fontWeight: 800`, `letterSpacing: -1px`)**로 시원하고 가독성 100%로 강조합니다.
   - **타석 카드 그리드 규격 (27인치 세로형 FHD 1080×1920 황금비율)**:
     - 종횡비: **`aspectRatio: '1 / 1.22'`** (상하 높이 15px+ 완충 여백 확보로 바닥 클리핑 원천 차단).
-    - 내부 패딩: **`padding: '13px 11px'`** (좌우 유효폭 10px+ 추가 확보).
-    - 사용 중 박스(하단 52px): 잔여시간(`12px` Bold)과 예정시각(`11px` Bold) 모두 **`whiteSpace: 'nowrap'` 강제**로 2줄 개행(`남/음`, `예/정`) 완전 방어, 슬림 프로그레스 바는 상하 3px 안전 여백으로 바닥 테두리 밖 돌출 클리핑 100% 해소.
+    - 내부 패딩: **`padding: '10px 8px 9px 8px'`** (5열 그리드·Bento 패딩 슬림화로 타일 폭 ~191px 확장).
+    - 사용 중 박스(하단 `84px` 순백 2단 풀폭 KPI): 1단(대기 0명 `남은 시간` / 대기 1명+ `남은 대기` / 일시정지 `일시 정지` `14px` + `{N}분` `27px`), 2단(대기 0명 `종료 시각` / 대기 1명+ `종료 예정` `14px` + `~{HH:mm}` `23px` / 일시정지 `현재 상태: 정지중`) 모두 `tabular-nums`·**`whiteSpace: 'nowrap'` 강제**로 2줄 개행을 방어하며, `7px` 일체형 프로그레스 바 적용 (**Why**: 27인치 원거리 시인성 확보 및 앞세션 종료 기준 모바일앱 통일; 입장 `+1분` 텀은 선택 후 모달에서 안내).
     - 상단 활성 타석 배너: `whiteSpace: 'nowrap'` 및 `28px` UltraBold로 타석 번호 단어 쪼개짐(`타/석`) 완전 방어.
 
 ---
@@ -42,8 +42,8 @@
   - 화이트 배경 카드: **애플 딥 차콜 필 버튼 (`background: #1d1d1f`, `color: #ffffff`)**
   - 다크 프로스트 카드: **애플 스노우 화이트 필 버튼 (`background: #ffffff`, `color: #000000`)**
   - 타석 배정 최종 확정 CTA (`AssetSelectModal.tsx` 2단 시선 릴레이): 미선택 시 뉴트럴 슬레이트(`#f1f5f9`)로 대기하다가, 고객이 이용권 카드를 터치하는 즉시 **즉시 배정 에메랄드 주얼 그라디언트(`.asset-cta-ready`)** / **대기 예약 앰버 주얼 그라디언트(`.asset-cta-ready-amber`)**와 외곽 호흡형 헤일로 링(`::before` `inset: -7px`)·내부 화이트 유리 광택 스윕(`.asset-cta-sheen-clip::after`)·우측 화살표 넛지(`.asset-cta-arrow`)가 동시 점등됩니다(`{NN}번 타석 · {HH:mm ~ HH:mm} 즉시 배정` / `대기 예약` 직접 각인, 이모지 미사용; `Why`: 1장 보유 시에도 자동 선선택하지 않고 카드 광택 ➔ 확정 CTA 점등으로 시선을 넘겨 오터치 배정을 방지).
-- **마이크로 터치 유도 인터랙션**:
-  - 버튼 내부 좌측에 콕콕 누르는 손가락 탭 마이크로 애니메이션(`Hand` 아이콘 + `animate-hand-tap`)을 필수로 탑재하여 0.1초 만에 터치를 강력하게 유도합니다.
+- **3D 택타일 CTA & 마이크로 넛지 인터랙션 ([kiosk_design_system.css](file:///Users/sgmnljs/workspace/Python/LocalMaster_Kiosk/src/styles/kiosk_design_system.css))**:
+  - 대기 화면 진입 유도 배너(`IntroScreen.tsx`)에는 `animate-hand-tap` 아이콘을 유지하고, 주요 배정·결제·체크인·이동·연장·확인 확정 CTA에는 공용 **`.decision-tactile-btn`**(`.decision-btn-emerald`/`-amber`/`-blue` 3D 상단 하이라이트+하단 눌림 립+교차 광택 스윕+`.decision-btn-arrow` 화살표 넛지) 및 모디파이어(`.shop-tactile-btn`, `.payment-tactile-btn`, `.kiosk-action-tactile-btn`, `.kiosk-confirm-tactile-btn`, `.locker-tactile-cta`)를 일관 적용합니다 (`:disabled` 상태에서는 셔머·화살표 넛지·`:active` 침강을 자동 차단).
 
 ---
 
@@ -67,7 +67,7 @@
   - 모달 카드 치수: **`width: 1,000px` × `minHeight: 1,260px`**(타석 배정 컨텍스트 티켓 바 포함 시; 비배정 일반 인증 시 `minHeight: 1,040px`).
   - 상단 Y좌표(Top Y)가 절대 고정되어 탭 전환이나 키패드 터치 시 **상하 들썩임(Layout Shift) 편차 0.0000px** 보장 (`Why`: 27인치 대형 터치스크린에서 인증 탭 전환 시 모달 높이가 출렁이면 손가락 목표 좌표가 어긋나 연속 오터치를 유발하기 때문).
 - **회원 이름 확인 모달 (`detectedMember`) Apple HIG 초대형 고대비 프리뷰**:
-  - AI `Sparkles` 아이콘·중복 이용권 요약 띠·이모지 장식을 전면 제거하고 모달 폭을 **`920px`**로 확대하며, **`[{마스킹 이름}] 회원님` (`56px`)** + **`본인이 맞으신가요?` (`32px`)**, 중앙 **`detected-member-allocation-preview`**(`즉시 배정`/`대기 예약 · 약 N분 대기` 배지 + `48px` `{층} · {NN}번 타석` + 이용권 선택 전 단계이므로 종료 시각 대신 **`46px` `HH:mm` + `28px` `즉시 시작` / `대기 시작`**) 및 하단 **`96px` (`28px`/`32px`) 확인/취소 필 버튼**을 적용합니다.
+  - AI `Sparkles` 아이콘·중복 이용권 요약 띠·이모지 장식을 전면 제거하고 모달 폭을 **`920px`**로 확대하며, **`[{마스킹 이름}] 회원님` (`56px`)** + **`본인이 맞으신가요?` (`32px`)**, 중앙 **`detected-member-allocation-preview`**(`즉시 배정`/`대기 예약 · 약 N분 대기` 배지 + `48px` `{층} · {NN}번 타석` + 이용권 선택 전 단계이므로 종료 시각 대신 **`46px` `HH:mm` + `28px` `즉시 시작` / `대기 시작`**) 및 하단 **`96px` 3D 택타일 `[예, 맞습니다!]`(`.decision-tactile-btn.kiosk-confirm-tactile-btn`) / `[아니오]` 필 버튼**을 적용합니다.
   - 보유 이용권 선택 모달(`AssetSelectModal.tsx`)도 Apple HIG 순백색 **`1,008px`** 시트(`46px` 헤드라인 + 1줄 컨텍스트 + **1장 보유 시에도 미선택 시작** + 단일 `480×296` / 다중 **2열 `458×286` `1.6:1` 신용카드 직사각형 비율** · `30px` 상품명 · `25px` 잔여 가치 · `3단 정형 스노우 푸터` · `LESSON` 오차감 및 기소진 0회권 차단 + **1단계 미선택 카드 유리 광택 스윕(`asset-card-pulse-hint`) ➔ 2단계 카드 선택 즉시 하단 `108px` 확정 CTA 루미너스 비콘(`asset-cta-ready`) 바통 터치** + `44px` 최종 타석·시간 독)로 일원화하며, `AllocationCompleteModal.tsx`는 **`920px` 디지털 배정표** + 풀와이드 **`96px` 단일 `[확인]` 버튼**으로 마감합니다(`Why`: 배정표는 모달 오픈 시 자동 인쇄되며, 용지 소진·재출력 대응은 프런트포스 전담이므로 키오스크 불필요 `[영수증 재출력]` 버튼을 제거해 오터치와 감열지 중복 낭비를 차단).
 - **내부 콘텐츠 패널 높이 단일화 (Uniform 750px Workspace)**:
   - 스마트 태그(`SMART_TAG`), 전화번호 키패드(`PHONE_KEYPAD`), 안면 인식(`FACE`), QR 스캔(`QR_SCAN`) 4대 인증 탭의 내부 작업 공간 높이를 **`height: 750px` (minHeight: 750px)**로 100% 일원화.
@@ -93,6 +93,8 @@
 
 | 일자 | 버전 | 변경 구분 | 핵심 변경 요약 |
 | :--- | :--- | :--- | :--- |
+| 2026-11-16 | v9.6 | 사용중 타석 종료시각(`~HH:mm`) 직관화 | `TeeboxTileCard` 대기 0명(`남은 시간`/`종료 시각 ~HH:mm`)·대기 1명+(`남은 대기`/`종료 예정 ~HH:mm`)·일시정지(`현재 상태: 정지중`) 분리 및 `'~종료'` 방어, `PracticeSelect` 분기모달 `formatNextQueueStartTime` 정렬 |
+| 2026-11-16 | v9.5 | 전 화면 3D 택타일 · Double-Check · 타일 스케일업 통일 | `TeeboxTileCard` `84px` 2단 KPI(`27px`/`23px`)·`10px 8px 9px 8px` 패딩, `.decision-tactile-btn` 3D 베벨·스윕·화살표 넛지 및 `:disabled` 가드 공용화(`PracticeSelect`·`ProductShop`·`PaymentTerminal`·`TeeboxMap`·`CheckinSelect`·`Par3Allocation`·`MemberAuth`·`CompanionSetupModal`·`LockerExtend`), Double-Check 타석/시간 요약·Zero-Emoji 일괄 동기화 |
 | 2026-11-15 | v9.4 | SSOT 표준화 | 크리스탈 라이트 블러(`3px`) 공간 맥락 보존 및 Top-Y 앵커 무변위(`0.0000px`) 오터치 방어 근거(`Why`) 보강, 링크·컴포넌트 참조 전수 검증 |
 | 2026-11-14 | v9.3 | 배정 퍼널 Apple HIG 1.6:1 직사각형 카드 & 2단 시선 릴레이 CTA 비콘 마감 | `TimeMaster.buildBayAllocationPreview` 전 퍼널 `즉시 배정`(에메랄드 `#059669`) vs `대기 예약`(앰버 `#d97706`) 이원화, AI `Sparkles`·`VIP PASS`/`EMV Chip`·`1단계`·이모지 전면 제거, `PracticeSelect` `960px` 2열 `nowrap` 모달(`Touch :`·중복 경고 제거, `72px` 버튼), `MemberAuth` `920px` 이름 확인(이용권 선택 전 `HH:mm 즉시 시작`/`HH:mm 대기 시작`만 표출, `96px` 버튼), `AssetSelectModal` `1,008px`(1장 보유 포함 전 권종 미선택 시작 · 단일 `480×296`/다중 2열 `458×286` `1.6:1` 카드 · 1단계 `asset-card-pulse-hint` 유리 광택 ➔ 2단계 `.asset-cta-ready` 스프링 팝인·헤일로 펄스·유리 광택 스윕·화살표 넛지 `108px` CTA 비콘 · `LESSON` 제외 및 `DAILY`/`TICKET` 0회 소진 차단), `AllocationCompleteModal` `920px` 대형 배정표(`floor ?? floor_no` + `84px` 타석번호 · `44px`/`40px` 시간 · `[영수증 재출력]` 제거 후 풀와이드 단일 `96px` `[확인]` 버튼) 및 `electron/main.cjs` 모니터 배율 자동 맞춤 완료 |
 | 2026-10-30 | v9.0 | 모바일 앱 스마트 체크인 | `MemberAuth.tsx`, `KioskSettingsModal.tsx` NFC 태그 안내 전면 제거 및 `앱 스마트 체크인` 2-Step 무선 가이드·750px 워크스페이스 일원화 |

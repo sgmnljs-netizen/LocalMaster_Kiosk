@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { CreditCard, Printer, ShieldAlert, ShieldCheck, RefreshCw, Ticket, CheckCircle2, UserCheck, X, ArrowLeft, Hand } from 'lucide-react';
+import { ArrowRight, CreditCard, Printer, ShieldAlert, ShieldCheck, RefreshCw, Ticket, CheckCircle2, UserCheck, X, ArrowLeft } from 'lucide-react';
 import { api, type Bay, type KioskCouponItem } from '../services/api';
 import { recordKioskBlackBox } from '../utils/kioskBlackBox';
 import { useKioskSettings } from '../stores/kioskSettings';
@@ -752,6 +752,23 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
     onCancel();
   };
 
+  const hasBayTarget =
+    (assignedBayNos && assignedBayNos.length > 0) ||
+    (assignedBayNo !== undefined && assignedBayNo !== null);
+  const paymentBayPreview = hasBayTarget
+    ? TimeMaster.buildBayAllocationPreview({
+        bay: selectedBay,
+        bays,
+        bayNoFallback: assignedBayNo,
+        bayNos: assignedBayNos,
+        durationMin: selectedDurationMin ?? null,
+        prepareMin,
+        storeCloseTime,
+        storeOpenTime,
+        isStore24h,
+        now,
+      })
+    : null;
 
   return (
     <div 
@@ -911,134 +928,202 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
             </div>
           )}
 
-          {/* 주문 정보 요약 바 (타석 배정 결제 시 즉시배정/대기예약 및 시작~종료 예정 시각 명확히 표시) */}
-          {(() => {
-            const hasBayTarget =
-              (assignedBayNos && assignedBayNos.length > 0) ||
-              (assignedBayNo !== undefined && assignedBayNo !== null);
-            const paymentBayPreview = hasBayTarget
-              ? TimeMaster.buildBayAllocationPreview({
-                  bay: selectedBay,
-                  bays,
-                  bayNoFallback: assignedBayNo,
-                  bayNos: assignedBayNos,
-                  durationMin: selectedDurationMin ?? null,
-                  prepareMin,
-                  storeCloseTime,
-                  storeOpenTime,
-                  isStore24h,
-                  now,
-                })
-              : null;
-
-            return (
+          {/* 주문 정보 요약 바 — 타석 배정 결제 시 AssetSelectModal 동일 2열 Double-Check 티켓 + 상품·금액 바 */}
+          {paymentBayPreview ? (
+            <div
+              style={{
+                background: paymentBayPreview.isWaitlist ? '#fffbeb' : '#f0fdf4',
+                borderRadius: '26px',
+                border: paymentBayPreview.isWaitlist ? '2px solid #f59e0b' : '2px solid #10b981',
+                padding: '18px 22px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+                boxSizing: 'border-box',
+              }}
+            >
+              {/* 상단: 순백 2열 배정 타석 & 이용 예정 시간 티켓 */}
               <div
                 style={{
-                  background: paymentBayPreview
-                    ? (paymentBayPreview.isWaitlist ? '#fffbeb' : '#f0fdf4')
-                    : '#f5f5f7',
-                  borderRadius: '24px',
-                  border: paymentBayPreview
-                    ? (paymentBayPreview.isWaitlist ? '2px solid #f59e0b' : '2px solid #34d399')
-                    : '1px solid #e5e5ea',
-                  padding: '24px 30px',
+                  background: '#ffffff',
+                  borderRadius: '18px',
+                  padding: '18px 24px',
+                  border: paymentBayPreview.isWaitlist ? '1.5px solid #fde68a' : '1.5px solid #a7f3d0',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: '18px',
-                  boxSizing: 'border-box'
+                  gap: '20px',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
-                  <span
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '15px', fontWeight: 700, color: '#6e6e73' }}>배정 타석</span>
+                    <span
+                      data-testid="payment-allocation-mode-badge"
+                      style={{
+                        fontSize: '13.5px',
+                        fontWeight: 900,
+                        color: '#ffffff',
+                        background: paymentBayPreview.isWaitlist ? '#d97706' : '#059669',
+                        padding: '3px 11px',
+                        borderRadius: '999px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {paymentBayPreview.modeBadgeText}
+                    </span>
+                  </div>
+                  <div
                     style={{
-                      background: paymentBayPreview
-                        ? (paymentBayPreview.isWaitlist ? '#d97706' : '#059669')
-                        : '#1d1d1f',
-                      color: '#ffffff',
-                      fontSize: '18px',
-                      fontWeight: 900,
-                      padding: '11px 18px',
-                      borderRadius: '14px',
-                      letterSpacing: '-0.3px',
-                      flexShrink: 0,
+                      fontSize: assignedBayNos && assignedBayNos.length > 1 ? '26px' : '38px',
+                      fontWeight: 950,
+                      color: '#1d1d1f',
+                      letterSpacing: '-1px',
+                      lineHeight: 1.15,
                       fontVariantNumeric: 'tabular-nums',
+                      whiteSpace: assignedBayNos && assignedBayNos.length > 1 ? 'normal' : 'nowrap',
+                      wordBreak: 'keep-all',
+                    }}
+                  >
+                    {(assignedBayNos && assignedBayNos.length > 1)
+                      ? `${assignedBayNos.join(', ')}번 타석 (${assignedBayNos.length}석)`
+                      : paymentBayPreview.bayWithFloorLabel}
+                  </div>
+                </div>
+
+                <div style={{ width: '1.5px', height: '60px', background: '#e5e7eb', flexShrink: 0 }} />
+
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', textAlign: 'right', gap: '4px', minWidth: 0 }}>
+                  <span style={{ fontSize: '15px', fontWeight: 700, color: '#6e6e73' }}>
+                    {paymentBayPreview.isWaitlist ? '대기 이용 예정 시간' : '이용 예정 시간'}
+                  </span>
+                  <div
+                    style={{
+                      fontSize: '33px',
+                      fontWeight: 950,
+                      color: paymentBayPreview.isWaitlist ? '#b45309' : '#059669',
+                      letterSpacing: '-1px',
+                      lineHeight: 1.05,
+                      fontVariantNumeric: 'tabular-nums',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {paymentBayPreview.endHhmm
+                      ? `이용 예정 ${paymentBayPreview.timeRangeLabel}`
+                      : paymentBayPreview.timeRangeLabel}
+                  </div>
+                  {paymentBayPreview.effectiveDurationMin && (
+                    <span style={{ fontSize: '15px', fontWeight: 800, color: '#4b5563', whiteSpace: 'nowrap' }}>
+                      ({paymentBayPreview.effectiveDurationMin}분
+                      {paymentBayPreview.prepareMin > 0 ? ` + 준비 ${paymentBayPreview.prepareMin}분` : ''})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 하단: 선택 상품명 + 기준 금액 */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '16px',
+                  padding: '2px 6px',
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '25px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.5px' }}>
+                    {productName}
+                  </div>
+                  <div
+                    data-testid="payment-product-spec-summary"
+                    style={{
+                      fontSize: '15.5px',
+                      color: productSpecSummary ? '#334155' : '#64748b',
+                      fontWeight: 700,
+                      marginTop: '3px',
+                      lineHeight: 1.35,
                     }}
                   >
                     {(assignedBayNos && assignedBayNos.length > 0)
-                      ? `${assignedBayNos.join(', ')}번`
-                      : (assignedBayNo !== undefined && assignedBayNo !== null)
-                        ? (paymentBayPreview ? paymentBayPreview.bayWithFloorLabel : `${assignedBayNo}번 타석`)
-                        : (assignedLockerNo !== undefined && assignedLockerNo !== null)
-                          ? `${assignedLockerNo}호 라카`
-                          : '이용권'}
-                  </span>
-                  <div>
-                    {paymentBayPreview && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                        <span
-                          data-testid="payment-allocation-mode-badge"
-                          style={{
-                            fontSize: '14.5px',
-                            fontWeight: 900,
-                            color: paymentBayPreview.isWaitlist ? '#b45309' : '#047857',
-                            background: '#ffffff',
-                            border: paymentBayPreview.isWaitlist ? '1px solid #fcd34d' : '1px solid #a7f3d0',
-                            padding: '3px 11px',
-                            borderRadius: '999px',
-                          }}
-                        >
-                          {paymentBayPreview.modeBadgeText}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: '18px',
-                            fontWeight: 950,
-                            color: paymentBayPreview.isWaitlist ? '#92400e' : '#065f46',
-                            fontVariantNumeric: 'tabular-nums',
-                          }}
-                        >
-                          {paymentBayPreview.endHhmm
-                            ? `이용 예정 ${paymentBayPreview.timeRangeLabel}`
-                            : paymentBayPreview.timeRangeLabel}
-                        </span>
-                      </div>
-                    )}
-                    <div style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.6px' }}>
-                      {productName}
-                    </div>
-                    <div
-                      data-testid="payment-product-spec-summary"
-                      style={{
-                        fontSize: '16px',
-                        color: productSpecSummary ? '#334155' : '#86868b',
-                        fontWeight: productSpecSummary ? 700 : 600,
-                        marginTop: '4px',
-                        lineHeight: 1.4
-                      }}
-                    >
-                      {(assignedBayNos && assignedBayNos.length > 0)
-                        ? `동반자 그룹 (${assignedBayNos.length}석)${productSpecSummary ? ` · ${productSpecSummary}` : ''}`
-                        : productSpecSummary
-                          ? productSpecSummary
-                          : (assignedBayNo !== undefined && assignedBayNo !== null)
-                            ? `${paymentBayPreview?.modeActionLabel || '즉시 배정'} · 타석 이용권`
-                            : '정규 이용권'}
-                    </div>
+                      ? `동반자 그룹 (${assignedBayNos.length}석)${productSpecSummary ? ` · ${productSpecSummary}` : ''}`
+                      : productSpecSummary
+                        ? productSpecSummary
+                        : `${paymentBayPreview.modeActionLabel} · 타석 이용권`}
                   </div>
                 </div>
 
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#86868b' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#6e6e73' }}>
                     기준 금액
                   </div>
-                  <div style={{ fontSize: '36px', fontWeight: 900, color: '#1d1d1f', marginTop: '2px', letterSpacing: '-0.8px' }}>
-                    {amount.toLocaleString()} <span style={{ fontSize: '22px', fontWeight: 700 }}>원</span>
+                  <div style={{ fontSize: '32px', fontWeight: 950, color: '#1d1d1f', marginTop: '2px', letterSpacing: '-0.8px', fontVariantNumeric: 'tabular-nums' }}>
+                    {amount.toLocaleString()} <span style={{ fontSize: '20px', fontWeight: 700 }}>원</span>
                   </div>
                 </div>
               </div>
-            );
-          })()}
+            </div>
+          ) : (
+            <div
+              style={{
+                background: '#f5f5f7',
+                borderRadius: '24px',
+                border: '1px solid #e5e5ea',
+                padding: '24px 30px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '18px',
+                boxSizing: 'border-box',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+                <span
+                  style={{
+                    background: '#1d1d1f',
+                    color: '#ffffff',
+                    fontSize: '18px',
+                    fontWeight: 900,
+                    padding: '11px 18px',
+                    borderRadius: '14px',
+                    letterSpacing: '-0.3px',
+                    flexShrink: 0,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {(assignedLockerNo !== undefined && assignedLockerNo !== null)
+                    ? `${assignedLockerNo}호 라카`
+                    : '이용권'}
+                </span>
+                <div>
+                  <div style={{ fontSize: '30px', fontWeight: 900, color: '#1d1d1f', letterSpacing: '-0.6px' }}>
+                    {productName}
+                  </div>
+                  <div
+                    data-testid="payment-product-spec-summary"
+                    style={{
+                      fontSize: '16px',
+                      color: productSpecSummary ? '#334155' : '#86868b',
+                      fontWeight: productSpecSummary ? 700 : 600,
+                      marginTop: '4px',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {productSpecSummary || '정규 이용권'}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#86868b' }}>
+                  기준 금액
+                </div>
+                <div style={{ fontSize: '36px', fontWeight: 900, color: '#1d1d1f', marginTop: '2px', letterSpacing: '-0.8px' }}>
+                  {amount.toLocaleString()} <span style={{ fontSize: '22px', fontWeight: 700 }}>원</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 회원 인증 & 포인트 (인라인 컴팩트 바) */}
           <div
@@ -1672,38 +1757,68 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
                 type="button"
                 data-testid="start-card-payment-btn"
                 onClick={handleStartPayment}
-                style={{
-                  height: '80px',
-                  padding: '0 48px',
-                  borderRadius: '999px',
-                  background: '#1d1d1f',
-                  color: '#ffffff',
-                  fontSize: '24px',
-                  fontWeight: 900,
-                  border: 'none',
-                  cursor: 'pointer',
-                  boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '14px',
-                  letterSpacing: '-0.5px',
-                  transition: 'all 0.15s ease'
-                }}
+                className={`decision-tactile-btn payment-tactile-btn ${
+                  finalCardAmt === 0
+                    ? 'decision-btn-emerald'
+                    : paymentBayPreview?.isWaitlist
+                      ? 'decision-btn-amber'
+                      : 'decision-btn-blue'
+                }`}
+                style={{ '--decision-sheen-delay': '0.3s' } as React.CSSProperties}
               >
-                {finalCardAmt === 0 ? (
-                  <>
-                    <CheckCircle2 size={26} />
-                    <span>0원 결제 완료하기</span>
-                  </>
-                ) : (
-                  <>
-                    <CreditCard size={26} />
-                    <span>
-                      {finalCardAmt.toLocaleString()}원 카드 결제 시작
+                <span
+                  style={{
+                    position: 'relative',
+                    zIndex: 2,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '3px',
+                  }}
+                >
+                  {paymentBayPreview && (
+                    <span
+                      style={{
+                        fontSize: '14.5px',
+                        fontWeight: 800,
+                        opacity: 0.94,
+                        letterSpacing: '-0.2px',
+                        lineHeight: 1.15,
+                        whiteSpace: 'nowrap',
+                        maxWidth: '460px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {(assignedBayNos && assignedBayNos.length > 1)
+                        ? `${assignedBayNos.join(', ')}번 타석 (${assignedBayNos.length}석)`
+                        : paymentBayPreview.bayWithFloorLabel}
+                      {paymentBayPreview.timeRangeLabel ? ` · ${paymentBayPreview.timeRangeLabel}` : ''}
                     </span>
-                  </>
-                )}
+                  )}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', fontSize: '24px', fontWeight: 900, lineHeight: 1.15 }}>
+                    {finalCardAmt === 0 ? (
+                      <>
+                        <CheckCircle2 size={25} />
+                        <span>0원 결제 완료하기</span>
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard size={25} />
+                        <span>{finalCardAmt.toLocaleString()}원 카드 결제 시작</span>
+                      </>
+                    )}
+                  </span>
+                </span>
+                <ArrowRight
+                  size={27}
+                  strokeWidth={3}
+                  className="decision-btn-arrow"
+                  aria-hidden="true"
+                  style={{ position: 'relative', zIndex: 2, flexShrink: 0 }}
+                />
               </button>
             </div>
           </div>
@@ -1822,14 +1937,21 @@ export const PaymentTerminal: React.FC<PaymentTerminalProps> = ({
               </span>
               <div style={{ fontSize: '24px', fontWeight: 900, color: '#1d1d1f', marginTop: '3px' }}>
                 {productName}
-                {(assignedBayNos && assignedBayNos.length > 0)
-                  ? ` (${assignedBayNos.join(', ')}번 타석)`
-                  : assignedBayNo
-                    ? ` (${assignedBayNo}번 타석)`
-                    : assignedLockerNo
-                      ? ` (라카 ${assignedLockerNo}호)`
-                      : ''}
+                {(assignedBayNos && assignedBayNos.length > 1)
+                  ? ` (${assignedBayNos.join(', ')}번 타석 · ${assignedBayNos.length}석)`
+                  : (paymentBayPreview
+                      ? ` (${paymentBayPreview.bayWithFloorLabel})`
+                      : assignedBayNo
+                        ? ` (${assignedBayNo}번 타석)`
+                        : assignedLockerNo
+                          ? ` (라카 ${assignedLockerNo}호)`
+                          : '')}
               </div>
+              {paymentBayPreview?.endHhmm && (
+                <div style={{ fontSize: '15px', fontWeight: 800, color: paymentBayPreview.isWaitlist ? '#b45309' : '#059669', marginTop: '4px', fontVariantNumeric: 'tabular-nums' }}>
+                  {paymentBayPreview.isWaitlist ? '대기 이용 예정' : '이용 예정'} {paymentBayPreview.timeRangeLabel}
+                </div>
+              )}
             </div>
 
             <div style={{ textAlign: 'right' }}>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, User, X, Check, Smartphone, QrCode, Delete, Hash } from 'lucide-react';
+import { Camera, User, X, Check, ArrowRight, Smartphone, QrCode, Delete, Hash } from 'lucide-react';
 import { api, Member, Bay } from '../services/api';
 import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
 import {
@@ -1759,24 +1759,11 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
                       setDetectedMember(null);
                       confirmDetectedMemberOnce(authConfirmedRef, target, onAuthSuccess);
                     }}
-                    style={{
-                      height: '96px',
-                      borderRadius: '999px',
-                      fontSize: '32px',
-                      fontWeight: 900,
-                      background: detectedPreview.isWaitlist ? '#d97706' : '#059669',
-                      color: '#ffffff',
-                      border: 'none',
-                      boxShadow: detectedPreview.isWaitlist
-                        ? '0 12px 28px rgba(217, 119, 6, 0.30)'
-                        : '0 12px 28px rgba(5, 150, 105, 0.30)',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                    onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.97)'}
-                    onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                    className={`decision-tactile-btn kiosk-confirm-tactile-btn ${detectedPreview.isWaitlist ? 'decision-btn-amber' : 'decision-btn-emerald'}`}
                   >
-                    예, 맞습니다!
+                    <Check size={30} strokeWidth={3} style={{ position: 'relative', zIndex: 2 }} />
+                    <span style={{ position: 'relative', zIndex: 2 }}>예, 맞습니다!</span>
+                    <ArrowRight size={28} strokeWidth={2.6} className="decision-btn-arrow" style={{ position: 'relative', zIndex: 2 }} />
                   </button>
                 </div>
               </div>

@@ -40,8 +40,12 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
   const isSelfLocked = isPreOccupied && (isSelected || (!!bay.lock_terminal_id && bay.lock_terminal_id === api.getTerminalId()));
   const isClickable = !isMaintenance && (isAvailable || isOccupied || isPrepare || isSelected || isSelfLocked || isLessonOnly || isCurrentMyBay);
 
+  const hasWaitlist = Boolean(bay.waiting_res_count && bay.waiting_res_count > 0);
   const totalRemainingMin = TimeMaster.getTotalWaitMinutes(bay);
-  const finalEndTimeStr = TimeMaster.formatAvailableFromTime(bay);
+  const rawAvailableEndTimeStr = TimeMaster.formatAvailableFromTime(bay);
+  const finalEndTimeStr = /^\d{2}:\d{2}$/.test(rawAvailableEndTimeStr)
+    ? `~${rawAvailableEndTimeStr}`
+    : rawAvailableEndTimeStr;
 
   const progressPercent = totalRemainingMin >= 60
     ? 100
@@ -494,7 +498,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
               boxSizing: 'border-box',
             }}
           >
-            {/* 1단(상단 풀폭): 남은 대기 시간 강조 (좌우 정렬 · 14px 라벨 + 27px 볼드 수치) */}
+            {/* 1단(상단 풀폭): 남은 시간 / 남은 대기 강조 (좌우 정렬 · 14px 라벨 + 27px 볼드 수치) */}
             <div
               style={{
                 display: 'flex',
@@ -527,7 +531,9 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
               >
                 {bay.is_paused
                   ? (lang === 'KO' ? '일시 정지' : 'Paused')
-                  : (lang === 'KO' ? '남은 대기' : 'Wait Time')}
+                  : hasWaitlist
+                  ? (lang === 'KO' ? '남은 대기' : 'Wait Time')
+                  : (lang === 'KO' ? '남은 시간' : 'Time Left')}
               </span>
               <span
                 style={{
@@ -564,7 +570,7 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
               }}
             />
 
-            {/* 2단(하단 풀폭): 시작 시각 고대비 표출 (좌우 정렬 · 14px 라벨 + 23px 볼드 시각) */}
+            {/* 2단(하단 풀폭): 앞사람 종료 시각(~HH:mm) / 일시정지 상태 고대비 표출 (좌우 정렬 · 14px 라벨 + 23px 볼드 시각) */}
             <div
               style={{
                 display: 'flex',
@@ -585,7 +591,11 @@ export const TeeboxTileCard: React.FC<TeeboxTileCardProps> = ({
                   whiteSpace: 'nowrap',
                 }}
               >
-                {lang === 'KO' ? '시작 시각' : 'Start At'}
+                {bay.is_paused
+                  ? (lang === 'KO' ? '현재 상태' : 'Status')
+                  : hasWaitlist
+                  ? (lang === 'KO' ? '종료 예정' : 'Est. End')
+                  : (lang === 'KO' ? '종료 시각' : 'Ends At')}
               </span>
               <span
                 style={{
