@@ -1,8 +1,8 @@
 # 🗺️ LocalMaster Kiosk (`LocalMaster_Kiosk`) 단일 진실 공급원(SSOT) 맵
 
-> **최종 동기화 일자**: 2026-11-16
+> **최종 동기화 일자**: 2026-11-17
 > **포트 규약**: `Port 5179` (Vite React + TypeScript + Electron/Windows Hardware Bridge)
-> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 99개 파일 594 passed / 8대 골든 패스 E2E 100% 통과)
+> **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 104개 파일 604 passed / 8대 골든 패스 E2E 100% 통과)
 
 ---
 
