@@ -216,9 +216,11 @@ const STORAGE_KEY = 'lm-kiosk-settings';
 
 export function getDefaultApiUrl(): string {
   if (typeof window !== 'undefined' && window.location) {
+    const protocol = window.location.protocol;
+    const isHttp = protocol === 'http:' || protocol === 'https:';
     const hostname = window.location.hostname;
-    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return `${window.location.protocol}//${hostname}:8000`;
+    if (isHttp && hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return `${protocol}//${hostname}:8000`;
     }
   }
   return 'http://127.0.0.1:8000';
@@ -226,6 +228,18 @@ export function getDefaultApiUrl(): string {
 
 export function normalizeApiUrl(rawUrl?: string): string {
   let base = (rawUrl || '').trim().replace(/\/+$/, '');
+  if (base) {
+    try {
+      const parsed = new URL(base);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        base = '';
+      }
+    } catch {
+      if (!/^https?:\/\//i.test(base)) {
+        base = '';
+      }
+    }
+  }
   if (!base) {
     base = getDefaultApiUrl();
   }

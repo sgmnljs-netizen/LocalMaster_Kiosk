@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   ArrowLeftRight,
   ArrowRight,
@@ -90,6 +90,23 @@ interface KioskMainDashboardProps {
   onMenuClick?: (menuId: string, zoneIds: (string | number)[]) => void;
 }
 
+export function sortKioskDashboardMenus(menus: ReadonlyArray<KioskMenuConfig>): KioskMenuConfig[] {
+  return [...menus].sort((a, b) => {
+    const orderA = typeof a.sort_order === 'number' && Number.isFinite(a.sort_order) ? a.sort_order : 99;
+    const orderB = typeof b.sort_order === 'number' && Number.isFinite(b.sort_order) ? b.sort_order : 99;
+    return orderA - orderB;
+  });
+}
+
+export function shouldAllowDashboardCardTap(
+  lastTapAtMs: number,
+  nowMs: number = Date.now(),
+  cooldownMs: number = 350
+): boolean {
+  if (!Number.isFinite(lastTapAtMs) || lastTapAtMs <= 0) return true;
+  return nowMs - lastTapAtMs >= cooldownMs;
+}
+
 export default function KioskMainDashboard({
   lang,
   bays,
@@ -109,6 +126,7 @@ export default function KioskMainDashboard({
   const t = TRANSLATIONS[lang];
   const { settings } = useKioskSettings();
   const effectiveOverrides = menuOverrides ?? settings.menuOverrides;
+  const lastCardTapAtRef = useRef<number>(0);
 
   const cleanStoreLabel = (storeName || '')
     .replace(/^골포스\s*/, '')
@@ -133,17 +151,22 @@ export default function KioskMainDashboard({
 
   // 활성화된 메뉴 목록 동적 필터링 및 정렬 (파트너센터 설정 + 기기별 로컬 오버라이드 결합)
   const rawMenus: KioskMenuConfig[] = kioskMenuConfigs && kioskMenuConfigs.length > 0 ? kioskMenuConfigs : defaultMenus;
-  const activeMenus = rawMenus
-    .filter((m) => isKioskMenuEnabled(m.menu_id, effectiveOverrides, m.is_active !== false))
-    .sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99));
+  const activeMenus = sortKioskDashboardMenus(
+    rawMenus.filter((m) => isKioskMenuEnabled(m.menu_id, effectiveOverrides, m.is_active !== false))
+  );
 
   const effectiveOnCheckin =
     onCheckin && isKioskMenuEnabled('CHECKIN', effectiveOverrides, true)
       ? onCheckin
       : undefined;
 
-  // 메뉴 클릭 핸들러 (통합 onMenuClick 및 레거시 핸들러 하이브리드 지원)
+  // 메뉴 클릭 핸들러 (350ms 따닥 디바운스 + 통합 onMenuClick/레거시 핸들러 하이브리드 지원)
   const handleCardClick = (menuId: string, zoneIds: (string | number)[] = []) => {
+    const nowMs = Date.now();
+    if (!shouldAllowDashboardCardTap(lastCardTapAtRef.current, nowMs)) {
+      return;
+    }
+    lastCardTapAtRef.current = nowMs;
     if (onMenuClick) {
       onMenuClick(menuId, zoneIds);
     }
@@ -334,7 +357,7 @@ export default function KioskMainDashboard({
             {/* 📌 좌측: 예약 타석 체크인 (딥 포레스트 에메랄드 글래스 + 크리스탈 화이트 3D CTA) */}
             {effectiveOnCheckin && (
               <div
-                onClick={effectiveOnCheckin}
+                onClick={() => handleCardClick('CHECKIN')}
                 style={{
                   minHeight: '292px',
                   display: 'flex',

@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import KioskMainDashboard from '../MainPage/KioskMainDashboard';
+import KioskMainDashboard, {
+  shouldAllowDashboardCardTap,
+  sortKioskDashboardMenus,
+} from '../MainPage/KioskMainDashboard';
+import { normalizeApiUrl } from '../../stores/kioskSettings';
 import type { Bay, KioskMenuConfig } from '../../services/api';
 
 const storageMap = new Map<string, string>();
@@ -115,5 +119,36 @@ describe('KioskMainDashboard UI 시각 위계 · 가용 집계 · 커스텀 메�
     expect(html).toContain('맞춤 서비스');
     expect(html).toContain('서비스 이용하기');
     expect(html).not.toContain('타석 이동하기');
+  });
+
+  it('MD-04: sort_order=0 우선순위를 보존하고, 350ms 이내 카드 연타 차단 및 비HTTP API URL 폴백을 검증한다', () => {
+    const sorted = sortKioskDashboardMenus([
+      {
+        menu_id: 'LOCKER',
+        menu_name: '라카 연장',
+        description: '',
+        zone_ids: [],
+        is_active: true,
+        sort_order: 2,
+        icon_type: 'LOCKER',
+      },
+      {
+        menu_id: 'ALLOCATE_DAILY',
+        menu_name: '연습타석 배정',
+        description: '',
+        zone_ids: [],
+        is_active: true,
+        sort_order: 0,
+        icon_type: 'TARGET',
+      },
+    ]);
+    expect(sorted.map((m) => m.menu_id)).toEqual(['ALLOCATE_DAILY', 'LOCKER']);
+
+    expect(shouldAllowDashboardCardTap(0, 1000)).toBe(true);
+    expect(shouldAllowDashboardCardTap(1000, 1200)).toBe(false);
+    expect(shouldAllowDashboardCardTap(1000, 1350)).toBe(true);
+
+    expect(normalizeApiUrl('javascript:alert(1)')).toBe('http://127.0.0.1:8000/api');
+    expect(normalizeApiUrl('file:///C:/kiosk/index.html')).toBe('http://127.0.0.1:8000/api');
   });
 });
