@@ -43,7 +43,7 @@
   - 다크 프로스트 카드: **애플 스노우 화이트 필 버튼 (`background: #ffffff`, `color: #000000`)**
   - 타석 배정 최종 확정 CTA (`AssetSelectModal.tsx` 2단 시선 릴레이): 미선택 시 뉴트럴 슬레이트(`#f1f5f9`)로 대기하다가, 고객이 이용권 카드를 터치하는 즉시 **즉시 배정 에메랄드 주얼 그라디언트(`.asset-cta-ready`)** / **대기 예약 앰버 주얼 그라디언트(`.asset-cta-ready-amber`)**와 외곽 호흡형 헤일로 링(`::before` `inset: -7px`)·내부 화이트 유리 광택 스윕(`.asset-cta-sheen-clip::after`)·우측 화살표 넛지(`.asset-cta-arrow`)가 동시 점등됩니다(`{NN}번 타석 · {HH:mm ~ HH:mm} 즉시 배정` / `대기 예약` 직접 각인, 이모지 미사용; `Why`: 1장 보유 시에도 자동 선선택하지 않고 카드 광택 ➔ 확정 CTA 점등으로 시선을 넘겨 오터치 배정을 방지).
 - **3D 택타일 CTA & 마이크로 넛지 인터랙션 ([kiosk_design_system.css](file:///Users/sgmnljs/workspace/Python/LocalMaster_Kiosk/src/styles/kiosk_design_system.css))**:
-  - 대기 화면 진입 유도 배너(`IntroScreen.tsx`)에는 `animate-hand-tap` 아이콘을 유지하고, 주요 배정·결제·체크인·이동·연장·확인 확정 CTA에는 공용 **`.decision-tactile-btn`**(`.decision-btn-emerald`/`-amber`/`-blue` 3D 상단 하이라이트+하단 눌림 립+교차 광택 스윕+`.decision-btn-arrow` 화살표 넛지) 및 모디파이어(`.shop-tactile-btn`, `.payment-tactile-btn`, `.kiosk-action-tactile-btn`, `.kiosk-confirm-tactile-btn`, `.locker-tactile-cta`)를 일관 적용합니다 (`:disabled` 상태에서는 셔머·화살표 넛지·`:active` 침강을 자동 차단).
+  - 대기 화면 진입 유도 배너(`IntroScreen.tsx`)에는 `animate-hand-tap` 아이콘을 유지하고, 메인 대시보드 및 주요 배정·결제·체크인·이동·연장·확인 확정 CTA에는 공용 **`.decision-tactile-btn`**(`.decision-btn-emerald`/`-amber`/`-blue` 3D 상단 하이라이트+하단 눌림 립+교차 광택 스윕+`.decision-btn-arrow` 화살표 넛지) 및 모디파이어(`.dashboard-hero-tactile-btn`, `.dashboard-hero-snow-btn`, `.dashboard-sub-cta`, `.dashboard-signup-cta`, `.shop-tactile-btn`, `.payment-tactile-btn`, `.kiosk-action-tactile-btn`, `.kiosk-confirm-tactile-btn`, `.locker-tactile-cta`)를 일관 적용합니다 (`:disabled` 상태에서는 셔머·화살표 넛지·`:active` 침강을 자동 차단; `Why`: 메인 대시보드는 Hero 에메랄드 3D > 서브 시맨틱 컬러 3D > 회원가입 소프트 블루 순으로 시각 무게 위계를 유지).
 
 ---
 
@@ -93,6 +93,7 @@
 
 | 일자 | 버전 | 변경 구분 | 핵심 변경 요약 |
 | :--- | :--- | :--- | :--- |
+| 2026-11-17 | v9.7 | 메인 대시보드 시각 위계·3D CTA 통일 | `KioskMainDashboard`·`KioskApp` 지점 Eyebrow 중앙 통합(`MapPin`), Hero `.dashboard-hero-tactile-btn`(에메랄드 3D·실시간 가용 N석)·`.dashboard-hero-snow-btn`, 서브 `.dashboard-sub-cta`·`h3` 수평 정렬, 회원가입 `.dashboard-signup-cta` 3순위 시각 분리 및 Zero-Emoji 통일 |
 | 2026-11-16 | v9.6 | 사용중 타석 종료시각(`~HH:mm`) 직관화 | `TeeboxTileCard` 대기 0명(`남은 시간`/`종료 시각 ~HH:mm`)·대기 1명+(`남은 대기`/`종료 예정 ~HH:mm`)·일시정지(`현재 상태: 정지중`) 분리 및 `'~종료'` 방어, `PracticeSelect` 분기모달 `formatNextQueueStartTime` 정렬 |
 | 2026-11-16 | v9.5 | 전 화면 3D 택타일 · Double-Check · 타일 스케일업 통일 | `TeeboxTileCard` `84px` 2단 KPI(`27px`/`23px`)·`10px 8px 9px 8px` 패딩, `.decision-tactile-btn` 3D 베벨·스윕·화살표 넛지 및 `:disabled` 가드 공용화(`PracticeSelect`·`ProductShop`·`PaymentTerminal`·`TeeboxMap`·`CheckinSelect`·`Par3Allocation`·`MemberAuth`·`CompanionSetupModal`·`LockerExtend`), Double-Check 타석/시간 요약·Zero-Emoji 일괄 동기화 |
 | 2026-11-15 | v9.4 | SSOT 표준화 | 크리스탈 라이트 블러(`3px`) 공간 맥락 보존 및 Top-Y 앵커 무변위(`0.0000px`) 오터치 방어 근거(`Why`) 보강, 링크·컴포넌트 참조 전수 검증 |

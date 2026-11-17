@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { 
   ArrowLeftRight, Calendar, Compass, CreditCard, Clock,
-  KeyRound, RefreshCw, ShieldAlert, Sparkles, UserCheck, UserPlus
+  KeyRound, MapPin, RefreshCw, ShieldAlert, Sparkles, UserCheck, UserPlus
 } from 'lucide-react';
 import { IntroScreen } from './components/IntroScreen';
 import { MemberAuth } from './components/MemberAuth';
@@ -2776,11 +2776,11 @@ export default function KioskApp() {
             }}
           >
             
-            {/* 최상단 지점 및 세션 네비게이션 헤더 (전역 회원 배너는 공용 키오스크 오배정 사고 방지를 위해 제거하고, 각 세부 모달 내부에서 일회성으로만 표출) */}
-            {step !== 'PRACTICE_SELECT' && (
+            {/* 최상단 지점 및 세션 네비게이션 헤더 (메인 대시보드 전광판 노출 시 지점 배지는 KioskMainDashboard 중앙 Eyebrow로 통합) */}
+            {step !== 'PRACTICE_SELECT' && (step !== 'MAIN_DASHBOARD' || settings.topDashboardMode === 'HIDDEN') && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 {step === 'MAIN_DASHBOARD' ? (
-                  <div 
+                  <div
                     style={{
                       cursor: 'pointer',
                       display: 'inline-flex',
@@ -2789,14 +2789,14 @@ export default function KioskApp() {
                       padding: '8px 18px',
                       borderRadius: '999px',
                       background: '#ffffff',
-                      border: '1px solid rgba(0, 0, 0, 0.08)',
-                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+                      border: '1px solid #e2e8f0',
+                      boxShadow: '0 2px 8px rgba(15, 23, 42, 0.04)',
                     }}
                     onClick={() => handleLogout()}
                     title="대기화면으로 돌아가기"
                   >
-                    <span style={{ fontSize: '18px' }}>⛳</span>
-                    <span style={{ fontSize: '18px', fontWeight: 800, color: '#111827', letterSpacing: '-0.3px' }}>
+                    <MapPin size={16} strokeWidth={2.5} style={{ color: '#059669' }} />
+                    <span style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.3px' }}>
                       {storeName.replace(/^골포스\s*/, '').replace(/^로컬마스터\s*/, '').trim() || '골프 아카데미'}
                     </span>
                   </div>
@@ -2805,10 +2805,7 @@ export default function KioskApp() {
                 )}
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  {/* 타석현황판(TopTeeboxDashboard)이 미노출되는 서브 화면 또는 HIDDEN 모드일 때만 상단 네비게이션 바 우측에 시계 표시 */}
-                  {(step !== 'MAIN_DASHBOARD' || settings.topDashboardMode === 'HIDDEN') && (
-                    <KioskLiveClock lang={lang} variant="compact" />
-                  )}
+                  <KioskLiveClock lang={lang} variant="compact" />
                 </div>
               </div>
             )}
@@ -2882,6 +2879,9 @@ export default function KioskApp() {
             {step === 'MAIN_DASHBOARD' && completedAllocationInfo === null && feedbackCountdown === null && (
               <KioskMainDashboard 
                 lang={lang}
+                bays={bays}
+                storeName={storeName}
+                onReturnToIntro={settings.topDashboardMode !== 'HIDDEN' ? () => handleLogout() : undefined}
                 kioskMenuConfigs={kioskMenuConfigs}
                 onPracticeTeebox={() => {
                   if (!guardStoreOperatingHours('타석 배정')) {
