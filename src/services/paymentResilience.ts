@@ -147,6 +147,7 @@ export interface FetchWithPaymentRetryOptions {
 }
 
 let idempotencyAttemptSeq = 0;
+let dlqNoAuthSeq = 0;
 
 /**
  * 단일 API 호출(내부 네트워크 재시도 1~3회 전체) 안에서는 동일한 X-Idempotency-Key를 유지하면서,
@@ -390,10 +391,13 @@ export class PaymentOutboxManager {
   }): string {
     const cleanAuth = String(params.authCode || '').trim();
     const cleanStore = String(params.storeCd || '').trim();
+    const cleanVanTrNo = String(params.vanTrNo || '').trim();
     const safeAmount = Number.isFinite(Number(params.amount))
       ? Math.max(0, Math.floor(Number(params.amount)))
       : 0;
-    const dedupKey = `DLQ_${cleanStore}_${cleanAuth}_${safeAmount}`;
+    const dedupKey = cleanAuth
+      ? `DLQ_${cleanStore}_${cleanAuth}_${safeAmount}`
+      : `DLQ_${cleanStore}_NOAUTH_${cleanVanTrNo || `${Date.now()}_${++dlqNoAuthSeq}`}_${safeAmount}`;
     const nowIso = new Date().toISOString();
     // 동일 지점·승인번호의 WAL_IN_FLIGHT가 남아있으면 PENDING_DLQ로 원자적 승격(치환)
     const entries = this.getEntries().filter(
