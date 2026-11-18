@@ -500,6 +500,13 @@ export default function KioskApp() {
   const [photoUrl, setPhotoUrl] = useState<string | undefined>(undefined);
   const [logoUrl, setLogoUrl] = useState<string | undefined>(undefined);
   const storeInfoSyncedRef = useRef<boolean>(false);
+  const syncedStorePolicyRef = useRef<{
+    openTime: string;
+    closeTime: string;
+    is24h: boolean;
+    isClosed: boolean;
+    closedReason: string | null;
+  } | null>(null);
 
   const loadBays = async () => {
     try {
@@ -515,10 +522,14 @@ export default function KioskApp() {
   // 0. 가맹점 상호명 및 동적 체크인 정책 로드 + WebSocket 실시간 채널 연결
   useEffect(() => {
     storeInfoSyncedRef.current = false;
+    syncedStorePolicyRef.current = null;
     const syncMasterAndStoreInfo = async () => {
       try {
         const isOnlineNow = await api.checkConnection();
-        const masterData = await api.getKioskMasterData();
+        const [masterData, info] = await Promise.all([
+          api.getKioskMasterData(),
+          api.getStoreInfo(),
+        ]);
         if (Array.isArray(masterData?.zones) && masterData.zones.length > 0) {
           const nextZoneMap: Record<string, string> = {};
           for (const z of masterData.zones) {
@@ -528,7 +539,6 @@ export default function KioskApp() {
           }
           setZoneLabelMap(nextZoneMap);
         }
-        const info = await api.getStoreInfo();
         setStoreName(info.store_nm);
         if (info.open_time) {
           setStoreOpenTime(info.open_time);
@@ -566,6 +576,13 @@ export default function KioskApp() {
             }
           }
         }
+        syncedStorePolicyRef.current = {
+          openTime: info.open_time || '06:00',
+          closeTime: info.close_time || '24:00',
+          is24h: Boolean(info.is_24h),
+          isClosed: Boolean(info.is_closed),
+          closedReason: info.closed_reason ?? null,
+        };
         if (isOnlineNow) {
           storeInfoSyncedRef.current = true;
         }
@@ -960,35 +977,42 @@ export default function KioskApp() {
 
   // 매장 휴무일 및 당일 운영시간(open_time ~ close_time) 통합 사전 진입 가드
   const guardStoreOperatingHours = (actionLabel: string): boolean => {
-    if (isStoreClosed) {
+    const policy =
+      storeInfoSyncedRef.current && syncedStorePolicyRef.current
+        ? syncedStorePolicyRef.current
+        : TimeMaster.resolveCachedStoreOperatingPolicy(
+            typeof localStorage !== 'undefined'
+              ? localStorage.getItem('LM_STORE_INFO')
+              : null
+          );
+    if (!policy) {
+      return true;
+    }
+
+    if (policy.isClosed) {
       const actionWithParticle =
         actionLabel.endsWith('배정') || actionLabel.endsWith('이동') || actionLabel.endsWith('체크인')
           ? `${actionLabel}을`
           : `${actionLabel}을(를)`;
       showErrorModal(
-        storeClosedReason
-          ? `오늘은 매장 휴무일(${storeClosedReason})로 ${actionWithParticle} 진행할 수 없습니다.`
+        policy.closedReason
+          ? `오늘은 매장 휴무일(${policy.closedReason})로 ${actionWithParticle} 진행할 수 없습니다.`
           : `오늘은 매장 휴무일로 ${actionWithParticle} 진행할 수 없습니다.`,
         '매장 휴무일 안내'
       );
       return false;
     }
 
-    const hasSyncedStoreHours =
-      storeInfoSyncedRef.current ||
-      (typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('LM_STORE_INFO')));
-    if (hasSyncedStoreHours) {
-      const opWindow = TimeMaster.evaluateStoreOperatingWindow(
-        storeOpenTime,
-        storeCloseTime,
-        TimeMaster.getSyncedDate(),
-        { is24h: isStore24h }
-      );
-      if (!opWindow.isOpen) {
-        const blockNotice = TimeMaster.buildOperatingHoursBlockMessage(opWindow, actionLabel, lang);
-        showErrorModal(blockNotice.message, blockNotice.title);
-        return false;
-      }
+    const opWindow = TimeMaster.evaluateStoreOperatingWindow(
+      policy.openTime ?? storeOpenTime,
+      policy.closeTime ?? storeCloseTime,
+      TimeMaster.getSyncedDate(),
+      { is24h: policy.is24h }
+    );
+    if (!opWindow.isOpen) {
+      const blockNotice = TimeMaster.buildOperatingHoursBlockMessage(opWindow, actionLabel, lang);
+      showErrorModal(blockNotice.message, blockNotice.title);
+      return false;
     }
     return true;
   };

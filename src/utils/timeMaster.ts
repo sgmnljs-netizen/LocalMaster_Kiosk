@@ -547,6 +547,67 @@ export class TimeMaster {
   }
 
   /**
+   * [Boot-Race Guard] getStoreInfo() 완료 전 React 초기값('06:00'~'24:00', is24h=false) 오판 방지용
+   * localStorage LM_STORE_INFO 스냅샷 내 실매장 운영시간/24h 정책 안전 해석
+   */
+  static resolveCachedStoreOperatingPolicy(
+    rawStoreInfoJson: string | null | undefined
+  ): CachedStoreOperatingPolicy | null {
+    if (!rawStoreInfoJson || typeof rawStoreInfoJson !== 'string') {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(rawStoreInfoJson) as Record<string, unknown> | null;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return null;
+      }
+      let metaObj: Record<string, unknown> | null = null;
+      if (typeof parsed.meta_data === 'string' && parsed.meta_data.trim()) {
+        try {
+          const decodedMeta = JSON.parse(parsed.meta_data);
+          if (decodedMeta && typeof decodedMeta === 'object' && !Array.isArray(decodedMeta)) {
+            metaObj = decodedMeta as Record<string, unknown>;
+          }
+        } catch {
+          metaObj = null;
+        }
+      } else if (
+        parsed.meta_data &&
+        typeof parsed.meta_data === 'object' &&
+        !Array.isArray(parsed.meta_data)
+      ) {
+        metaObj = parsed.meta_data as Record<string, unknown>;
+      }
+      const metaOp =
+        metaObj?.operation && typeof metaObj.operation === 'object' && !Array.isArray(metaObj.operation)
+          ? (metaObj.operation as Record<string, unknown>)
+          : null;
+
+      const is24h = Boolean(parsed.is_24h ?? metaOp?.is_24h);
+      const isClosed = Boolean(parsed.is_closed);
+      const closedReason =
+        typeof parsed.closed_reason === 'string' && parsed.closed_reason.trim()
+          ? parsed.closed_reason.trim()
+          : null;
+      const openTime =
+        typeof parsed.open_time === 'string' && parsed.open_time.trim()
+          ? parsed.open_time.trim()
+          : null;
+      const closeTime =
+        typeof parsed.close_time === 'string' && parsed.close_time.trim()
+          ? parsed.close_time.trim()
+          : null;
+
+      if (!is24h && !isClosed && !openTime && !closeTime) {
+        return null;
+      }
+      return { openTime, closeTime, is24h, isClosed, closedReason };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * [SSOT] 타석 배정(즉시 배정 vs 대기 예약) 시각·이용시간·단축여부 프리뷰 산출
    * - 백엔드 AllocatorService.find_next_available_slot & kiosk.py (total_duration = effective_duration_min + prepare_min) 1:1 정합
    * - 본 단말기 선점 상태(PRE_OCCUPIED)는 빈 타석 즉시 배정(!isBayOccupied)으로 판정하여 오판 원천 차단
@@ -554,6 +615,14 @@ export class TimeMaster {
   static buildBayAllocationPreview(options: BayAllocationPreviewOptions): BayAllocationPreviewResult {
     return buildBayAllocationPreview(options);
   }
+}
+
+export interface CachedStoreOperatingPolicy {
+  openTime: string | null;
+  closeTime: string | null;
+  is24h: boolean;
+  isClosed: boolean;
+  closedReason: string | null;
 }
 
 export interface BayAllocationPreviewProbe extends BayStatusProbe {

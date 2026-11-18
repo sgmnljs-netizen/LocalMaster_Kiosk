@@ -170,4 +170,39 @@ describe('키오스크 운영시간 사전 진입 가드 & 타석 선점(preoccu
     );
     expect(msg).toBe('유효하지 않은 키오스크 기기 인증 키입니다.');
   });
+
+  it('6. resolveCachedStoreOperatingPolicy는 getKioskMasterData 선저장으로 인한 부팅 레이스 시 실제 캐시 정책만 안전 해석한다', () => {
+    expect(TimeMaster.resolveCachedStoreOperatingPolicy(null)).toBeNull();
+    expect(TimeMaster.resolveCachedStoreOperatingPolicy('{bad-json')).toBeNull();
+    // 운영시간 필드 없는 데모 스텁은 차단 정책으로 오인하지 않고 null 반환
+    expect(
+      TimeMaster.resolveCachedStoreOperatingPolicy(
+        JSON.stringify({ store_cd: 'H01-SE-001', store_nm: '체험관' })
+      )
+    ).toBeNull();
+
+    // 문자열 meta_data.operation.is_24h 및 open_time/close_time 복원
+    const parsedFromStringMeta = TimeMaster.resolveCachedStoreOperatingPolicy(
+      JSON.stringify({
+        open_time: '06:00',
+        close_time: '23:00',
+        meta_data: JSON.stringify({ operation: { is_24h: true } }),
+      })
+    );
+    expect(parsedFromStringMeta).toEqual({
+      openTime: '06:00',
+      closeTime: '23:00',
+      is24h: true,
+      isClosed: false,
+      closedReason: null,
+    });
+
+    const evaluated = TimeMaster.evaluateStoreOperatingWindow(
+      parsedFromStringMeta!.openTime,
+      parsedFromStringMeta!.closeTime,
+      new Date('2026-11-19T02:10:00+09:00'),
+      { is24h: parsedFromStringMeta!.is24h }
+    );
+    expect(evaluated.isOpen).toBe(true);
+  });
 });
