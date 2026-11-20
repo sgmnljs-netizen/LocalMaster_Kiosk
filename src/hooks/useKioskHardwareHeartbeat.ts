@@ -6,7 +6,7 @@ import {
     resolveVanStatusEndpointPath,
 } from '../stores/kioskSettings';
 import { getIsMockHardware } from '../services/hardware/adapters/HardwareAdapterFactory';
-import { api } from '../services/api';
+import { api, isDemoEnvironment } from '../services/api';
 import { sanitizeVanPort } from './useKioskVanPayment';
 
 const HEARTBEAT_INTERVAL_MS = 30000;
@@ -20,6 +20,16 @@ export interface HardwareProbeResult {
 }
 
 export async function probeKioskHardwareHealthOnce(): Promise<HardwareProbeResult> {
+    // Why: 웹 쇼룸(/demo)에서는 127.0.0.1 로컬 포트 프로브가 브라우저 LNA/CORS 경고 및 콘솔 에러를 유발하므로 즉시 ONLINE 가상 응답
+    if (isDemoEnvironment()) {
+        return {
+            nextVcat: 'ONLINE',
+            nextVcatReason: null,
+            nextPrinter: 'ONLINE',
+            nextPrinterReason: null,
+        };
+    }
+
     const currentSettings = getKioskSettings();
     const defaultPort = sanitizeVanPort(resolveDefaultVanPort(currentSettings.providerType), 9099);
     const port = sanitizeVanPort(currentSettings.vcatPort, defaultPort);

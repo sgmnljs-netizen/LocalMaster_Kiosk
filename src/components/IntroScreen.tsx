@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronRight, Hand, Play, ShieldAlert, Sparkles, Tv } from 'lucide-react';
-import { api, type Bay } from '../services/api';
+import { api, isDemoEnvironment, type Bay } from '../services/api';
 import { isBayTrulyAvailableForKiosk } from '../utils/bayStatusGuard';
 import { normalizeFloorZoneToken, sortFloorsAscending } from '../utils/floorUtils';
 import { KioskLiveClock } from './KioskLiveClock';
@@ -54,6 +54,30 @@ const DEFAULT_ADS: KioskIntroSlide[] = [
   }
 ];
 
+const DEMO_ADS: KioskIntroSlide[] = [
+  {
+    type: 'image',
+    url: '/demo/kiosk-banners/slide2.jpg',
+    title: 'PREMIUM GOLF CLUB',
+    subtitle: '국내 최고 수준의 프리미엄 프라이빗 골프 연습장',
+    tag: 'PROMOTION',
+  },
+  {
+    type: 'image',
+    url: '/demo/kiosk-banners/slide1.jpg',
+    title: 'Professional 1:1 Lessons',
+    subtitle: 'KPGA/KLPGA 투어 출신 강사진의 고품격 분석 레슨',
+    tag: 'PROMOTION',
+  },
+  {
+    type: 'image',
+    url: '/demo/kiosk-banners/slide3.jpg',
+    title: 'Smart Unattended Operation',
+    subtitle: '24시간 모바일 앱 및 키오스크 연동 무인 자동화 타석 배정',
+    tag: 'PROMOTION',
+  },
+];
+
 export function resolveIntroBannerImageUrl(rawUrl: string, baseUrl: string): string {
   const trimmed = (rawUrl || '').trim();
   if (!trimmed) return '';
@@ -76,6 +100,7 @@ export function resolveIntroSlides(
   photoUrl?: string,
   storeName?: string
 ): KioskIntroSlide[] {
+  const fallbackAds = isDemoEnvironment() ? DEMO_ADS : DEFAULT_ADS;
   if (Array.isArray(hqBanners) && hqBanners.length > 0) {
     return hqBanners;
   }
@@ -88,10 +113,10 @@ export function resolveIntroSlides(
         subtitle: '국내 최고 수준의 프리미엄 골프 아카데미',
         tag: 'PROMOTION',
       },
-      ...DEFAULT_ADS.slice(1)
+      ...fallbackAds.slice(1)
     ];
   }
-  return DEFAULT_ADS;
+  return fallbackAds;
 }
 
 export const IntroScreen: React.FC<IntroScreenProps> = ({
@@ -121,6 +146,7 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({
   useEffect(() => {
     let mounted = true;
     const fetchHqIntroBanners = async () => {
+      if (isDemoEnvironment()) return;
       try {
         const storeCd = api.getStoreCd();
         const baseUrl = api.getBaseUrl();

@@ -21,7 +21,7 @@ import { CheckinSelect } from './components/CheckinSelect';
 import { AllocationCompleteModal } from './components/AllocationCompleteModal';
 import { AssetSelectModal, resolveDefaultSelectedAssetId } from './components/AssetSelectModal';
 import { PurchaseCompleteModal, CompletedPurchaseInfo } from './components/PurchaseCompleteModal';
-import { api, Member, Product, Bay, type KioskMenuConfig } from './services/api';
+import { api, isDemoEnvironment as checkIsDemoEnvironment, Member, Product, Bay, type KioskMenuConfig } from './services/api';
 import type { CardApprovalResult } from './services/van/van_types';
 import { kioskVanClient } from './services/van/van_client';
 import { executeKioskAutoReversal } from './services/van/kioskPaymentReversal';
@@ -404,10 +404,12 @@ export default function KioskApp() {
 
     const loadSettings = async () => {
       try {
-        if (!getKioskSettings().deviceKey) {
-          await bootstrapLocalKioskSettings();
+        if (!isDemoEnvironment) {
+          if (!getKioskSettings().deviceKey) {
+            await bootstrapLocalKioskSettings();
+          }
+          void hydrateKioskDeviceSettingsFromServer();
         }
-        void hydrateKioskDeviceSettingsFromServer();
         const kioskConfig = await api.getKioskSystemSettings();
         if (kioskConfig) {
           if (Array.isArray(kioskConfig.menu_zone_mappings)) {
@@ -2907,6 +2909,11 @@ export default function KioskApp() {
                 storeName={storeName}
                 onReturnToIntro={settings.topDashboardMode !== 'HIDDEN' ? () => handleLogout() : undefined}
                 kioskMenuConfigs={kioskMenuConfigs}
+                menuOverrides={
+                  checkIsDemoEnvironment()
+                    ? { ...settings.menuOverrides, CHECKIN: false, PAR3: false }
+                    : settings.menuOverrides
+                }
                 onPracticeTeebox={() => {
                   if (!guardStoreOperatingHours('타석 배정')) {
                     return;
@@ -2955,7 +2962,7 @@ export default function KioskApp() {
                   setAuthMember(null);
                   setStep('MEMBER_REGISTER');
                 }}
-                onCheckin={checkinPolicy !== 'DISABLED' ? () => {
+                onCheckin={!checkIsDemoEnvironment() && checkinPolicy !== 'DISABLED' ? () => {
                   setPurpose('CHECKIN_RESERVATION');
                   setInitialAuthMode('SMART_TAG');
                   if (authMember) {

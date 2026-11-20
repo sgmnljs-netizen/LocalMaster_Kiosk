@@ -562,19 +562,8 @@ export const generateDefault50Bays = (): Bay[] => {
     const isLefty = [2, 10, 18, 22, 30, 38, 42].includes(bayNo);
     const isPrivate = [1, 20, 21, 40, 41, 50].includes(bayNo);
     
-    // 실시간 가동 상태 (이용 중 33개, 이용 가능 17개)
-    const occupiedBayNos = [
-      1, 3, 5, 7, 8, 10, 12, 13, 15, 16, 17, 19, 20,       // 1F (13/20)
-      21, 23, 24, 26, 28, 29, 31, 33, 34, 36, 37, 39, 40, // 2F (13/20)
-      41, 43, 44, 46, 48, 49, 50                           // 3F (7/10)
-    ];
-    const isOccupied = occupiedBayNos.includes(bayNo);
-    
-    const memberNames = ['김프로', '이회원', '박골퍼', '최골프', '정프로', '한회원', '강싱글', '윤버디', '조이글', '송홀인원'];
-    const userName = isOccupied ? memberNames[bayNo % memberNames.length] : null;
-    const remMin = isOccupied ? ((bayNo * 7) % 45 + 10) : undefined;
-    const endTimeStr = isOccupied ? `15:${(remMin! < 10 ? '0' : '') + remMin}` : null;
-
+    // 데모 시연 가독성: 50타석 전체를 깔끔한 미배정(AVAILABLE) 상태로 시작
+    // (방문자가 직접 타석을 배정한 뒤 즉시 사용중 전환 및 타석 이동까지 깔끔하게 체험 가능)
     let bayTypeName = '(오픈형)';
     if (isPrivate) bayTypeName = '(프라이빗룸)';
     else if (isLefty) bayTypeName = '(좌타겸용)';
@@ -586,11 +575,11 @@ export const generateDefault50Bays = (): Bay[] => {
       floor: floorStr,
       zone_code: zoneCode,
       type: isLefty ? 'LEFT' : 'RIGHT',
-      status: isOccupied ? 'OCCUPIED' : 'AVAILABLE',
-      current_user_name: userName,
-      current_user_hp: isOccupied ? `010-${1000 + bayNo}-${2000 + bayNo}` : null,
-      minutes_left: remMin,
-      end_time: endTimeStr,
+      status: 'AVAILABLE',
+      current_user_name: null,
+      current_user_hp: null,
+      minutes_left: undefined,
+      end_time: null,
       bay_name: `${bayNo}번 타석 ${bayTypeName}`,
     };
   });
@@ -669,6 +658,13 @@ const initializeEdgeDB = () => {
   }
 
   if (isDemoEnvironment()) {
+    const DEMO_SEED_VER = 'v20261120_clean_v4';
+    const needsDemoRefresh = localStorage.getItem('LM_DEMO_SEED_VER') !== DEMO_SEED_VER;
+    if (needsDemoRefresh) {
+      ['LM_BAYS', 'LM_PRODUCTS', 'LM_LOCKERS', 'LM_MEMBERS', 'LM_ZONES'].forEach(key => localStorage.removeItem(key));
+      localStorage.setItem('LM_DEMO_SEED_VER', DEMO_SEED_VER);
+    }
+
     // 1. 데모 전용 가맹점 정보
     if (!localStorage.getItem('LM_STORE_INFO') || localStorage.getItem('LM_STORE_INFO') === '{}') {
       const activeStoreCd = getKioskSettings().storeCode || STORE_CODE;
@@ -680,23 +676,25 @@ const initializeEdgeDB = () => {
         ceo_name: '대표이사',
         address: '서울특별시 강남구 테헤란로 123',
         tel: '1566-8705',
-        close_time: '23:00',
-        checkin_policy: 'CHECKIN_REQUIRED',
+        close_time: '23:59',
+        is_24h: true,
+        checkin_policy: 'DISABLED',
         meta_data: { integration: { face_terminal_yn: true } }
       }));
     }
 
-    // 2. 데모 전용 구역 정보 (ZONES: 1F, 2F, 3F, PAR3)
+    // 2. 데모 전용 구역 정보 (ZONES: 1F, 2F, 3F)
     if (!localStorage.getItem('LM_ZONES') || localStorage.getItem('LM_ZONES') === '[]') {
-      localStorage.setItem('LM_ZONES', JSON.stringify(DEFAULT_50_ZONES));
+      localStorage.setItem('LM_ZONES', JSON.stringify(DEFAULT_50_ZONES.filter((z) => z.zone_code !== 'PAR3')));
     }
 
     // 3. 데모 전용 타석 목록 (캐시가 비어있을 때만 시드 생성)
-    if (!Array.isArray(existingBays) || existingBays.length === 0) {
+    const demoExistingBays = safeParseStorageArray<Bay>('LM_BAYS');
+    if (demoExistingBays.length === 0) {
       localStorage.setItem('LM_BAYS', JSON.stringify(generateDefault50Bays()));
     }
 
-    // 4. 데모 전용 상품 목록 (PRODUCTS)
+    // 4. 데모 전용 상품 목록 (PRODUCTS: 일일권 + 정기권 + 라카 연장 전용 상품)
     const existingProducts = safeParseStorageArray<Product>('LM_PRODUCTS');
     if (existingProducts.length === 0) {
       localStorage.setItem('LM_PRODUCTS', JSON.stringify([
@@ -705,6 +703,8 @@ const initializeEdgeDB = () => {
         { prod_cd: 'D03', prod_nm: '일일 타석 120분', standard_price: 35000, sale_price: 35000, logic_type: 'DAILY', duration_min: 120 },
         { prod_cd: 'P03', prod_nm: '1개월 정기 회원권', standard_price: 180000, sale_price: 180000, logic_type: 'MEMBERSHIP', days: 30 },
         { prod_cd: 'P04', prod_nm: '3개월 정기 회원권', standard_price: 480000, sale_price: 450000, logic_type: 'MEMBERSHIP', days: 90 },
+        { prod_cd: 'RNT-LOCKER-1M', prod_nm: '라카 1개월 연장', standard_price: 20000, sale_price: 20000, logic_type: 'RENTAL', days: 30 },
+        { prod_cd: 'RNT-LOCKER-3M', prod_nm: '라카 3개월 연장', standard_price: 60000, sale_price: 55000, logic_type: 'RENTAL', days: 90 },
       ]));
     }
 
@@ -712,9 +712,75 @@ const initializeEdgeDB = () => {
     const existingMembers = safeParseStorageArray<Member>('LM_MEMBERS');
     if (existingMembers.length === 0) {
       localStorage.setItem('LM_MEMBERS', JSON.stringify([
-        { member_no: 'M001', member_name: '홍길동', hp: '010-1234-5678', member_grade: '일반', grade_cd: 'GENERAL', status_cd: 'ACTIVE', total_point: 5000, discount_rate: 0.0 },
+        {
+          member_no: 'M001',
+          member_name: '홍길동',
+          hp: '010-1234-5678',
+          member_grade: '일반',
+          grade_cd: 'GENERAL',
+          status_cd: 'ACTIVE',
+          total_point: 5000,
+          discount_rate: 0.0,
+          assets: [
+            {
+              id: 1001,
+              member_item_id: '1001',
+              item_name: '30회 타석 이용권 (60분)',
+              prod_cd: 'P03',
+              prod_nm: '30회 타석 이용권 (60분)',
+              logic_type: 'COUNT',
+              pass_type: 'TICKET',
+              total_count: 30,
+              rem_count: 14,
+              remain_cnt: 14,
+              duration_min: 60,
+              end_date: '2026-12-31',
+              end_dt: '2026-12-31',
+              expiry_date: '2026-12-31',
+              status: 'ACTIVE',
+              status_cd: 'ACTIVE',
+              is_assignable: true,
+            },
+          ],
+        },
         { member_no: 'M002', member_name: '이골프', hp: '010-9988-7766', member_grade: '우수', grade_cd: 'GOLD', status_cd: 'ACTIVE', total_point: 12000, discount_rate: 5.0 },
         { member_no: 'M003', member_name: '박프로', hp: '010-5544-3322', member_grade: 'VIP', grade_cd: 'VIP', status_cd: 'ACTIVE', total_point: 35000, discount_rate: 10.0 },
+      ]));
+    }
+
+    // 6. 데모 전용 라카 목록 (홍길동 M001 보유 라카 포함 -> '라카 연장' 즉시 체험 가능)
+    const existingLockers = safeParseStorageArray<Locker>('LM_LOCKERS');
+    if (existingLockers.length === 0) {
+      const expireDt = new Date(Date.now() + 7 * 86_400_000);
+      const pad2 = (n: number) => String(n).padStart(2, '0');
+      const endDtStr = `${expireDt.getFullYear()}-${pad2(expireDt.getMonth() + 1)}-${pad2(expireDt.getDate())}`;
+      localStorage.setItem('LM_LOCKERS', JSON.stringify([
+        {
+          locker_id: 1012,
+          locker_no: 'A-12',
+          display_no: 'A-12',
+          group_id: 'G01',
+          zone_name: '1층 로비 프리미엄존',
+          floor_no: 1,
+          status: 'OCCUPIED',
+          member_no: 'M001',
+          member_name: '홍길동',
+          start_dt: '2026-10-20',
+          end_dt: endDtStr,
+        },
+        {
+          locker_id: 1024,
+          locker_no: 'B-04',
+          display_no: 'B-04',
+          group_id: 'G02',
+          zone_name: '2층 VIP 라운지존',
+          floor_no: 2,
+          status: 'OCCUPIED',
+          member_no: 'M002',
+          member_name: '이골프',
+          start_dt: '2026-10-01',
+          end_dt: endDtStr,
+        },
       ]));
     }
   } else {
@@ -1080,7 +1146,7 @@ class HybridAPIClient {
    * 🔄 백엔드 /api/v1/kiosk/master 마스터 데이터 연동 및 실시간 상태 바인딩
    */
   async getKioskMasterData(): Promise<KioskMasterResponse> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     const storeCd = this.getStoreCd();
 
     if (isConnected) {
@@ -1457,6 +1523,9 @@ class HybridAPIClient {
     if (!Number.isFinite(safeBayNo) || safeBayNo <= 0 || safeDurationMin <= 0) {
       return false;
     }
+    if (isDemoEnvironment()) {
+      return true;
+    }
 
     const endTime = new Date();
     endTime.setMinutes(endTime.getMinutes() + safeDurationMin);
@@ -1616,7 +1685,7 @@ class HybridAPIClient {
 
   // 가맹점 상호명 및 동적 체크인 정책 종합 정보 조회 (Local Fallback 포함)
   async getStoreInfo(): Promise<KioskStoreInfo> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     if (isConnected) {
       try {
         const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/store-info?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
@@ -1808,7 +1877,7 @@ class HybridAPIClient {
   // 1. 회원 조회 (QR 또는 휴대폰 번호)
   async getMember(query: string): Promise<Member | null> {
     const strictOnline = isStrictOnlineStoreRuntime();
-    const isConnected = strictOnline ? true : await this.checkConnection();
+    const isConnected = isDemoEnvironment() ? false : (strictOnline ? true : await this.checkConnection());
     console.log(`[LM_KIOSK] Auth Query: "${query}". Network Connection: ${isConnected ? 'ONLINE' : 'OFFLINE(EdgeDB)'}`);
     
     // Normalize QR/NFC/BLE prefix if present (e.g. GOLFOS_MEMBER_M260501 / GOLFOS-QR:M260501:A7K9M2 / QR-M260501 -> M260501)
@@ -2018,7 +2087,7 @@ class HybridAPIClient {
 
   // 2. 타석 목록 및 상태 조회
   async getBays(): Promise<Bay[]> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     
     if (isConnected) {
       try {
@@ -2159,7 +2228,7 @@ class HybridAPIClient {
   async preoccupyBays(bayNos: number[]): Promise<boolean> {
     this.lastPreoccupyError = null;
     if (!bayNos || bayNos.length === 0) return false;
-    const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
+    const isConnected = !isDemoEnvironment();
     const storeCd = this.getStoreCd();
     const terminalId = this.getTerminalId();
     
@@ -2276,7 +2345,7 @@ class HybridAPIClient {
     memberNo: string,
     authChannel?: string | null
   ): Promise<KioskCheckinReservation[]> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     if (isConnected) {
       try {
         const cfg = getKioskSettings();
@@ -2411,7 +2480,7 @@ class HybridAPIClient {
 
   async releaseBays(bayNos: number[]): Promise<void> {
     if (!bayNos || bayNos.length === 0) return;
-    const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
+    const isConnected = !isDemoEnvironment();
     const storeCd = this.getStoreCd();
     const terminalId = this.getTerminalId();
     
@@ -2618,7 +2687,7 @@ class HybridAPIClient {
     // 프로덕션 환경에서는 0원 회원권(TICKET) 배정이든 실물 결제/쿠폰/포인트 건이든
     // checkConnection() 1회 순단으로 인해 본 요청이 스킵되거나 가짜 EdgeDB 배정으로 빠지는 것을 원천 차단하고,
     // 무조건 fetchWithPaymentRetry로 실서버에 4회 시도합니다.
-    const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
+    const isConnected = !isDemoEnvironment();
 
     if (isConnected) {
       const effectiveBayAuthCode = paymentApproval?.auth_code || paymentApproval?.apprNo || null;
@@ -3169,6 +3238,7 @@ class HybridAPIClient {
 
   // 로컬 하드웨어 브릿지(:18080) BLE 근접 감지 캐시 즉시 초기화 + 앞사람 잔류 신호 재발화 억제
   clearLocalBleCache(): void {
+    if (isDemoEnvironment()) return;
     fetch(`${this.getLocalBleBridgeUrl()}/api/v1/ble/clear`, {
       method: 'POST',
       signal: AbortSignal.timeout(500),
@@ -3325,7 +3395,7 @@ class HybridAPIClient {
 
   // 7. 상품 목록 가져오기
   async getProducts(): Promise<Product[]> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     if (isConnected) {
       try {
         const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/products?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
@@ -3416,9 +3486,9 @@ class HybridAPIClient {
           cardApproval: cardApprovalArg,
         };
     const cardApp = extraPaymentInfo?.cardApproval;
-    const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
+    const isConnected = !isDemoEnvironment();
 
-    if (isConnected || !isDemoEnvironment()) {
+    if (isConnected) {
       const effectiveApprNo = apprNo || cardApp?.auth_code || cardApp?.apprNo || null;
       const effectiveVanTrNo = vanTrNo || cardApp?.van_tr_no || effectiveApprNo || null;
       const isRealPurchaseCardWal =
@@ -3556,7 +3626,7 @@ class HybridAPIClient {
 
   // 9. 라카 목록 가져오기
   async getLockers(): Promise<Locker[]> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     if (isConnected) {
       try {
         const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/lockers?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
@@ -3574,7 +3644,7 @@ class HybridAPIClient {
   
   // 9-1. 특정 회원의 라카 가져오기
   async getMemberLockers(memberNo: string): Promise<Locker[]> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     if (isConnected) {
       try {
         const res = await fetch(`${this.getBaseUrl()}/v1/kiosk/members/${encodeURIComponent(memberNo)}/lockers?store_cd=${encodeURIComponent(this.getStoreCd())}`, {
@@ -3601,7 +3671,7 @@ class HybridAPIClient {
     lockerNo?: number | string,
     terminalId?: string
   ): Promise<{ success: boolean; res_id: string; resId: string; message: string }> {
-    const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
+    const isConnected = !isDemoEnvironment();
     const storeCd = this.getStoreCd();
     const numericLockerId = Number(lockerId);
     const payloadLockerId = !Number.isNaN(numericLockerId) && numericLockerId > 0 ? numericLockerId : 0;
@@ -3708,7 +3778,7 @@ class HybridAPIClient {
           cardApproval: cardApprovalArg,
         };
 
-    const isConnected = !isDemoEnvironment() ? true : await this.checkConnection();
+    const isConnected = !isDemoEnvironment();
     let backendStartDate: string | undefined;
     let backendEndDate: string | undefined;
     let backendLockerNo: string | undefined;
@@ -4203,12 +4273,46 @@ class HybridAPIClient {
   private activeFaceScanController: AbortController | null = null;
 
   async scanFace(deviceIp?: string, externalSignal?: AbortSignal): Promise<Member | null> {
-    const ip = deviceIp || this.resolveKioskFaceTerminalIp();
-    const storeCd = this.getStoreCd();
-
     if (externalSignal?.aborted) {
       return null;
     }
+
+    // Why: 웹 데모(/demo)에서는 물리 안면 단말기가 없으므로 1.2초 AI 스캔 연출 후 체험 회원(홍길동 M001)으로 즉시 시뮬레이션 인증
+    if (isDemoEnvironment()) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 1200);
+        if (externalSignal) {
+          externalSignal.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true }
+          );
+        }
+      });
+      if (externalSignal?.aborted) {
+        return null;
+      }
+      const demoMembers = safeParseStorageArray<Member>('LM_MEMBERS');
+      const hong = demoMembers.find((m) => m.member_no === 'M001') || demoMembers[0];
+      return (
+        hong || {
+          member_no: 'M001',
+          member_name: '홍길동',
+          hp: '010-1234-5678',
+          member_grade: '일반',
+          grade_cd: 'GENERAL',
+          status_cd: 'ACTIVE',
+          total_point: 5000,
+          discount_rate: 0,
+        }
+      );
+    }
+
+    const ip = deviceIp || this.resolveKioskFaceTerminalIp();
+    const storeCd = this.getStoreCd();
 
     // 동시 중복 호출 시 선행 인플라이트 안면 스캔을 즉시 중단하여 중복 이벤트 소비/레이스 차단
     if (this.activeFaceScanController) {
@@ -4388,7 +4492,7 @@ class HybridAPIClient {
 
   // 14.5. 지점의 파3 구역(Zone) 목록 조회 API
   async getKioskZones(): Promise<KioskZone[]> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     const storeCd = this.getStoreCd();
     if (isConnected) {
       try {
@@ -4425,7 +4529,7 @@ class HybridAPIClient {
 
   // 15. 파3 티오프 시간 슬롯 조회 API
   async getPar3Slots(zoneCode: string, date: string): Promise<Par3Slot[]> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     const storeCd = this.getStoreCd();
     if (isConnected) {
       try {
@@ -4953,7 +5057,7 @@ class HybridAPIClient {
 
   // 18. 키오스크 전용 전시 카테고리 로드 API
   async getKioskDisplayCategories(): Promise<KioskDisplayCategory[]> {
-    const isConnected = await this.checkConnection();
+    const isConnected = !isDemoEnvironment() && (await this.checkConnection());
     const storeCd = this.getStoreCd();
     if (isConnected) {
       try {

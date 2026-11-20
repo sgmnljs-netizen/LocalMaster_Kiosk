@@ -564,14 +564,19 @@ export default function KioskMainDashboard({
           </div>
         )}
 
-        {/* Row 2: 2x2 서브 카드 (선명한 순백 입체 카드 + 시맨틱 경량 3D CTA + Zero-Emoji) */}
+        {/* Row 2: 서브 카드 (1개: 풀폭 / 3개: 3열 균등 대칭 / 2·4개+: 2열 그리드) */}
         {gridSubMenus.length > 0 && (
           <div
             className="animate-fade-up"
             style={{
               display: 'grid',
-              gridTemplateColumns: gridSubMenus.length === 1 ? '1fr' : '1fr 1fr',
-              gap: '20px',
+              gridTemplateColumns:
+                gridSubMenus.length === 1
+                  ? '1fr'
+                  : gridSubMenus.length === 3
+                    ? 'repeat(3, 1fr)'
+                    : '1fr 1fr',
+              gap: gridSubMenus.length === 3 ? '18px' : '20px',
               animationDelay: '0.3s',
             }}
           >
@@ -580,17 +585,18 @@ export default function KioskMainDashboard({
               const theme = getSubMenuTheme(menu.menu_id);
               const BadgeIcon = theme.BadgeIcon;
               const isPar3 = menu.menu_id === 'PAR3';
+              const isThreeCol = gridSubMenus.length === 3;
 
               return (
                 <div
                   key={menu.menu_id || index}
                   onClick={() => handleCardClick(menu.menu_id, menu.zone_ids || [])}
                   style={{
-                    minHeight: '262px',
+                    minHeight: isThreeCol ? '300px' : '262px',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
-                    padding: '26px 28px',
+                    padding: isThreeCol ? '24px 22px' : '26px 28px',
                     background: isPar3
                       ? 'linear-gradient(145deg, #059669 0%, #047857 50%, #064e3b 100%)'
                       : '#ffffff',
@@ -610,8 +616,8 @@ export default function KioskMainDashboard({
                     {/* 3D 스쿼클 아이콘 타일 (60x60px 대형화) */}
                     <div
                       style={{
-                        width: '60px',
-                        height: '60px',
+                        width: isThreeCol ? '54px' : '60px',
+                        height: isThreeCol ? '54px' : '60px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -623,7 +629,7 @@ export default function KioskMainDashboard({
                           : '0 4px 10px rgba(15, 23, 42, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.8)',
                       }}
                     >
-                      <IconComp size={30} strokeWidth={2.4} style={{ color: isPar3 ? '#ffffff' : theme.iconColor }} />
+                      <IconComp size={isThreeCol ? 26 : 30} strokeWidth={2.4} style={{ color: isPar3 ? '#ffffff' : theme.iconColor }} />
                     </div>
 
                     {theme.badgeText && (
@@ -632,27 +638,28 @@ export default function KioskMainDashboard({
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '5px',
-                          fontSize: '15px',
+                          fontSize: isThreeCol ? '13.5px' : '15px',
                           fontWeight: 800,
                           color: theme.badgeColor,
                           background: theme.badgeBg,
-                          padding: '6px 14px',
+                          padding: isThreeCol ? '5px 11px' : '6px 14px',
                           borderRadius: '999px',
                           letterSpacing: '-0.2px',
                           border: theme.badgeBorder || (isPar3 ? '1px solid rgba(255, 255, 255, 0.35)' : theme.border),
+                          whiteSpace: 'nowrap',
                         }}
                       >
-                        <BadgeIcon size={14} strokeWidth={2.6} aria-hidden="true" />
+                        <BadgeIcon size={13} strokeWidth={2.6} aria-hidden="true" />
                         <span>{theme.badgeText}</span>
                       </span>
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, marginTop: '14px' }}>
-                    <h3 style={{ fontSize: '34px', fontWeight: 900, color: isPar3 ? '#ffffff' : '#0f172a', margin: '0 0 6px 0', letterSpacing: '-0.7px', lineHeight: 1.2 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, marginTop: '16px' }}>
+                    <h3 style={{ fontSize: isThreeCol ? '27px' : '34px', fontWeight: 900, color: isPar3 ? '#ffffff' : '#0f172a', margin: '0 0 8px 0', letterSpacing: '-0.7px', lineHeight: 1.2, wordBreak: 'keep-all' }}>
                       {menu.menu_name}
                     </h3>
-                    <p style={{ fontSize: '19px', color: isPar3 ? '#d1fae5' : '#475569', fontWeight: 600, lineHeight: 1.4, margin: '0 0 18px 0', letterSpacing: '-0.3px', wordBreak: 'keep-all' }}>
+                    <p style={{ fontSize: isThreeCol ? '16.5px' : '19px', color: isPar3 ? '#d1fae5' : '#475569', fontWeight: 600, lineHeight: 1.45, margin: '0 0 20px 0', letterSpacing: '-0.3px', wordBreak: 'keep-all' }}>
                       {menu.description}
                     </p>
 

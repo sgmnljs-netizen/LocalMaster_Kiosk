@@ -926,7 +926,13 @@ export function useKioskSettings() {
     };
     window.addEventListener('kiosk-settings-changed', handleUpdate);
     handleUpdate();
-    void bootstrapLocalKioskSettings();
+    const isDemoHost =
+      window.location.pathname.includes('/demo/') ||
+      window.location.hostname.endsWith('segnet.co.kr') ||
+      window.location.hostname.endsWith('golfos.co.kr');
+    if (!isDemoHost) {
+      void bootstrapLocalKioskSettings();
+    }
     return () => window.removeEventListener('kiosk-settings-changed', handleUpdate);
   }, []);
 

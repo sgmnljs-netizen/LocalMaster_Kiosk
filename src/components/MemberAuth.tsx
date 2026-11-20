@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, User, X, Check, ArrowRight, Smartphone, QrCode, Delete, Hash } from 'lucide-react';
-import { api, Member, Bay } from '../services/api';
+import { api, isDemoEnvironment, Member, Bay } from '../services/api';
 import { useHardwareScanner } from '../services/hardware/hooks/useHardwareScanner';
 import {
   useKioskSettings,
@@ -151,23 +151,29 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   onAuthError
 }) => {
   const { settings } = useKioskSettings();
-  const baseAuthModes: AuthMode[] =
-    enabledAuthModes && enabledAuthModes.length > 0
+  const isDemoMode = isDemoEnvironment();
+  const baseAuthModes: AuthMode[] = isDemoMode
+    ? ['FACE']
+    : enabledAuthModes && enabledAuthModes.length > 0
       ? enabledAuthModes
       : resolveEnabledAuthModes(settings.authMethods, faceTerminalEnabled);
-  const filteredAuthModes: AuthMode[] = disallowQrScan
-    ? baseAuthModes.filter((m) => m !== 'QR_SCAN')
-    : baseAuthModes;
+  const filteredAuthModes: AuthMode[] = isDemoMode
+    ? ['FACE']
+    : disallowQrScan
+      ? baseAuthModes.filter((m) => m !== 'QR_SCAN')
+      : baseAuthModes;
   const activeAuthModes: AuthMode[] =
     filteredAuthModes.length > 0
       ? filteredAuthModes
       : (faceTerminalEnabled !== false ? ['SMART_TAG', 'FACE'] : ['SMART_TAG']);
 
-  const effectiveInitialMode: AuthMode = resolveEffectiveAuthMode(
-    initialAuthMode,
-    defaultAuthMode ?? settings.defaultAuthMode,
-    activeAuthModes
-  );
+  const effectiveInitialMode: AuthMode = isDemoMode
+    ? 'FACE'
+    : resolveEffectiveAuthMode(
+        initialAuthMode,
+        defaultAuthMode ?? settings.defaultAuthMode,
+        activeAuthModes
+      );
 
   const [rawAuthMode, setAuthMode] = useState<AuthMode>(effectiveInitialMode);
   const authMode: AuthMode = activeAuthModes.includes(rawAuthMode) ? rawAuthMode : effectiveInitialMode;
@@ -384,6 +390,7 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
   // 📡 로컬 하드웨어 브릿지(:18080/api/v1/ble/poll) WinRT BLE 근접 태그 실시간 감지 폴링
   useEffect(() => {
     const canPollBle =
+      !isDemoEnvironment() &&
       isSmartTagEnabled &&
       !isSearching &&
       !detectedMember &&
@@ -713,7 +720,9 @@ export const MemberAuth: React.FC<MemberAuthProps> = ({
               </h2>
             </div>
             <span style={{ fontSize: '16px', fontWeight: 700, color: '#64748b', letterSpacing: '-0.2px' }}>
-              {`원하시는 인증 수단을 선택해 주세요 (${activeAuthModes.map((m) => AUTH_MODE_SHORT_LABELS[m]).join(' · ')})`}
+              {isDemoMode
+                ? '카메라 정면을 응시하시면 AI 안면인식으로 1초 만에 자동 인증됩니다'
+                : `원하시는 인증 수단을 선택해 주세요 (${activeAuthModes.map((m) => AUTH_MODE_SHORT_LABELS[m]).join(' · ')})`}
             </span>
           </div>
         </div>

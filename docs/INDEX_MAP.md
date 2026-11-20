@@ -1,6 +1,6 @@
 # 🗺️ LocalMaster Kiosk (`LocalMaster_Kiosk`) 단일 진실 공급원(SSOT) 맵
 
-> **최종 동기화 일자**: 2026-11-19
+> **최종 동기화 일자**: 2026-11-20
 > **포트 규약**: `Port 5179` (Vite React + TypeScript + Electron/Windows Hardware Bridge)
 > **역할**: 무인 타석 배정, 예약 체크인, 30초 회원가입, 상품 구매, 라카 연장, 타석 이동, 다중 사업자 VAN 결제 및 서멀 인쇄 키오스크 (Vitest 106개 파일 610+ passed / 8대 골든 패스 E2E 100% 통과)
 
@@ -17,17 +17,19 @@
 | 💳 **4. VAN 결제 & 매대 마스터** | [kiosk_payment_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk/kiosk_payment_master.md) | 다중 TID 라우팅, 할부 개월, 0원 무카드, Exception-Only 상품 매대·일일권 사전 가드, 라카 연장, 2PC 망취소/DLQ |
 | 🖨️ **5. 하드웨어 & 관리자 마스터** | [kiosk_hardware_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk/kiosk_hardware_master.md) | 내장 시리얼 서멀 프린터(HKP-300 COM5), 영수증/배정표/라카확인증 3단 분리, 5-Tap 관리자 모드, 기기설정 DB 보존, 블랙박스 로깅, 4중 세션 보안 |
 | 🎨 **6. 화면별 UI & 인터랙션 규격** | [kiosk_ui_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk/kiosk_ui_master.md) | 27인치 세로형 FHD 레이아웃, 화면 흐름도, 9대 화면별 와이어프레임 및 UI 절대 가드레일 |
+| ♿ **7. 배리어프리 접근성 마스터** | [kiosk_barrier_free_master.md](file:///Users/sgmnljs/workspace/Python/docs/domains/kiosk/kiosk_barrier_free_master.md) | KS X 9211·NIA 인증 1차 타석배정 스코프, `K-270F`/`HKP-200D` 키코드·저자세(`770px`)·TTS 청사진 & Phase 0~5 체크리스트 |
 | 🍏 **키오스크 표준 디자인 규약** | [kiosk_design_system_master.md](file:///Users/sgmnljs/workspace/Python/LocalMaster_Kiosk/docs/kiosk_design_system_master.md) | 애플 미니멀 럭셔리 스타일 (White/Charcoal, Pill Button, 5% Indicator) 전역 규약 |
+| ♿ **배리어프리 HW·드라이버 아카이브** | [README.md](file:///Users/sgmnljs/workspace/Python/LocalMaster_Kiosk/docs/hardware/hanasis_barrier_free/README.md) | 하나시스 K-270F 제원, HKP-200D/300D 유틸리티·오디오 드라이버, `F15/F16` 이어폰·키코드 맵 |
 
 ---
 
 ## 2. 🎨 키오스크 화면 및 핵심 모듈 라우팅 맵 (`src/`)
 
 - **`KioskApp.tsx` & `utils/timeMaster.ts` (`resolveCachedStoreOperatingPolicy`)**: 최상위 상태 머신 오케스트레이터(부팅 시 마스터/지점 병렬 동기화 & 초기 `06:00~24:00` 오차단 가드, 세션/네트워크 복구, VAN 2PC 망취소·DLQ)
-- **`components/IntroScreen.tsx`**: 메인 대기 화면 (실시간 층별 타석 현황 위젯 및 터치 진입)
-- **`components/MainPage/KioskMainDashboard.tsx`**: 지점 Eyebrow·Hero 에메랄드 3D CTA(가용 N석)·시맨틱 서브 3D·회원가입 3순위 허브
+- **`components/IntroScreen.tsx`**: 메인 대기 화면 (실시간 층별 타석 현황, 데모 실사 골프 배너 3종 및 터치 진입)
+- **`components/MainPage/KioskMainDashboard.tsx`**: 지점 Eyebrow·Hero 에메랄드 3D CTA·2/3열 적응형 서브 3D·회원가입 허브 (데모 시 체크인·파3 비노출)
 - **`components/TopTeeboxDashboard.tsx` & `MiniTeeboxMonitor.tsx` & `KioskLiveClock.tsx` & `utils/floorUtils.ts` & `utils/timeMaster.ts`**: 물리 층 내림차순 타석 현황판, KST 시계 및 운영시간·마감 잔여분(`evaluateStoreOperatingWindow`) 산출
-- **`components/MemberAuth.tsx`**: 휴대폰 뒷 8자리(`010-` 고정) / 쿠폰전용 QR(`qrCouponOnlyMode` & 라카·구매 비노출) / 무선 스마트 체크인 / 안면인식 회원 인증
+- **`components/MemberAuth.tsx`**: 휴대폰 뒷 8자리(`010-` 고정) / 쿠폰전용 QR / 무선 스마트 체크인 / 안면인식(데모 시 `FACE` 단일 통일·1.2초 자동 스캔 및 `:18080` BLE 격리)
 - **`components/MemberRegister.tsx` & `VirtualKeyboard.tsx`**: 30초 즉석 회원가입 및 4대 모드(`HANGUL_NAME`·`COUPON_CODE`·`ASCII_TEXT`·`NUMERIC`) 가상 키보드
 - **`components/CheckinSelect.tsx`**: 당일 예약 조회 및 2-Track 체크인(Double-Check 대형 시간 티켓·Zero-Emoji 3D 체크인/재출력 분리)
 - **`components/PracticeSelect.tsx` & `TeeboxMap.tsx` & `TeeboxTileCard.tsx` & `utils/bayStatusGuard.ts`**: 층별 5열 타일(종료 `~HH:mm` KPI)·분기 `+1분` 입장 정렬, 동반/이동 바, 가용가드·선점거절 원문 표출
@@ -40,5 +42,5 @@
 - **`components/AllocationCompleteModal.tsx` & `PurchaseCompleteModal.tsx` & `ReceiptPrinter.tsx`**: 영수증/타석배정표/라카확인증 3단 분리 서멀 인쇄 (`kioskSlipPrinter.ts`, FIFO 큐)
 - **`utils/kioskProductSpecSummary.ts` & `utils/kioskPurchaseEligibility.ts` & `utils/code128Barcode.ts` & `utils/kioskBlackBox.ts`**: 상품 스펙 요약·자격 판정 엔진, ISO Code128B 바코드, PAN 마스킹 블랙박스 로거
 - **`components/AdminPinModal.tsx` & `KioskSettingsModal.tsx` & `hooks/useHiddenAdminTrigger.ts` & `stores/kioskSettings.ts`**: 서버 검증 관리자/엔지니어 PIN, 5-Tap 히든 트리거, 호기별 설정 분리, `X-Device-Key` 기기인증 및 앱 제어
-- **`hooks/useKioskHardwareHeartbeat.ts` & `stores/useKioskHardwareHealthStore.ts` & `hooks/useKioskVanPayment.ts`**: 멀티 VAN·프린터 헬스 하트비트 스토어, VAN 결제 `E_BUSY` 잠금 및 QR 스캐너(`useHardwareScanner.ts`) 훅
+- **`hooks/useKioskHardwareHeartbeat.ts` & `stores/useKioskHardwareHealthStore.ts` & `hooks/useKioskVanPayment.ts`**: 멀티 VAN·프린터 헬스 하트비트(`isDemoEnvironment` 0ms 격리), VAN 결제 `E_BUSY` 잠금 및 QR 스캐너(`useHardwareScanner.ts`) 훅
 - **`electron/main.cjs`**: 24/7 무인 키오스크 데스크톱 셸 (모니터 배율 자동 맞춤 `applyMonitorZoomFit`, LAN PNA 해제, 크래시/오프라인 자동 복구)
