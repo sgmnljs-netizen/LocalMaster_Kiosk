@@ -1566,10 +1566,29 @@ class HybridAPIClient {
     }
   }
 
+  private generateKioskTraceId(): string {
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return `kiosk-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+      }
+    } catch {
+      // Fallback to random hex
+    }
+    return `kiosk-${Math.random().toString(16).slice(2, 10).padEnd(8, '0')}`;
+  }
+
   // [Security Layer 2] 단말기 시큐어 헤더 공통 생성기
   getSecureHeaders(additionalHeaders: Record<string, string> = {}): Record<string, string> {
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const settings = getKioskSettings();
+    const traceId =
+      additionalHeaders['x-trace-id'] ||
+      additionalHeaders['X-Trace-ID'] ||
+      this.generateKioskTraceId();
+    const caller =
+      additionalHeaders['x-caller'] ||
+      additionalHeaders['X-Caller'] ||
+      'KIOSK';
     return {
       'x-store-cd': this.getStoreCd(),
       'x-terminal-id': this.getTerminalId(),
@@ -1577,6 +1596,8 @@ class HybridAPIClient {
       ...(settings?.deviceKey ? { 'x-device-key': settings.deviceKey } : {}),
       'x-kiosk-min-gap': String(settings?.minGapMinutes ?? 60),
       'x-timestamp': timestamp,
+      'x-trace-id': traceId,
+      'x-caller': caller,
       ...additionalHeaders
     };
   }
