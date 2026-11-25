@@ -95,13 +95,15 @@ export async function runKioskPowerNetworkCheckin(options?: {
         ? checkinJson.power_control_key.trim()
         : '';
 
+    let powerKeyRegistered = true;
     if (powerKey && (!healthJson?.power_key_configured || options?.force)) {
-      await fetch(`${bridgeOrigin}/api/v1/system/register-power-key`, {
+      const regRes = await fetch(`${bridgeOrigin}/api/v1/system/register-power-key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ power_control_key: powerKey }),
         signal: AbortSignal.timeout(2500),
       }).catch(() => undefined);
+      powerKeyRegistered = Boolean(regRes && regRes.ok);
     }
 
     // 브릿지 부팅 직후 NIC 백그라운드 워밍업 중(mac/lan_ip 미수집)이었다면 3초 뒤 1회 재시도해 완전 등록 보장
@@ -109,7 +111,13 @@ export async function runKioskPowerNetworkCheckin(options?: {
       setTimeout(() => {
         void runKioskPowerNetworkCheckin({ bridgeOrigin, force: true });
       }, 3000);
-      return true;
+      return powerKeyRegistered;
+    }
+
+    // Why: 종료 인증키 등록(register-power-key) 실패 시 lastCheckedStoreCd를 잠그면
+    //      세션 내 재시도가 영구 차단되어 vcat_bridge가 403 POWER_KEY_NOT_CONFIGURED 상태에 고착됨.
+    if (!powerKeyRegistered) {
+      return false;
     }
 
     lastCheckedStoreCd = storeCd;

@@ -72,4 +72,90 @@ describe('kioskPowerCheckin', () => {
     const ok = await runKioskPowerNetworkCheckin();
     expect(ok).toBe(false);
   });
+
+  it('does not lock store check-in when register-power-key fails and allows subsequent retry to succeed', async () => {
+    const fetchMock = vi.fn()
+      // 1차 시도: health + checkin 성공, register-power-key HTTP 500 실패
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          status: 'ONLINE',
+          network: { mac_address: '00:E0:4C:F7:01:C9', lan_ip: '192.168.0.221' },
+          power_key_configured: false,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          power_control_key: 'gpk_1234567890abcdef1234567890abcdef',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ success: false }),
+      })
+      // 2차 재시도: register-power-key 200 성공
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          status: 'ONLINE',
+          network: { mac_address: '00:E0:4C:F7:01:C9', lan_ip: '192.168.0.221' },
+          power_key_configured: false,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          power_control_key: 'gpk_1234567890abcdef1234567890abcdef',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const firstAttempt = await runKioskPowerNetworkCheckin();
+    expect(firstAttempt).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // 1차 실패로 세션 락이 걸리지 않았으므로 2차 호출이 재시도되어 성공해야 함
+    const retryAttempt = await runKioskPowerNetworkCheckin();
+    expect(retryAttempt).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+
+    // 2차 성공 후에는 세션 중복 방지 락이 동작해 3차 호출이 스킵됨
+    const thirdAttempt = await runKioskPowerNetworkCheckin();
+    expect(thirdAttempt).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it('skips register-power-key when bridge reports power_key_configured=true', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          status: 'ONLINE',
+          network: { mac_address: '00:E0:4C:F7:01:C9', lan_ip: '192.168.0.221' },
+          power_key_configured: true,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          power_control_key: 'gpk_1234567890abcdef1234567890abcdef',
+        }),
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const ok = await runKioskPowerNetworkCheckin();
+    expect(ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
