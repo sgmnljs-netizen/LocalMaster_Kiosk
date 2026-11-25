@@ -21,6 +21,12 @@ import { MemberAuth } from '../MemberAuth';
 import { PaymentTerminal } from '../PaymentTerminal';
 import { DispenserDailyFaceCaptureModal } from './DispenserDailyFaceCaptureModal';
 import { DispenserCompleteModal, type DispenserReceiptContext } from './DispenserCompleteModal';
+import {
+  buildDispenserPaymentDetails,
+  filterDailyDispenserProducts,
+  resolveDailyBasketCount,
+  resolveDailyProductPrice,
+} from './dispenserFlowUtils';
 
 export interface DispenserFlowModalProps {
   faceTerminalEnabled: boolean;
@@ -68,14 +74,33 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
 
   const preloadDailyPromiseRef = useRef<Promise<Product[]> | null>(null);
   const preloadedDailyProductsRef = useRef<Product[] | null>(null);
+  const mountedRef = useRef<boolean>(true);
+  const issuingItemRef = useRef<boolean>(false);
+  const dailyPaymentSubmittingRef = useRef<boolean>(false);
+
+  const clearDailyBiometricState = useCallback(() => {
+    setCapturedFaceB64('');
+    setSelectedDailyProduct(null);
+  }, []);
+
+  const resetToChoice = useCallback(() => {
+    clearDailyBiometricState();
+    setAuthMember(null);
+    setEligibleItems([]);
+    setErrorMessage('');
+    setStage('CHOICE');
+  }, [clearDailyBiometricState]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const fetchFilteredDailyProducts = useCallback(async (): Promise<Product[]> => {
     const allProducts = await api.getProducts();
-    return allProducts.filter((p) => {
-      const lt = String(p.logic_type || '').trim().toUpperCase();
-      const cat = String(p.category || '').trim().toUpperCase();
-      return lt === 'DAILY' || cat.includes('DAILY') || cat.includes('일일');
-    });
+    return filterDailyDispenserProducts(allProducts);
   }, []);
 
   // 2분할 모달이 열리자마자 일일권 상품 목록 백그라운드 프리로드 -> [일일권 구매] 클릭 시 0ms 즉시 표시
@@ -99,6 +124,7 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
   }, [fetchFilteredDailyProducts]);
 
   const loadDailyProducts = useCallback(async () => {
+    clearDailyBiometricState();
     const cached = preloadedDailyProductsRef.current;
     if (cached && cached.length > 0) {
       setDailyProducts(cached);
@@ -114,6 +140,7 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
       if (filtered.length === 0 && inflight) {
         filtered = await fetchFilteredDailyProducts();
       }
+      if (!mountedRef.current) return;
       if (filtered.length === 0) {
         void api.writeKioskLog('DISPENSER_DAILY_LOAD_EMPTY', '일일권 상품 목록 0건 (등록된 일일권 없음)');
         setErrorMessage('현재 키오스크에 등록된 일일권 상품이 없습니다. 카운터에 문의해 주세요.');
@@ -124,18 +151,22 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
       setDailyProducts(filtered);
       setStage('DAILY_PRODUCT_SELECT');
     } catch (err) {
+      if (!mountedRef.current) return;
       const msg = err instanceof Error ? err.message : '일일권 상품 목록을 불러오지 못했습니다.';
       void api.writeKioskLog('DISPENSER_DAILY_LOAD_FAIL', `일일권 상품 목록 조회 실패: ${msg}`);
       setErrorMessage(msg);
       setStage('ERROR');
     }
-  }, [fetchFilteredDailyProducts]);
+  }, [clearDailyBiometricState, fetchFilteredDailyProducts]);
 
   const issueForItem = useCallback(async (memberNo: string, itemId?: number) => {
+    if (issuingItemRef.current) return;
+    issuingItemRef.current = true;
     setLoadingText('1·2층 볼 배급기 입실 배정을 진행하고 있습니다...');
     setStage('PROCESSING');
     try {
       const res = await api.issueDispenserPass(memberNo, itemId);
+      if (!mountedRef.current) return;
       if (res.pass) {
         setCompletedPass(res.pass);
         setCompletedReceipt(null);
@@ -147,20 +178,25 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
         setStage('ERROR');
       }
     } catch (err) {
+      if (!mountedRef.current) return;
       const msg = err instanceof Error ? err.message : '볼 배급권 발급에 실패했습니다.';
       void api.writeKioskLog('DISPENSER_ISSUE_FAIL', `회원권 입실 배정 실패 (item_id=${itemId ?? '-'}): ${msg}`, memberNo);
       setErrorMessage(msg);
       setStage('ERROR');
+    } finally {
+      issuingItemRef.current = false;
     }
   }, []);
 
   const handleMemberAuthSuccess = useCallback(
     async (member: Member) => {
+      if (issuingItemRef.current) return;
       setAuthMember(member);
       setLoadingText('보유 중인 골프 이용권을 확인하고 있습니다...');
       setStage('PROCESSING');
       try {
         const res = await api.getDispenserEligibleItems(member.member_no);
+        if (!mountedRef.current) return;
         if (res.items.length === 0) {
           void api.writeKioskLog('DISPENSER_NO_ELIGIBLE_ITEM', '1·2층 볼 배급 적격 이용권 없음', member.member_no);
           setErrorMessage(
@@ -176,6 +212,7 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
         setEligibleItems(res.items);
         setStage('ASSET_SELECT');
       } catch (err) {
+        if (!mountedRef.current) return;
         const msg = err instanceof Error ? err.message : '이용권 조회 중 오류가 발생했습니다.';
         void api.writeKioskLog('DISPENSER_ELIGIBLE_FAIL', `적격 이용권 조회 실패: ${msg}`, member.member_no);
         setErrorMessage(msg);
@@ -193,51 +230,40 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
       installmentMonths?: number;
       cardApproval?: CardApprovalResult;
     }) => {
+      if (dailyPaymentSubmittingRef.current) return;
       if (!selectedDailyProduct || !capturedFaceB64) {
         setErrorMessage('일일권 정보 또는 안면 촬영 데이터가 유실되었습니다.');
         setStage('ERROR');
         return;
       }
-      const price =
-        selectedDailyProduct.sale_price && selectedDailyProduct.sale_price > 0
-          ? selectedDailyProduct.sale_price
-          : selectedDailyProduct.standard_price;
+      dailyPaymentSubmittingRef.current = true;
+      const productSnapshot = selectedDailyProduct;
+      const faceSnapshot = capturedFaceB64;
+      const price = resolveDailyProductPrice(productSnapshot);
       const actualPaid = payResult?.amount ?? price;
 
       setLoadingText('결제 확인 및 1·2층 볼 배급기 임시 안면 등록 중입니다...');
       setStage('PROCESSING');
 
       try {
-        const paymentDetails: Record<string, unknown> = {
-          approval_no:
-            payResult?.apprNo ||
-            payResult?.cardApproval?.auth_code ||
-            payResult?.cardApproval?.apprNo ||
-            '',
-          trade_date: payResult?.tradeDate || '',
-          installment_months:
-            payResult?.installmentMonths ?? payResult?.cardApproval?.installment_months ?? 0,
-          van_tr_no: payResult?.cardApproval?.van_tr_no || '',
-          card_no_masked: payResult?.cardApproval?.card_no_masked || '',
-          issuer_name: payResult?.cardApproval?.issuer_name || '',
-          acquirer_name: payResult?.cardApproval?.acquirer_name || '',
-          terminal_id: payResult?.cardApproval?.terminal_id || '',
-          merchant_no: payResult?.cardApproval?.merchant_no || '',
-        };
+        const paymentDetails = buildDispenserPaymentDetails(payResult);
         const res = await api.purchaseDailyDispenserPass({
-          prodCd: selectedDailyProduct.prod_cd,
-          faceImageBase64: capturedFaceB64,
+          prodCd: productSnapshot.prod_cd,
+          faceImageBase64: faceSnapshot,
           payMethod: 'CARD',
           paidAmount: actualPaid,
           paymentDetails,
         });
         if (res.pass) {
+          if (!mountedRef.current) return;
+          // 결제 및 임시 안면 전송 완료 즉시 브라우저 메모리의 생체 이미지 버퍼 파기
+          setCapturedFaceB64('');
           setCompletedPass(res.pass);
           setCompletedReceipt({
             saleId: res.sale_id,
-            productName: selectedDailyProduct.prod_nm,
+            productName: productSnapshot.prod_nm,
             amount: actualPaid,
-            vatYn: selectedDailyProduct.vat_yn,
+            vatYn: productSnapshot.vat_yn,
             apprNo:
               payResult?.apprNo ||
               payResult?.cardApproval?.auth_code ||
@@ -265,11 +291,12 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
           '-';
         void api.writeKioskLog(
           'DISPENSER_DAILY_PURCHASE_FAIL',
-          `일일권 등록/안면전송 실패 (prod=${selectedDailyProduct.prod_cd}, amt=${actualPaid}, appr=${apprCode}): ${baseErr}`,
+          `일일권 등록/안면전송 실패 (prod=${productSnapshot.prod_cd}, amt=${actualPaid}, appr=${apprCode}): ${baseErr}`,
           'DAILY_GUEST'
         );
         let reversalSuffix = '';
         if (payResult?.cardApproval) {
+          // Why: 모달 언마운트 여부와 무관하게 카드 승인 자동 망취소는 끝까지 완료하여 미매칭 결제를 원천 차단한다.
           const rev = await onExecuteAutoReversal(
             payResult.cardApproval,
             actualPaid,
@@ -282,8 +309,12 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
           );
           reversalSuffix = `\n\n[자동 결제 취소] ${rev.message}`;
         }
+        if (!mountedRef.current) return;
+        setCapturedFaceB64('');
         setErrorMessage(`${baseErr}${reversalSuffix}`);
         setStage('ERROR');
+      } finally {
+        dailyPaymentSubmittingRef.current = false;
       }
     },
     [capturedFaceB64, onExecuteAutoReversal, selectedDailyProduct]
@@ -295,6 +326,7 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
   }, []);
 
   const handleDailyFaceCancel = useCallback(() => {
+    setCapturedFaceB64('');
     setStage('DAILY_PRODUCT_SELECT');
   }, []);
 
@@ -345,14 +377,11 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
   }
 
   if (stage === 'DAILY_FACE_CAPTURE' && selectedDailyProduct) {
-    const unitPrice =
-      selectedDailyProduct.sale_price && selectedDailyProduct.sale_price > 0
-        ? selectedDailyProduct.sale_price
-        : selectedDailyProduct.standard_price;
+    const unitPrice = resolveDailyProductPrice(selectedDailyProduct);
     return (
       <DispenserDailyFaceCaptureModal
         productName={selectedDailyProduct.prod_nm}
-        basketCount={Math.max(1, Number(selectedDailyProduct.total_count || 1))}
+        basketCount={resolveDailyBasketCount(selectedDailyProduct)}
         price={unitPrice}
         onCaptured={handleDailyFaceCaptured}
         onCancel={handleDailyFaceCancel}
@@ -361,10 +390,7 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
   }
 
   if (stage === 'DAILY_PAYMENT' && selectedDailyProduct) {
-    const unitPrice =
-      selectedDailyProduct.sale_price && selectedDailyProduct.sale_price > 0
-        ? selectedDailyProduct.sale_price
-        : selectedDailyProduct.standard_price;
+    const unitPrice = resolveDailyProductPrice(selectedDailyProduct);
     return (
       <div
         style={{
@@ -382,7 +408,7 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
       >
         <PaymentTerminal
           productName={selectedDailyProduct.prod_nm}
-          productSpecSummary={`1·2층 볼 배급 ${Math.max(1, Number(selectedDailyProduct.total_count || 1))}회 (당일 유효)`}
+          productSpecSummary={`1·2층 볼 배급 ${resolveDailyBasketCount(selectedDailyProduct)}회 (당일 유효)`}
           amount={unitPrice}
           productCategory="DAILY"
           storeOpenTime={storeOpenTime}
@@ -391,7 +417,10 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
           onPaymentSuccess={(payRes) => {
             void handleDailyPaymentSuccess(payRes);
           }}
-          onCancel={() => setStage('DAILY_PRODUCT_SELECT')}
+          onCancel={() => {
+            setCapturedFaceB64('');
+            setStage('DAILY_PRODUCT_SELECT');
+          }}
         />
       </div>
     );
@@ -484,7 +513,7 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
         {stage !== 'CHOICE' && stage !== 'PROCESSING' && (
           <button
             type="button"
-            onClick={() => setStage('CHOICE')}
+            onClick={resetToChoice}
             aria-label="뒤로"
             style={{
               position: 'absolute',
@@ -916,6 +945,7 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
                   key={prod.prod_cd}
                   type="button"
                   onClick={() => {
+                    setCapturedFaceB64('');
                     setSelectedDailyProduct(prod);
                     setStage('DAILY_FACE_CAPTURE');
                   }}
@@ -1077,7 +1107,7 @@ export const DispenserFlowModal: React.FC<DispenserFlowModalProps> = ({
             <div style={{ display: 'flex', gap: '16px', width: '100%', maxWidth: '520px', marginTop: '8px' }}>
               <button
                 type="button"
-                onClick={() => setStage('CHOICE')}
+                onClick={resetToChoice}
                 style={{
                   flex: 1,
                   borderRadius: '20px',
