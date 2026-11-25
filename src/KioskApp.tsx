@@ -27,6 +27,7 @@ const DispenserTopBanner = React.lazy(() => import('./components/dispenser/Dispe
 import type { CardApprovalResult } from './services/van/van_types';
 import { kioskVanClient } from './services/van/van_client';
 import { executeKioskAutoReversal } from './services/van/kioskPaymentReversal';
+import { runKioskPowerNetworkCheckin } from './services/hardware/kioskPowerCheckin';
 import KioskMainDashboard from './components/MainPage/KioskMainDashboard';
 import { KioskBottomBar } from './components/KioskBottomBar';
 import {
@@ -604,6 +605,7 @@ export default function KioskApp() {
         };
         if (isOnlineNow) {
           storeInfoSyncedRef.current = true;
+          void runKioskPowerNetworkCheckin();
         }
       } catch (err) {
         console.warn('Failed to sync kiosk master and store info:', err);

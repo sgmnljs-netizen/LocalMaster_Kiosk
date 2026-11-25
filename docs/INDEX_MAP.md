@@ -43,5 +43,6 @@
 - **`utils/kioskProductSpecSummary.ts` & `utils/kioskPurchaseEligibility.ts` & `utils/code128Barcode.ts` & `utils/kioskBlackBox.ts`**: 상품 스펙 요약·자격 판정 엔진, ISO Code128B 바코드, PAN 마스킹 블랙박스 로거
 - **`components/AdminPinModal.tsx` & `KioskSettingsModal.tsx` & `ParkingPopupModal.tsx` & `stores/kioskSettings.ts`**: 관리자/엔지니어 PIN, 5-Tap 설정, 호기별 분리, 공식 주차팝업(`parkingConfig`), `X-Device-Key` 인증 및 앱 제어
 - **`hooks/useKioskHardwareHeartbeat.ts` & `stores/useKioskHardwareHealthStore.ts` & `hooks/useKioskVanPayment.ts`**: 멀티 VAN·프린터 헬스 하트비트(`isDemoEnvironment` 0ms 격리), VAN 결제 `E_BUSY` 잠금 및 QR 스캐너(`useHardwareScanner.ts`) 훅
+- **`services/hardware/kioskPowerCheckin.ts`**: 부팅 1회 무소음 `:18080/health` 유선 MAC·LAN IP 자동 수집(`wol-checkin`) 및 안전 종료용 `X-Power-Key` 루프백 등록 (워밍업 미완료 시 3초 뒤 1회 재시도)
 - **`services/api.ts`**: API 클라이언트 및 `isDemoEnvironment()` 0ms 가상 Edge DB(50타석 미배정 클린 시드·숫자 `id: 1001` 이용권·LNA 차단)
 - **`electron/main.cjs` & `preload.cjs` & `parking_*_preload.cjs`**: 24/7 무인 키오스크 셸 (`applyMonitorZoomFit`, `persist:parking` 주차 모달·터치 유휴리셋, LAN PNA 해제, 크래시 복구)
