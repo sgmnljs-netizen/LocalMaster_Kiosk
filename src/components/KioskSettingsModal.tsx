@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Settings, X, Monitor, Wifi, Shield, Zap, Loader2, CheckCircle2, AlertTriangle, LayoutGrid, RotateCcw, Star } from 'lucide-react';
+import { Settings, X, Monitor, Wifi, Shield, Zap, Loader2, CheckCircle2, AlertTriangle, LayoutGrid, RotateCcw, Star, CarFront, ExternalLink, Trash2 } from 'lucide-react';
 import {
   useKioskSettings,
   KioskSettings,
@@ -8,6 +8,11 @@ import {
   KioskAuthMethodsConfig,
   KioskMenuVisibilityMap,
   DEFAULT_AUTH_METHODS,
+  DEFAULT_PARKING_CONFIG,
+  DEFAULT_PARKING_BUTTON_LABEL,
+  isSafeParkingHttpUrl,
+  sanitizeKioskParkingConfig,
+  type KioskParkingConfig,
   canonicalizeKioskMenuId,
   isKioskMenuEnabled,
   normalizeVanProviderType,
@@ -21,6 +26,7 @@ import { api, type KioskMenuConfig } from '../services/api';
 import { kioskVanClient } from '../services/van/van_client';
 import { normalizeVanProvider } from '../services/van/van_types';
 import { VirtualKeyboard, type VirtualKeyboardMode } from './VirtualKeyboard';
+import { ParkingPopupModal } from './ParkingPopupModal';
 
 interface KioskSettingsModalProps {
   isOpen: boolean;
@@ -104,13 +110,18 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
   const [formQrCouponOnlyMode, setFormQrCouponOnlyMode] = useState<boolean>(
     settings.qrCouponOnlyMode !== false
   );
+  const [formParkingConfig, setFormParkingConfig] = useState<KioskParkingConfig>(() =>
+    sanitizeKioskParkingConfig(settings.parkingConfig, DEFAULT_PARKING_CONFIG)
+  );
+  const [isParkingTestOpen, setIsParkingTestOpen] = useState<boolean>(false);
+  const [parkingSessionMsg, setParkingSessionMsg] = useState<string | null>(null);
   const [policyGuardMsg, setPolicyGuardMsg] = useState<string | null>(null);
 
   const [isPinging, setIsPinging] = useState(false);
   const [pingStatus, setPingStatus] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [activeKeyboardField, setActiveKeyboardField] = useState<
-    'terminalId' | 'vcatPort' | 'apiUrl' | 'storeCode' | 'deviceKey' | 'adminPin' | null
+    'terminalId' | 'vcatPort' | 'apiUrl' | 'storeCode' | 'deviceKey' | 'adminPin' | 'parkingUrl' | 'parkingLabel' | null
   >(null);
   const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [bootstrapMsg, setBootstrapMsg] = useState<string | null>(null);
@@ -182,6 +193,9 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       setFormMinGapMinutes(settings.minGapMinutes ?? 60);
       setFormTopDashboardMode(settings.topDashboardMode || 'AUTO');
       setFormQrCouponOnlyMode(settings.qrCouponOnlyMode !== false);
+      setFormParkingConfig(sanitizeKioskParkingConfig(settings.parkingConfig, DEFAULT_PARKING_CONFIG));
+      setIsParkingTestOpen(false);
+      setParkingSessionMsg(null);
       setPolicyGuardMsg(null);
       setPingStatus(null);
       setSaveSuccess(false);
@@ -361,6 +375,17 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
     const cleanVcatPort = formVcatPort.trim();
     const normalizedProvider = normalizeVanProviderType(formProviderType);
 
+    if (formParkingConfig.enabled && !isSafeParkingHttpUrl(formParkingConfig.url)) {
+      setActiveTab('menus');
+      setPolicyGuardMsg('주차 등록 기능을 활성화하려면 http:// 또는 https://로 시작하는 주차할인 웹 URL을 입력해 주세요.');
+      return;
+    }
+
+    const storeCodeChanged = Boolean(cleanStoreCd) && cleanStoreCd !== settings.storeCode;
+    const deviceKeyUnchanged = formDeviceKey.trim() === (settings.deviceKey || '').trim();
+    // 매장코드를 변경하면서 구 매장 기기키를 그대로 둔 경우 타 매장 401 차단을 막기 위해 즉시 비우고 재동기화
+    const effectiveDeviceKey = storeCodeChanged && deviceKeyUnchanged ? '' : formDeviceKey.trim();
+
     const updated: Partial<KioskSettings> = {
       deviceId: cleanDeviceId,
       deviceName: formDeviceName,
@@ -369,7 +394,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       vcatPort: cleanVcatPort,
       apiUrl: formApiUrl.trim(),
       storeCode: cleanStoreCd,
-      deviceKey: formDeviceKey.trim(),
+      deviceKey: effectiveDeviceKey,
       isMaintenanceMode: formIsMaintenance,
       menuOverrides: formMenuOverrides,
       authMethods: formAuthMethods,
@@ -377,6 +402,7 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       minGapMinutes: formMinGapMinutes,
       topDashboardMode: formTopDashboardMode,
       qrCouponOnlyMode: formQrCouponOnlyMode,
+      parkingConfig: sanitizeKioskParkingConfig(formParkingConfig, DEFAULT_PARKING_CONFIG),
     };
 
     try {
@@ -398,6 +424,14 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
       syncRemote: true,
       newAdminPin: trimmedNewPin.length === 4 ? trimmedNewPin : undefined,
     });
+    if (storeCodeChanged && deviceKeyUnchanged) {
+      void bootstrapLocalKioskSettings({
+        force: true,
+        allowAuthenticatedLan: true,
+        apiUrlOverride: formApiUrl.trim(),
+        storeCodeOverride: cleanStoreCd,
+      });
+    }
     setSaveSuccess(true);
     if (saveCloseTimerRef.current) {
       clearTimeout(saveCloseTimerRef.current);
@@ -1157,6 +1191,250 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
                   })}
                 </div>
               </div>
+
+              {/* Section E: 공식 옵션 — 외부 주차할인 웹 팝업 연동 */}
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: formParkingConfig.enabled ? '1.5px solid #10b981' : '1px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                  <div>
+                    <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CarFront size={16} color="#059669" />
+                      <span>외부 주차할인 웹 팝업 연동 (공식 옵션)</span>
+                    </h4>
+                    <p style={{ fontSize: '11.5px', color: '#64748b', margin: '3px 0 0 0', fontWeight: 500 }}>
+                      ON 설정 시 키오스크 메인에 주차 등록 버튼이 노출되며, 터치 시 전용 보안 팝업(로그인 쿠키 유지 · 유휴 자동 닫힘)으로 주차업체 웹을 띄웁니다.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="toggle-parking-enabled"
+                    onClick={() => {
+                      setPolicyGuardMsg(null);
+                      setFormParkingConfig((prev) => ({ ...prev, enabled: !prev.enabled }));
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '10px',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      border: formParkingConfig.enabled ? '1px solid #059669' : '1px solid #cbd5e1',
+                      background: formParkingConfig.enabled ? '#059669' : '#ffffff',
+                      color: formParkingConfig.enabled ? '#ffffff' : '#475569',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {formParkingConfig.enabled ? '사용 ON' : '미사용 OFF'}
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#1e293b', marginBottom: '6px' }}>
+                      주차할인 웹 URL (http:// 또는 https://)
+                    </label>
+                    <input
+                      type="text"
+                      data-testid="settings-input-parkingUrl"
+                      value={formParkingConfig.url}
+                      onFocus={() => setActiveKeyboardField('parkingUrl')}
+                      onClick={() => setActiveKeyboardField('parkingUrl')}
+                      onChange={(e) => {
+                        setPolicyGuardMsg(null);
+                        setFormParkingConfig((prev) => ({ ...prev, url: e.target.value }));
+                      }}
+                      placeholder="예: http://218.156.35.126"
+                      style={{
+                        width: '100%',
+                        background: '#ffffff',
+                        border: activeKeyboardField === 'parkingUrl' ? '2px solid #059669' : '1px solid #cbd5e1',
+                        borderRadius: '10px',
+                        padding: '10px 12px',
+                        color: '#0f172a',
+                        fontFamily: 'monospace',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#1e293b', marginBottom: '6px' }}>
+                      버튼 표시명 (최대 20자)
+                    </label>
+                    <input
+                      type="text"
+                      data-testid="settings-input-parkingLabel"
+                      maxLength={20}
+                      value={formParkingConfig.buttonLabel}
+                      onFocus={() => setActiveKeyboardField('parkingLabel')}
+                      onClick={() => setActiveKeyboardField('parkingLabel')}
+                      onChange={(e) => setFormParkingConfig((prev) => ({ ...prev, buttonLabel: e.target.value }))}
+                      placeholder={DEFAULT_PARKING_BUTTON_LABEL}
+                      style={{
+                        width: '100%',
+                        background: '#ffffff',
+                        border: activeKeyboardField === 'parkingLabel' ? '2px solid #059669' : '1px solid #cbd5e1',
+                        borderRadius: '10px',
+                        padding: '10px 12px',
+                        color: '#0f172a',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b', marginBottom: '6px' }}>
+                      미조작 자동 닫힘 시간
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {[30, 60, 90, 120, 180].map((sec) => {
+                        const selected = formParkingConfig.idleTimeoutSec === sec;
+                        return (
+                          <button
+                            key={sec}
+                            type="button"
+                            onClick={() => setFormParkingConfig((prev) => ({ ...prev, idleTimeoutSec: sec }))}
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: '8px',
+                              fontSize: '11.5px',
+                              fontWeight: 800,
+                              border: selected ? '1.5px solid #059669' : '1px solid #cbd5e1',
+                              background: selected ? '#ecfdf5' : '#ffffff',
+                              color: selected ? '#047857' : '#475569',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {sec}초
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b', marginBottom: '6px' }}>
+                      팝업 창 크기
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {(
+                        [
+                          { label: '보통 (80%)', w: 80, h: 66 },
+                          { label: '표준 (86%)', w: 86, h: 72 },
+                          { label: '크게 (94%)', w: 94, h: 82 },
+                        ] as const
+                      ).map((preset) => {
+                        const selected =
+                          formParkingConfig.popupWidthPct === preset.w &&
+                          formParkingConfig.popupHeightPct === preset.h;
+                        return (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() =>
+                              setFormParkingConfig((prev) => ({
+                                ...prev,
+                                popupWidthPct: preset.w,
+                                popupHeightPct: preset.h,
+                              }))
+                            }
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: '8px',
+                              fontSize: '11.5px',
+                              fontWeight: 800,
+                              border: selected ? '1.5px solid #059669' : '1px solid #cbd5e1',
+                              background: selected ? '#ecfdf5' : '#ffffff',
+                              color: selected ? '#047857' : '#475569',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {preset.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    data-testid="settings-parking-test-btn"
+                    disabled={!isSafeParkingHttpUrl(formParkingConfig.url)}
+                    onClick={() => setIsParkingTestOpen(true)}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: '10px',
+                      border: '1px solid #0284c7',
+                      background: isSafeParkingHttpUrl(formParkingConfig.url) ? '#f0f9ff' : '#f1f5f9',
+                      color: isSafeParkingHttpUrl(formParkingConfig.url) ? '#0369a1' : '#94a3b8',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      cursor: isSafeParkingHttpUrl(formParkingConfig.url) ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    <ExternalLink size={14} />
+                    <span>팝업 테스트 / 최초 로그인</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="settings-parking-clear-session-btn"
+                    onClick={async () => {
+                      if (typeof window !== 'undefined' && typeof window.golfosKioskBridge?.clearParkingSession === 'function') {
+                        const res = await window.golfosKioskBridge.clearParkingSession();
+                        setParkingSessionMsg(
+                          res?.ok
+                            ? '주차 팝업 로그인 쿠키/세션이 초기화되었습니다.'
+                            : res?.error || '세션 초기화에 실패했습니다.'
+                        );
+                      } else {
+                        setParkingSessionMsg('전용 Electron 키오스크 앱에서 주차 로그인 세션을 초기화할 수 있습니다.');
+                      }
+                    }}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: '10px',
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#475569',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    <span>주차 로그인 초기화</span>
+                  </button>
+                  {parkingSessionMsg && (
+                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#047857' }}>
+                      {parkingSessionMsg}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -1638,6 +1916,25 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
               masked: true,
               maxLength: 4,
             },
+            parkingUrl: {
+              label: '주차할인 웹 URL',
+              mode: 'ASCII_TEXT',
+              value: formParkingConfig.url,
+              onChange: (val) => {
+                setPolicyGuardMsg(null);
+                setFormParkingConfig((prev) => ({ ...prev, url: val }));
+              },
+              maxLength: 500,
+            },
+            parkingLabel: {
+              label: '주차 버튼 표시명',
+              mode: 'HANGUL_NAME',
+              value: formParkingConfig.buttonLabel,
+              onChange: (val) => {
+                setFormParkingConfig((prev) => ({ ...prev, buttonLabel: val }));
+              },
+              maxLength: 20,
+            },
           };
           const cfg = kbMeta[activeKeyboardField];
           return (
@@ -1853,6 +2150,11 @@ export const KioskSettingsModal: React.FC<KioskSettingsModalProps> = ({
           </div>
         </div>
       </div>
+      <ParkingPopupModal
+        isOpen={isParkingTestOpen}
+        config={sanitizeKioskParkingConfig({ ...formParkingConfig, enabled: true }, DEFAULT_PARKING_CONFIG)}
+        onClose={() => setIsParkingTestOpen(false)}
+      />
     </div>
   );
 };

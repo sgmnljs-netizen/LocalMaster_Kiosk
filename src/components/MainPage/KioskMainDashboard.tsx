@@ -4,6 +4,7 @@ import {
   ArrowRight,
   BookmarkCheck,
   Calendar,
+  CarFront,
   Compass,
   Flag,
   Grid,
@@ -19,7 +20,10 @@ import {
 import {
   useKioskSettings,
   isKioskMenuEnabled,
-  KioskMenuVisibilityMap,
+  isSafeParkingHttpUrl,
+  DEFAULT_PARKING_BUTTON_LABEL,
+  type KioskMenuVisibilityMap,
+  type KioskParkingConfig,
 } from '../../stores/kioskSettings';
 import type { Bay, KioskMenuConfig } from '../../services/api';
 import { isBayTrulyAvailableForKiosk } from '../../utils/bayStatusGuard';
@@ -87,6 +91,9 @@ interface KioskMainDashboardProps {
   onSignUp: () => void;
   kioskMenuConfigs?: KioskMenuConfig[];
   menuOverrides?: KioskMenuVisibilityMap;
+  operationMode?: 'STANDARD' | 'BALL_DISPENSER';
+  parkingConfig?: KioskParkingConfig | null;
+  onOpenParking?: () => void;
   onMenuClick?: (menuId: string, zoneIds: (string | number)[]) => void;
 }
 
@@ -121,11 +128,19 @@ export default function KioskMainDashboard({
   onSignUp,
   kioskMenuConfigs,
   menuOverrides,
+  operationMode = 'STANDARD',
+  parkingConfig,
+  onOpenParking,
   onMenuClick,
 }: KioskMainDashboardProps) {
   const t = TRANSLATIONS[lang];
   const { settings } = useKioskSettings();
-  const effectiveOverrides = menuOverrides ?? settings.menuOverrides;
+  const baseOverrides = menuOverrides ?? settings.menuOverrides;
+  // [BALL_DISPENSER 플러그인] 무타석 볼배급 매장에서는 타석 전용 메뉴(이동·파3·체크인) 자동 은닉
+  const effectiveOverrides: KioskMenuVisibilityMap | undefined =
+    operationMode === 'BALL_DISPENSER'
+      ? { ...(baseOverrides ?? {}), MOVE_BAY: false, CHANGE_BAY: false, PAR3: false, CHECKIN: false }
+      : baseOverrides;
   const lastCardTapAtRef = useRef<number>(0);
 
   const cleanStoreLabel = (storeName || '')
@@ -281,17 +296,53 @@ export default function KioskMainDashboard({
     }
   };
 
+  const isDispenserMode = operationMode === 'BALL_DISPENSER';
+  const subWelcomeText = isDispenserMode
+    ? lang === 'KO'
+      ? '터치 한 번으로 빠르게 입실 배정 및 일일권을 이용하실 수 있습니다.'
+      : 'Quickly check in or buy a daily pass with a single touch.'
+    : t.subWelcome;
+  const heroBadgeLabel = isDispenserMode
+    ? lang === 'KO'
+      ? '빠른 입실'
+      : 'FAST CHECK-IN'
+    : lang === 'KO'
+      ? '빠른 타석 배정'
+      : 'FAST ASSIGN';
+  const heroTitleText = isDispenserMode
+    ? lang === 'KO'
+      ? '입실 배정'
+      : 'Check-In'
+    : heroMenu?.menu_name || t.practiceTeebox;
+  const heroTitleSubText = isDispenserMode
+    ? lang === 'KO'
+      ? '(회원 배정 / 일일권 구매)'
+      : '(Member / Daily Pass)'
+    : null;
+  const heroDescText = isDispenserMode
+    ? lang === 'KO'
+      ? '배정 완료 후 1·2층 볼 배급기 안면인식으로 바로 연습을 시작합니다.'
+      : 'After check-in, scan your face at the 1F/2F ball dispenser to start.'
+    : heroMenu?.description || t.practiceTeeboxSub;
+  const heroActionText = isDispenserMode
+    ? lang === 'KO'
+      ? '입실 배정하기'
+      : 'Start Check-In'
+    : lang === 'KO'
+      ? '타석 배정하기'
+      : 'Allocate Teebox';
+
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '18px',
-        justifyContent: 'space-between',
+        gap: isDispenserMode ? '26px' : '18px',
+        justifyContent: isDispenserMode ? 'flex-start' : 'space-between',
         width: '100%',
         flex: 1,
-        padding: '6px 10px 10px 10px',
+        padding: isDispenserMode ? '24px 10px 14px 10px' : '6px 10px 10px 10px',
       }}
     >
       {/* 헤더 섹션: 지점 Eyebrow 중앙 통합(전광판 노출 시) + ClearType 대형 타이틀 */}
@@ -336,12 +387,22 @@ export default function KioskMainDashboard({
           {t.welcome}
         </h2>
         <p style={{ fontSize: '21px', color: '#475569', fontWeight: 600, letterSpacing: '-0.3px', margin: 0, wordBreak: 'keep-all' }}>
-          {t.subWelcome}
+          {subWelcomeText}
         </p>
       </div>
 
       {/* 🍱 2026 High-Visibility Kiosk Bento Box Grid */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', width: '100%', maxWidth: '1040px', flex: 1, justifyContent: 'space-between' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: isDispenserMode ? '24px' : '18px',
+          width: '100%',
+          maxWidth: '1040px',
+          flex: 1,
+          justifyContent: isDispenserMode ? 'flex-start' : 'space-between',
+        }}
+      >
 
         {/* Row 1: 2대 메인 히어로 (좌측: 예약 타석 체크인 / 우측: 1순위 연습타석 배정) */}
         {(effectiveOnCheckin || heroMenu) && (
@@ -445,7 +506,7 @@ export default function KioskMainDashboard({
               <div
                 onClick={() => handleCardClick(heroMenu.menu_id, heroMenu.zone_ids || [])}
                 style={{
-                  minHeight: '292px',
+                  minHeight: isDispenserMode ? '320px' : '292px',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
@@ -491,7 +552,7 @@ export default function KioskMainDashboard({
                     }}
                   >
                     <Zap size={15} strokeWidth={2.6} fill="#34d399" style={{ color: '#34d399' }} aria-hidden="true" />
-                    <span>{lang === 'KO' ? '빠른 타석 배정' : 'FAST ASSIGN'}</span>
+                    <span>{heroBadgeLabel}</span>
                   </span>
                   {practiceBays.length > 0 ? (
                     <span
@@ -535,11 +596,36 @@ export default function KioskMainDashboard({
                 </div>
 
                 <div style={{ position: 'relative', zIndex: 1 }}>
-                  <h3 style={{ fontSize: '40px', fontWeight: 900, color: '#ffffff', margin: '0 0 8px 0', letterSpacing: '-0.9px', lineHeight: 1.18 }}>
-                    {heroMenu.menu_name || t.practiceTeebox}
+                  <h3
+                    style={{
+                      fontSize: '40px',
+                      fontWeight: 900,
+                      color: '#ffffff',
+                      margin: '0 0 8px 0',
+                      letterSpacing: '-0.9px',
+                      lineHeight: 1.18,
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      flexWrap: 'wrap',
+                      gap: '12px',
+                    }}
+                  >
+                    <span>{heroTitleText}</span>
+                    {heroTitleSubText && (
+                      <span
+                        style={{
+                          fontSize: '26px',
+                          fontWeight: 800,
+                          color: '#a7f3d0',
+                          letterSpacing: '-0.5px',
+                        }}
+                      >
+                        {heroTitleSubText}
+                      </span>
+                    )}
                   </h3>
                   <p style={{ fontSize: '20px', color: '#cbd5e1', margin: '0 0 22px 0', lineHeight: 1.4, fontWeight: 600, letterSpacing: '-0.4px', wordBreak: 'keep-all' }}>
-                    {heroMenu.description || t.practiceTeeboxSub}
+                    {heroDescText}
                   </p>
 
                   {/* 🌟 1순위 시그니처 3D 에메랄드 주얼 택타일 CTA */}
@@ -548,7 +634,7 @@ export default function KioskMainDashboard({
                     style={{ '--decision-sheen-delay': '0s' } as React.CSSProperties}
                   >
                     <span style={{ position: 'relative', zIndex: 2 }}>
-                      {lang === 'KO' ? '타석 배정하기' : 'Allocate Teebox'}
+                      {heroActionText}
                     </span>
                     <ArrowRight
                       size={24}
@@ -592,7 +678,7 @@ export default function KioskMainDashboard({
                   key={menu.menu_id || index}
                   onClick={() => handleCardClick(menu.menu_id, menu.zone_ids || [])}
                   style={{
-                    minHeight: isThreeCol ? '300px' : '262px',
+                    minHeight: isThreeCol ? '300px' : isDispenserMode ? '292px' : '262px',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
@@ -691,6 +777,7 @@ export default function KioskMainDashboard({
             onClick={() => handleCardClick(signupMenu.menu_id, signupMenu.zone_ids || [])}
             style={{
               animationDelay: '0.4s',
+              marginTop: isDispenserMode ? 'auto' : undefined,
               minHeight: '118px',
               display: 'flex',
               alignItems: 'center',
@@ -764,6 +851,99 @@ export default function KioskMainDashboard({
                 aria-hidden="true"
                 style={{ position: 'relative', zIndex: 2, flexShrink: 0 }}
               />
+            </div>
+          </div>
+        )}
+
+        {/* Row 4: 공식 옵션 — 외부 주차할인 웹 팝업 등록 배너 (매장/기기 설정 ON + 유효 URL일 때만 노출) */}
+        {onOpenParking && parkingConfig?.enabled && isSafeParkingHttpUrl(parkingConfig.url) && (
+          <div
+            data-testid="kiosk-parking-btn"
+            className="animate-fade-up apple-card-hover shop-tactile-card"
+            onClick={() => {
+              const nowMs = Date.now();
+              if (!shouldAllowDashboardCardTap(lastCardTapAtRef.current, nowMs)) {
+                return;
+              }
+              lastCardTapAtRef.current = nowMs;
+              onOpenParking();
+            }}
+            style={{
+              animationDelay: '0.45s',
+              minHeight: '108px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '20px',
+              padding: '16px 30px',
+              background: '#ffffff',
+              borderRadius: '28px',
+              border: '1.5px solid #cbd5e1',
+              boxShadow: '0 10px 26px rgba(15, 23, 42, 0.055), inset 0 1px 0 #ffffff',
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '18px', minWidth: 0 }}>
+              <div
+                style={{
+                  width: '58px',
+                  height: '58px',
+                  borderRadius: '18px',
+                  background: 'linear-gradient(145deg, #ecfdf5 0%, #d1fae5 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1px solid rgba(5, 150, 105, 0.28)',
+                  boxShadow: '0 4px 10px rgba(5, 150, 105, 0.08)',
+                  flexShrink: 0,
+                }}
+              >
+                <CarFront size={28} strokeWidth={2.4} style={{ color: '#059669' }} />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '26px', fontWeight: 900, color: '#0f172a', letterSpacing: '-0.6px' }}>
+                    {lang === 'KO' ? (parkingConfig.buttonLabel || DEFAULT_PARKING_BUTTON_LABEL) : 'Parking Discount'}
+                  </span>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '14px',
+                      fontWeight: 800,
+                      color: '#047857',
+                      background: 'rgba(16, 185, 129, 0.1)',
+                      padding: '4px 12px',
+                      borderRadius: '999px',
+                      border: '1px solid rgba(16, 185, 129, 0.28)',
+                    }}
+                  >
+                    <span>{lang === 'KO' ? '차량번호 할인 등록' : 'Self Registration'}</span>
+                  </span>
+                </div>
+                <p style={{ fontSize: '17px', color: '#475569', fontWeight: 600, margin: 0, wordBreak: 'keep-all' }}>
+                  {lang === 'KO'
+                    ? '별도 로그인 없이 차량번호를 직접 입력해 주차 할인을 적용합니다.'
+                    : 'Enter your license plate number directly to apply parking validation.'}
+                </p>
+              </div>
+            </div>
+
+            <div
+              className="dashboard-sub-cta"
+              style={{
+                background: 'linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%)',
+                color: '#065f46',
+                border: '1.5px solid #6ee7b7',
+                boxShadow:
+                  'inset 0 1.5px 0 rgba(255, 255, 255, 0.95), inset 0 -3px 0 rgba(5, 150, 105, 0.18), 0 4px 10px rgba(5, 150, 105, 0.08)',
+                minWidth: '170px',
+                flexShrink: 0,
+              }}
+            >
+              <span>{lang === 'KO' ? '주차권 입력' : 'Open'}</span>
+              <ArrowRight size={20} strokeWidth={2.8} className="decision-btn-arrow" aria-hidden="true" />
             </div>
           </div>
         )}

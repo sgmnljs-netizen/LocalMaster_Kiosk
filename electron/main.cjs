@@ -7,7 +7,7 @@ try {
 const isElectronRuntime = Boolean(
   electronModule && typeof electronModule === 'object' && electronModule.app
 );
-const { app, BrowserWindow, Menu, nativeImage, dialog, session, screen } = isElectronRuntime
+const { app, BrowserWindow, WebContentsView, Menu, nativeImage, dialog, session, screen, ipcMain } = isElectronRuntime
   ? electronModule
   : {};
 const path = require('path');
@@ -16,6 +16,9 @@ const fs = require('fs');
 
 const KIOSK_BASE_WIDTH = 1080;
 const KIOSK_BASE_HEIGHT = 1920;
+const PARKING_HEADER_HEIGHT_PX = 68;
+const DEFAULT_PARKING_IDLE_TIMEOUT_SEC = 60;
+const PARKING_PARTITION = 'persist:parking';
 
 const args = process.argv.slice(2);
 const isWindowedArg = args.includes('--window');
@@ -67,11 +70,117 @@ function computeMonitorZoomFactor(contentW, contentH) {
   return Math.round(fitted * 1000) / 1000;
 }
 
+function validateParkingPopupUrl(rawUrl) {
+  if (typeof rawUrl !== 'string') {
+    return { valid: false, url: '', error: '주차할인 웹 URL이 지정되지 않았습니다.' };
+  }
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed.length > 500) {
+    return { valid: false, url: '', error: '유효한 주차할인 웹 URL을 입력해 주세요.' };
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { valid: false, url: '', error: 'http:// 또는 https:// 주소만 허용됩니다.' };
+    }
+    if (!parsed.hostname) {
+      return { valid: false, url: '', error: '호스트명이 누락된 URL입니다.' };
+    }
+    return { valid: true, url: parsed.toString(), error: null };
+  } catch (_) {
+    return { valid: false, url: '', error: 'URL 형식이 올바르지 않습니다.' };
+  }
+}
+
+function isIpv4OrIpv6Host(hostname) {
+  const h = String(hostname || '').trim();
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return true;
+  if (h.includes(':')) return true;
+  return false;
+}
+
+function isParkingNavigationAllowed(targetUrl, initialUrl) {
+  const targetCheck = validateParkingPopupUrl(targetUrl);
+  const initCheck = validateParkingPopupUrl(initialUrl);
+  if (!targetCheck.valid || !initCheck.valid) return false;
+  try {
+    const target = new URL(targetCheck.url);
+    const init = new URL(initCheck.url);
+    const tHost = target.hostname.toLowerCase();
+    const iHost = init.hostname.toLowerCase();
+    if (tHost === iHost) return true;
+    if (isIpv4OrIpv6Host(tHost) || isIpv4OrIpv6Host(iHost)) return false;
+    const tLabels = tHost.split('.').filter(Boolean);
+    const iLabels = iHost.split('.').filter(Boolean);
+    if (tLabels.length >= 2 && iLabels.length >= 2) {
+      const tTail = tLabels.slice(-2).join('.');
+      const iTail = iLabels.slice(-2).join('.');
+      return tTail === iTail;
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+function sanitizeParkingPopupOptions(rawOptions) {
+  const opts = rawOptions && typeof rawOptions === 'object' ? rawOptions : {};
+  const urlResult = validateParkingPopupUrl(opts.url);
+  const rawTitle = typeof opts.title === 'string' ? opts.title.trim() : '';
+  const rawIdle = Number(opts.idleTimeoutSec);
+  const idleTimeoutSec =
+    Number.isFinite(rawIdle) ? Math.max(15, Math.min(300, Math.round(rawIdle))) : DEFAULT_PARKING_IDLE_TIMEOUT_SEC;
+  const rawW = Number(opts.widthPct);
+  const widthPct = Number.isFinite(rawW) ? Math.max(50, Math.min(98, Math.round(rawW))) : 86;
+  const rawH = Number(opts.heightPct);
+  const heightPct = Number.isFinite(rawH) ? Math.max(45, Math.min(92, Math.round(rawH))) : 72;
+  return {
+    valid: urlResult.valid,
+    error: urlResult.error,
+    url: urlResult.url,
+    title: (rawTitle || '주차 등록').slice(0, 20),
+    idleTimeoutSec,
+    widthPct,
+    heightPct,
+  };
+}
+
+function computeParkingPopupBounds(parentBounds, options) {
+  const safeParent = parentBounds && typeof parentBounds === 'object' ? parentBounds : {};
+  const px = Number.isFinite(Number(safeParent.x)) ? Number(safeParent.x) : 0;
+  const py = Number.isFinite(Number(safeParent.y)) ? Number(safeParent.y) : 0;
+  const pw = Number.isFinite(Number(safeParent.width)) && Number(safeParent.width) > 0
+    ? Number(safeParent.width)
+    : KIOSK_BASE_WIDTH;
+  const ph = Number.isFinite(Number(safeParent.height)) && Number(safeParent.height) > 0
+    ? Number(safeParent.height)
+    : KIOSK_BASE_HEIGHT;
+
+  const opts = options && typeof options === 'object' ? options : {};
+  const wPct = Number.isFinite(Number(opts.widthPct)) ? Math.max(50, Math.min(98, Number(opts.widthPct))) : 86;
+  const hPct = Number.isFinite(Number(opts.heightPct)) ? Math.max(45, Math.min(92, Number(opts.heightPct))) : 72;
+
+  const maxW = Math.max(320, pw - 24);
+  const maxH = Math.max(320, ph - 24);
+  const width = Math.min(maxW, Math.max(Math.min(480, maxW), Math.round((pw * wPct) / 100)));
+  const height = Math.min(maxH, Math.max(Math.min(420, maxH), Math.round((ph * hPct) / 100)));
+  const x = Math.round(px + (pw - width) / 2);
+  const y = Math.round(py + (ph - height) / 2);
+  return { x, y, width, height };
+}
+
 module.exports = {
   KIOSK_BASE_WIDTH,
   KIOSK_BASE_HEIGHT,
+  PARKING_HEADER_HEIGHT_PX,
+  DEFAULT_PARKING_IDLE_TIMEOUT_SEC,
+  PARKING_PARTITION,
   computeMonitorFitMetrics,
   computeMonitorZoomFactor,
+  validateParkingPopupUrl,
+  isParkingNavigationAllowed,
+  sanitizeParkingPopupOptions,
+  computeParkingPopupBounds,
 };
 
 if (!isElectronRuntime) {
@@ -177,6 +286,314 @@ const windowIconPath = process.platform === 'win32' && fs.existsSync(iconIcoPath
   : iconPngPath;
 
 let mainWindow = null;
+let parkingWindow = null;
+let parkingView = null;
+let parkingIdleTimer = null;
+let parkingRemainingSec = DEFAULT_PARKING_IDLE_TIMEOUT_SEC;
+let parkingInitialTimeoutSec = DEFAULT_PARKING_IDLE_TIMEOUT_SEC;
+
+function escapeHtmlBasic(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildParkingHeaderDataUrl(title, idleTimeoutSec) {
+  const safeTitle = escapeHtmlBasic(title || '주차 등록');
+  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${safeTitle}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-touch-callout:none;}
+    html,body{height:${PARKING_HEADER_HEIGHT_PX}px;overflow:hidden;background:#0f172a;color:#f8fafc;font-family:'Pretendard','Malgun Gothic',sans-serif;}
+    .bar{height:${PARKING_HEADER_HEIGHT_PX}px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:2px solid rgba(16,185,129,0.45);background:linear-gradient(90deg,#0f172a 0%,#1e293b 100%);}
+    .left{display:flex;align-items:center;gap:12px;min-width:0;}
+    .dot{width:12px;height:12px;border-radius:999px;background:#10b981;box-shadow:0 0 12px rgba(16,185,129,0.75);flex-shrink:0;}
+    .title{font-size:20px;font-weight:900;letter-spacing:-0.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .pill{padding:6px 12px;border-radius:999px;background:rgba(16,185,129,0.18);border:1px solid rgba(52,211,153,0.4);color:#6ee7b7;font-size:14px;font-weight:800;white-space:nowrap;}
+    .actions{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+    button{height:44px;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer;padding:0 16px;border:1px solid rgba(255,255,255,0.16);background:rgba(255,255,255,0.08);color:#e2e8f0;}
+    button:active{transform:scale(0.97);}
+    .close-btn{padding:0 24px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);border:none;color:#ffffff;font-size:17px;box-shadow:0 4px 14px rgba(16,185,129,0.35);}
+  </style></head><body oncontextmenu="return false">
+  <div class="bar">
+    <div class="left">
+      <span class="dot"></span>
+      <span class="title">${safeTitle}</span>
+      <span id="countdown" class="pill">${idleTimeoutSec}초 후 자동 닫힘</span>
+    </div>
+    <div class="actions">
+      <button type="button" id="btnBack">이전</button>
+      <button type="button" id="btnReload">새로고침</button>
+      <button type="button" id="btnClose" class="close-btn">✕ 닫기</button>
+    </div>
+  </div>
+  <script>
+    const api = window.golfosParkingHeader;
+    document.getElementById('btnBack').addEventListener('click', () => api && api.back());
+    document.getElementById('btnReload').addEventListener('click', () => api && api.reload());
+    document.getElementById('btnClose').addEventListener('click', () => api && api.close());
+    if (api && typeof api.onCountdownTick === 'function') {
+      api.onCountdownTick((sec) => {
+        const el = document.getElementById('countdown');
+        if (el) el.textContent = sec + '초 후 자동 닫힘';
+      });
+    }
+  </script></body></html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+function clearParkingIdleTimer() {
+  if (parkingIdleTimer) {
+    clearInterval(parkingIdleTimer);
+    parkingIdleTimer = null;
+  }
+}
+
+function resetParkingIdleCountdown() {
+  parkingRemainingSec = parkingInitialTimeoutSec;
+  if (parkingWindow && !parkingWindow.isDestroyed()) {
+    try {
+      parkingWindow.webContents.send('parking-header:tick', parkingRemainingSec);
+    } catch (_) {
+      // 무시
+    }
+  }
+}
+
+function closeParkingPopupWindow(reason = 'manual') {
+  clearParkingIdleTimer();
+  const win = parkingWindow;
+  parkingWindow = null;
+  parkingView = null;
+  if (win && !win.isDestroyed()) {
+    try {
+      win.close();
+    } catch (_) {
+      try { win.destroy(); } catch (_2) {}
+    }
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.focus();
+      mainWindow.webContents.send('kiosk:parking-popup-closed', { reason });
+    } catch (_) {
+      // 무시
+    }
+  }
+}
+
+function openParkingPopupWindow(rawOptions) {
+  const opts = sanitizeParkingPopupOptions(rawOptions);
+  if (!opts.valid) {
+    return { ok: false, error: opts.error || '유효하지 않은 주차할인 URL입니다.' };
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { ok: false, error: '키오스크 메인 창이 활성화되지 않았습니다.' };
+  }
+
+  closeParkingPopupWindow('reopen');
+
+  const parentBounds = mainWindow.getBounds();
+  const bounds = computeParkingPopupBounds(parentBounds, opts);
+  parkingInitialTimeoutSec = opts.idleTimeoutSec;
+  parkingRemainingSec = opts.idleTimeoutSec;
+
+  const canUseWebContentsView = typeof WebContentsView === 'function';
+  parkingWindow = new BrowserWindow({
+    parent: mainWindow,
+    modal: true,
+    frame: !canUseWebContentsView,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    show: false,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    backgroundColor: '#0f172a',
+    title: opts.title,
+    webPreferences: canUseWebContentsView
+      ? {
+          preload: path.join(__dirname, 'parking_header_preload.cjs'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          spellcheck: false,
+        }
+      : {
+          partition: PARKING_PARTITION,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          spellcheck: false,
+        },
+  });
+
+  const attachSecurityGuards = (wc) => {
+    wc.setWindowOpenHandler(({ url }) => {
+      if (isParkingNavigationAllowed(url, opts.url)) {
+        wc.loadURL(url).catch(() => {});
+      }
+      return { action: 'deny' };
+    });
+    wc.on('will-navigate', (event, navUrl) => {
+      if (!isParkingNavigationAllowed(navUrl, opts.url)) {
+        event.preventDefault();
+        appendKioskRuntimeLog('PARKING', `Blocked external navigation attempt: ${navUrl}`);
+      } else {
+        resetParkingIdleCountdown();
+      }
+    });
+    wc.on('context-menu', (event) => {
+      if (!isDevMode) event.preventDefault();
+    });
+    wc.on('before-input-event', (event, input) => {
+      resetParkingIdleCountdown();
+      const key = (input.key || '').toLowerCase();
+      const ctrlOrCmd = input.control || input.meta;
+      if (input.type === 'keyDown' && key === 'escape') {
+        event.preventDefault();
+        closeParkingPopupWindow('escape');
+        return;
+      }
+      if (!isDevMode && (key === 'f5' || key === 'f12' || (input.alt && key === 'f4'))) {
+        event.preventDefault();
+        return;
+      }
+      if (ctrlOrCmd && ['n', 't', 'w', 'p', 's', 'u'].includes(key)) {
+        event.preventDefault();
+      }
+    });
+  };
+
+  if (canUseWebContentsView) {
+    parkingWindow.loadURL(buildParkingHeaderDataUrl(opts.title, opts.idleTimeoutSec)).catch(() => {});
+    parkingView = new WebContentsView({
+      webPreferences: {
+        partition: PARKING_PARTITION,
+        preload: path.join(__dirname, 'parking_view_preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        spellcheck: false,
+      },
+    });
+    parkingWindow.contentView.addChildView(parkingView);
+    const applyViewBounds = () => {
+      if (!parkingWindow || parkingWindow.isDestroyed() || !parkingView) return;
+      const [cw, ch] = parkingWindow.getContentSize();
+      parkingView.setBounds({
+        x: 0,
+        y: PARKING_HEADER_HEIGHT_PX,
+        width: Math.max(200, cw),
+        height: Math.max(200, ch - PARKING_HEADER_HEIGHT_PX),
+      });
+    };
+    applyViewBounds();
+    parkingWindow.on('resize', applyViewBounds);
+    attachSecurityGuards(parkingView.webContents);
+    parkingView.webContents.loadURL(opts.url).catch((err) => {
+      appendKioskRuntimeLog('PARKING', `Failed to load parking URL (${opts.url}): ${err?.message || err}`);
+    });
+  } else {
+    attachSecurityGuards(parkingWindow.webContents);
+    parkingWindow.loadURL(opts.url).catch((err) => {
+      appendKioskRuntimeLog('PARKING', `Failed to load parking URL (${opts.url}): ${err?.message || err}`);
+    });
+  }
+
+  parkingWindow.once('ready-to-show', () => {
+    if (parkingWindow && !parkingWindow.isDestroyed()) {
+      parkingWindow.show();
+      parkingWindow.focus();
+    }
+  });
+
+  parkingWindow.on('closed', () => {
+    clearParkingIdleTimer();
+    parkingWindow = null;
+    parkingView = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.focus();
+        mainWindow.webContents.send('kiosk:parking-popup-closed', { reason: 'closed' });
+      } catch (_) {
+        // 무시
+      }
+    }
+  });
+
+  clearParkingIdleTimer();
+  parkingIdleTimer = setInterval(() => {
+    parkingRemainingSec -= 1;
+    if (parkingRemainingSec <= 0) {
+      closeParkingPopupWindow('idle_timeout');
+      return;
+    }
+    if (parkingWindow && !parkingWindow.isDestroyed()) {
+      try {
+        parkingWindow.webContents.send('parking-header:tick', parkingRemainingSec);
+      } catch (_) {
+        // 무시
+      }
+    }
+  }, 1000);
+
+  appendKioskRuntimeLog('PARKING', `Opened parking popup (${opts.url}, idle=${opts.idleTimeoutSec}s)`);
+  return { ok: true, url: opts.url, idleTimeoutSec: opts.idleTimeoutSec };
+}
+
+function registerParkingIpcHandlers() {
+  if (!ipcMain) return;
+
+  ipcMain.handle('kiosk:open-parking-popup', (_event, options) => {
+    return openParkingPopupWindow(options);
+  });
+
+  ipcMain.handle('kiosk:close-parking-popup', () => {
+    closeParkingPopupWindow('ipc');
+    return { ok: true };
+  });
+
+  ipcMain.handle('kiosk:clear-parking-session', async () => {
+    try {
+      const part = session.fromPartition(PARKING_PARTITION);
+      await part.clearStorageData();
+      appendKioskRuntimeLog('PARKING', 'Cleared persist:parking session storage.');
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  ipcMain.on('parking-view:activity', () => {
+    resetParkingIdleCountdown();
+  });
+
+  ipcMain.on('parking-header:action', (_event, action) => {
+    resetParkingIdleCountdown();
+    if (action === 'close') {
+      closeParkingPopupWindow('header_close');
+    } else if (action === 'back') {
+      const targetWc = parkingView ? parkingView.webContents : (parkingWindow ? parkingWindow.webContents : null);
+      if (targetWc && !targetWc.isDestroyed() && targetWc.navigationHistory && targetWc.navigationHistory.canGoBack()) {
+        targetWc.navigationHistory.goBack();
+      } else if (targetWc && !targetWc.isDestroyed() && typeof targetWc.canGoBack === 'function' && targetWc.canGoBack()) {
+        targetWc.goBack();
+      }
+    } else if (action === 'reload') {
+      const targetWc = parkingView ? parkingView.webContents : (parkingWindow ? parkingWindow.webContents : null);
+      if (targetWc && !targetWc.isDestroyed()) {
+        targetWc.reload();
+      }
+    }
+  });
+}
 
 // 4. 단일 인스턴스 잠금 (바탕화면/하단 아이콘 중복 클릭 시 빈 창 생성 원천 차단 & 기존 창 포커스)
 const gotTheLock = app.requestSingleInstanceLock();
@@ -331,6 +748,7 @@ function createKioskWindow() {
     fullscreen: isKioskMode,
     show: false,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
@@ -583,6 +1001,7 @@ app.whenReady().then(() => {
   }
 
   configureKioskHardwarePermissions();
+  registerParkingIpcHandlers();
   buildKioskAppMenu();
   createKioskWindow();
 

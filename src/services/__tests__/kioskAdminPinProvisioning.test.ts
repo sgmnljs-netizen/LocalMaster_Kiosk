@@ -5,6 +5,7 @@ import {
   getKioskSettings,
   saveKioskSettings,
 } from '../../stores/kioskSettings';
+import { api, getCachedStoreOperationMode } from '../api';
 
 // Mock React useRef and useCallback to test hooks in node
 vi.mock('react', async (importOriginal) => {
@@ -622,6 +623,28 @@ describe('Kiosk Admin Trigger, PIN Security & Local Provisioning QA (A01, A02, A
       global.fetch = vi.fn().mockRejectedValue(new Error('Connection refused'));
       const resultNetworkError = await bootstrapLocalKioskSettings();
       expect(resultNetworkError).toBeNull();
+    });
+
+    it('A07-5: getSecureHeaders는 대소문자 다른 X-Store-CD 전달 시 Fetch 중복 병합("S_001, S_001")을 원천 차단한다', () => {
+      saveKioskSettings({ storeCode: 'S_001', deviceKey: 'lm_kiosk_s001_local_test_key' });
+      const headersObj = api.getSecureHeaders({ 'X-Store-CD': 'S_001', 'X-Caller': 'KIOSK' });
+      const fetchHeaders = new Headers(headersObj);
+      expect(fetchHeaders.get('x-store-cd')).toBe('S_001');
+      expect(fetchHeaders.get('x-caller')).toBe('KIOSK');
+      expect(fetchHeaders.get('x-device-key')).toBe('lm_kiosk_s001_local_test_key');
+    });
+
+    it('A07-6: getCachedStoreOperationMode는 매장 전환 시 타 매장의 BALL_DISPENSER 캐시 누수를 STANDARD로 차단한다', () => {
+      storageMap.set(
+        'LM_STORE_INFO',
+        JSON.stringify({ store_cd: 'S_001', operation_mode: 'BALL_DISPENSER' })
+      );
+      storageMap.set('LM_STORE_CD', 'S_001');
+      expect(getCachedStoreOperationMode()).toBe('BALL_DISPENSER');
+
+      // 매장을 STANDARD 매장(H01-SE-001)으로 전환하면 캐시 store_cd 불일치로 즉시 STANDARD 반환
+      storageMap.set('LM_STORE_CD', 'H01-SE-001');
+      expect(getCachedStoreOperationMode()).toBe('STANDARD');
     });
   });
 });

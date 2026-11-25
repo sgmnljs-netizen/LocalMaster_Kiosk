@@ -18,6 +18,113 @@ export interface KioskAuthMethodsConfig {
 
 export type KioskMenuVisibilityMap = Record<string, boolean>;
 
+export interface KioskParkingConfig {
+  enabled: boolean;
+  url: string;
+  buttonLabel: string;
+  idleTimeoutSec: number;
+  popupWidthPct: number;
+  popupHeightPct: number;
+}
+
+export const DEFAULT_PARKING_BUTTON_LABEL = '주차 등록';
+export const DEFAULT_PARKING_IDLE_TIMEOUT_SEC = 60;
+export const DEFAULT_PARKING_WIDTH_PCT = 86;
+export const DEFAULT_PARKING_HEIGHT_PCT = 72;
+
+export const DEFAULT_PARKING_CONFIG: KioskParkingConfig = {
+  enabled: false,
+  url: '',
+  buttonLabel: DEFAULT_PARKING_BUTTON_LABEL,
+  idleTimeoutSec: DEFAULT_PARKING_IDLE_TIMEOUT_SEC,
+  popupWidthPct: DEFAULT_PARKING_WIDTH_PCT,
+  popupHeightPct: DEFAULT_PARKING_HEIGHT_PCT,
+};
+
+export function isSafeParkingHttpUrl(raw?: string | null): boolean {
+  if (typeof raw !== 'string') return false;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 500) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function sanitizeKioskParkingConfig(
+  raw: unknown,
+  fallback: KioskParkingConfig = DEFAULT_PARKING_CONFIG
+): KioskParkingConfig {
+  const safeFallback: KioskParkingConfig = {
+    enabled: Boolean(fallback?.enabled),
+    url: isSafeParkingHttpUrl(fallback?.url) ? String(fallback.url).trim() : '',
+    buttonLabel: (String(fallback?.buttonLabel ?? '').trim() || DEFAULT_PARKING_BUTTON_LABEL).slice(0, 20),
+    idleTimeoutSec: Number.isFinite(fallback?.idleTimeoutSec)
+      ? Math.max(15, Math.min(300, Math.round(fallback.idleTimeoutSec)))
+      : DEFAULT_PARKING_IDLE_TIMEOUT_SEC,
+    popupWidthPct: Number.isFinite(fallback?.popupWidthPct)
+      ? Math.max(50, Math.min(98, Math.round(fallback.popupWidthPct)))
+      : DEFAULT_PARKING_WIDTH_PCT,
+    popupHeightPct: Number.isFinite(fallback?.popupHeightPct)
+      ? Math.max(45, Math.min(92, Math.round(fallback.popupHeightPct)))
+      : DEFAULT_PARKING_HEIGHT_PCT,
+  };
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return safeFallback;
+  }
+  const src = raw as Record<string, unknown>;
+  const rawUrl = typeof src.url === 'string' ? src.url.trim() : '';
+  const cleanUrl = rawUrl === '' ? '' : isSafeParkingHttpUrl(rawUrl) ? rawUrl.slice(0, 500) : safeFallback.url;
+  const rawLabel = src.buttonLabel ?? src.button_label;
+  const cleanLabel =
+    typeof rawLabel === 'string' && rawLabel.trim()
+      ? rawLabel.trim().slice(0, 20)
+      : safeFallback.buttonLabel;
+  const rawIdle = Number(src.idleTimeoutSec ?? src.idle_timeout_sec);
+  const cleanIdle = Number.isFinite(rawIdle)
+    ? Math.max(15, Math.min(300, Math.round(rawIdle)))
+    : safeFallback.idleTimeoutSec;
+  const rawW = Number(src.popupWidthPct ?? src.popup_width_pct);
+  const cleanW = Number.isFinite(rawW)
+    ? Math.max(50, Math.min(98, Math.round(rawW)))
+    : safeFallback.popupWidthPct;
+  const rawH = Number(src.popupHeightPct ?? src.popup_height_pct);
+  const cleanH = Number.isFinite(rawH)
+    ? Math.max(45, Math.min(92, Math.round(rawH)))
+    : safeFallback.popupHeightPct;
+
+  return {
+    enabled: typeof src.enabled === 'boolean' ? src.enabled : safeFallback.enabled,
+    url: cleanUrl,
+    buttonLabel: cleanLabel,
+    idleTimeoutSec: cleanIdle,
+    popupWidthPct: cleanW,
+    popupHeightPct: cleanH,
+  };
+}
+
+export function resolveEffectiveParkingConfig(
+  deviceParking?: KioskParkingConfig | null,
+  serverParking?: unknown
+): KioskParkingConfig {
+  const serverClean = sanitizeKioskParkingConfig(serverParking, DEFAULT_PARKING_CONFIG);
+  if (!deviceParking) {
+    return serverClean;
+  }
+  const devClean = sanitizeKioskParkingConfig(deviceParking, DEFAULT_PARKING_CONFIG);
+  if (devClean.enabled || devClean.url) {
+    return {
+      ...serverClean,
+      ...devClean,
+      url: devClean.url || serverClean.url,
+    };
+  }
+  return serverClean;
+}
+
 export interface KioskSettings {
   deviceId: string;
   deviceName: string;
@@ -46,6 +153,8 @@ export interface KioskSettings {
   qrCouponOnlyMode?: boolean;
   /** 각 층 타석 번호 가로(좌↔우) 배열 방향: ASC(1→11 정방향, 기본) | DESC(11→1 역방향, 매장 SSOT 연동) */
   bayNumberOrder?: BayNumberOrder;
+  /** 외부 주차할인 웹 팝업 공식 연동 설정 (기본 OFF) */
+  parkingConfig?: KioskParkingConfig;
 }
 
 export const DEFAULT_AUTH_METHODS: KioskAuthMethodsConfig = {
@@ -210,6 +319,7 @@ export const DEFAULT_KIOSK_SETTINGS: KioskSettings = {
   topDashboardMode: 'AUTO',
   qrCouponOnlyMode: true,
   bayNumberOrder: 'ASC',
+  parkingConfig: { ...DEFAULT_PARKING_CONFIG },
 };
 
 const STORAGE_KEY = 'lm-kiosk-settings';
@@ -347,6 +457,10 @@ export function getKioskSettings(): KioskSettings {
       bayNumberOrder: normalizeBayNumberOrder(
         parsed.bayNumberOrder,
         DEFAULT_KIOSK_SETTINGS.bayNumberOrder ?? 'ASC'
+      ),
+      parkingConfig: sanitizeKioskParkingConfig(
+        parsed.parkingConfig ?? parsed.parking_config,
+        DEFAULT_PARKING_CONFIG
       ),
     };
   } catch {
@@ -694,6 +808,7 @@ export async function pushKioskDeviceSettingsToServer(
       min_gap_minutes: settings.minGapMinutes ?? 60,
       top_dashboard_mode: settings.topDashboardMode || 'AUTO',
       qr_coupon_only_mode: settings.qrCouponOnlyMode !== false,
+      parking_config: sanitizeKioskParkingConfig(settings.parkingConfig, DEFAULT_PARKING_CONFIG),
     };
     if (newAdminPin && /^\d{4}$/.test(newAdminPin)) {
       payloadBody.admin_pin = newAdminPin;
@@ -784,6 +899,10 @@ export async function hydrateKioskDeviceSettingsFromServer(): Promise<KioskSetti
     if (typeof rawBayOrder === 'string' && rawBayOrder.trim()) {
       patch.bayNumberOrder = normalizeBayNumberOrder(rawBayOrder, current.bayNumberOrder);
     }
+    const rawParking = srv.parkingConfig ?? srv.parking_config;
+    if (rawParking && typeof rawParking === 'object' && !Array.isArray(rawParking)) {
+      patch.parkingConfig = sanitizeKioskParkingConfig(rawParking, current.parkingConfig ?? DEFAULT_PARKING_CONFIG);
+    }
 
     return saveKioskSettings(patch, { syncRemote: false });
   } catch {
@@ -800,6 +919,8 @@ export interface BootstrapKioskOptions {
   allowAuthenticatedLan?: boolean;
   /** 설정창에서 입력 중인 새 API 서버 주소를 우선 지정하여 부트스트랩 수행 */
   apiUrlOverride?: string;
+  /** 명시적 대상 매장코드 우선 지정 (401 자가치유 / 매장 전환 시 타 매장 폴백 차단) */
+  storeCodeOverride?: string;
 }
 
 export async function bootstrapLocalKioskSettings(
@@ -816,12 +937,16 @@ export async function bootstrapLocalKioskSettings(
   if (!isLoopback && !canAttemptLanBootstrap) return null;
 
   const current = getKioskSettings();
+  const devUrlStoreCd =
+    import.meta.env.DEV && isLoopback
+      ? (new URLSearchParams(window.location.search).get('store_cd') || '').trim()
+      : '';
   const hasExplicitSettings = Boolean(localStorage.getItem(STORAGE_KEY) && current.deviceKey);
-  if (hasExplicitSettings && !options?.force) {
+  if (hasExplicitSettings && !options?.force && (!devUrlStoreCd || devUrlStoreCd === current.storeCode)) {
     return current;
   }
 
-  if (bootstrapPromise && !options?.force) {
+  if (bootstrapPromise && !options?.force && !devUrlStoreCd) {
     return bootstrapPromise;
   }
 
@@ -837,10 +962,16 @@ export async function bootstrapLocalKioskSettings(
       )
         .trim()
         .replace(/\/+$/, '');
-      const existingStoreCd = localStorage.getItem('LM_STORE_CD') || '';
+      const explicitStoreOverride = (options?.storeCodeOverride || '').trim();
+      const targetPreferredStore = explicitStoreOverride || devUrlStoreCd;
+      if (targetPreferredStore) {
+        localStorage.removeItem('LM_STORE_INFO');
+        localStorage.setItem('LM_STORE_CD', targetPreferredStore);
+      }
+      const existingStoreCd = targetPreferredStore || localStorage.getItem('LM_STORE_CD') || current.storeCode || '';
       // 강제 부트스트랩(2-Tier 초기 셋업 등) 시 기본 데모 코드('H01-SE-001')는 서버 자동 매장 탐색을 막지 않도록 제외
       const effectiveQueryStoreCd =
-        options?.force && existingStoreCd === DEFAULT_KIOSK_SETTINGS.storeCode
+        !targetPreferredStore && options?.force && existingStoreCd === DEFAULT_KIOSK_SETTINGS.storeCode
           ? ''
           : existingStoreCd;
       const query = effectiveQueryStoreCd ? `?store_cd=${encodeURIComponent(effectiveQueryStoreCd)}` : '';

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { 
   ArrowLeftRight, Calendar, Compass, CreditCard, Clock,
   KeyRound, MapPin, RefreshCw, ShieldAlert, Sparkles, UserCheck, UserPlus
@@ -21,7 +21,9 @@ import { CheckinSelect } from './components/CheckinSelect';
 import { AllocationCompleteModal } from './components/AllocationCompleteModal';
 import { AssetSelectModal, resolveDefaultSelectedAssetId } from './components/AssetSelectModal';
 import { PurchaseCompleteModal, CompletedPurchaseInfo } from './components/PurchaseCompleteModal';
-import { api, isDemoEnvironment as checkIsDemoEnvironment, Member, Product, Bay, type KioskMenuConfig } from './services/api';
+import { api, getCachedStoreOperationMode, isDemoEnvironment as checkIsDemoEnvironment, Member, Product, Bay, type KioskMenuConfig, type StoreOperationMode } from './services/api';
+const DispenserFlowModal = React.lazy(() => import('./components/dispenser/DispenserFlowModal'));
+const DispenserTopBanner = React.lazy(() => import('./components/dispenser/DispenserTopBanner'));
 import type { CardApprovalResult } from './services/van/van_types';
 import { kioskVanClient } from './services/van/van_client';
 import { executeKioskAutoReversal } from './services/van/kioskPaymentReversal';
@@ -35,6 +37,9 @@ import {
   saveKioskSettings,
   isQrDisallowedForPurpose,
   resolveEnabledAuthModesForPurpose,
+  resolveEffectiveParkingConfig,
+  DEFAULT_PARKING_CONFIG,
+  type KioskParkingConfig,
 } from './stores/kioskSettings';
 import {
   extractBayNumberOrderFromMeta,
@@ -45,6 +50,7 @@ import { useHiddenAdminTrigger } from './hooks/useHiddenAdminTrigger';
 import { AdminPinModal } from './components/AdminPinModal';
 import { KioskSettingsModal } from './components/KioskSettingsModal';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
+import { ParkingPopupModal } from './components/ParkingPopupModal';
 import { useKioskHardwareHeartbeat } from './hooks/useKioskHardwareHeartbeat';
 import { recordKioskBlackBox } from './utils/kioskBlackBox';
 import {
@@ -148,6 +154,8 @@ export default function KioskApp() {
   const { settings } = useKioskSettings();
   const [isAdminPinOpen, setIsAdminPinOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isParkingPopupOpen, setIsParkingPopupOpen] = useState(false);
+  const [serverParkingConfig, setServerParkingConfig] = useState<KioskParkingConfig>(DEFAULT_PARKING_CONFIG);
   const { handleTap: handleHiddenTap } = useHiddenAdminTrigger(5, 3000);
 
   // 🚦 키오스크 하드웨어 실시간 헬스체크 (30초 주기 하트비트)
@@ -246,6 +254,8 @@ export default function KioskApp() {
   const [isStoreClosed, setIsStoreClosed] = useState<boolean>(false);
   const [storeClosedReason, setStoreClosedReason] = useState<string | null>(null);
   const [storePrepareMin, setStorePrepareMin] = useState<number>(3);
+  const [storeOperationMode, setStoreOperationMode] = useState<StoreOperationMode>(() => getCachedStoreOperationMode());
+  const [showDispenserFlow, setShowDispenserFlow] = useState<boolean>(false);
   const [checkinPolicy, setCheckinPolicy] = useState<string>('CHECKIN_REQUIRED');
   const [bayNumberOrder, setBayNumberOrder] = useState<BayNumberOrder>(() =>
     normalizeBayNumberOrder(settings.bayNumberOrder)
@@ -422,6 +432,12 @@ export default function KioskApp() {
           }
           setIsKioskActive(kioskConfig.is_active ?? true);
           setInactiveNotice(kioskConfig.inactive_notice || '');
+          if (kioskConfig.parking && typeof kioskConfig.parking === 'object') {
+            const nextParking = resolveEffectiveParkingConfig(null, kioskConfig.parking);
+            setServerParkingConfig((prev) =>
+              JSON.stringify(prev) !== JSON.stringify(nextParking) ? nextParking : prev
+            );
+          }
         }
       } catch (err) {
         console.error('Failed to fetch kiosk menu configs:', err);
@@ -555,6 +571,7 @@ export default function KioskApp() {
           setStorePrepareMin(Math.floor(info.prepare_time_min));
         }
         setCheckinPolicy(info.checkin_policy);
+        setStoreOperationMode(info.operation_mode === 'BALL_DISPENSER' ? 'BALL_DISPENSER' : 'STANDARD');
         setLogoUrl(info.logo_url);
         setPhotoUrl(info.photo_url);
 
@@ -807,6 +824,7 @@ export default function KioskApp() {
     setSelectedZoneIds([]);
     setIsAdminPinOpen(false);
     setIsSettingsOpen(false);
+    setIsParkingPopupOpen(false);
     setCustomMenuNotice(null);
     setErrorModal(prev => ({ ...prev, isVisible: false }));
     setHwFailAlert(null);
@@ -851,6 +869,8 @@ export default function KioskApp() {
   isAdminPinOpenRef.current = isAdminPinOpen;
   const isSettingsOpenRef = useRef(isSettingsOpen);
   isSettingsOpenRef.current = isSettingsOpen;
+  const isParkingPopupOpenRef = useRef(isParkingPopupOpen);
+  isParkingPopupOpenRef.current = isParkingPopupOpen;
   const completedPurchaseInfoRef = useRef(completedPurchaseInfo);
   completedPurchaseInfoRef.current = completedPurchaseInfo;
 
@@ -885,6 +905,7 @@ export default function KioskApp() {
           paymentRetryActiveRef.current ||
           isAdminPinOpenRef.current ||
           isSettingsOpenRef.current ||
+          isParkingPopupOpenRef.current ||
           completedAllocationInfoRef.current !== null ||
           completedPurchaseInfoRef.current !== null
         ) {
@@ -904,6 +925,7 @@ export default function KioskApp() {
           paymentRetryActiveRef.current ||
           isAdminPinOpenRef.current ||
           isSettingsOpenRef.current ||
+          isParkingPopupOpenRef.current ||
           completedAllocationInfoRef.current !== null ||
           completedPurchaseInfoRef.current !== null
         ) {
@@ -2768,6 +2790,13 @@ export default function KioskApp() {
         faceTerminalEnabled={faceTerminalEnabled}
       />
 
+      {/* 🚗 공식 외부 주차할인 웹 팝업 모달 (설정 ON 시 메인 버튼으로 호출) */}
+      <ParkingPopupModal
+        isOpen={isParkingPopupOpen}
+        config={resolveEffectiveParkingConfig(settings.parkingConfig, serverParkingConfig)}
+        onClose={() => setIsParkingPopupOpen(false)}
+      />
+
       {/* A. 인트로 광고 화면 단계 */}
       {step === 'INTRO' && (
         <IntroScreen
@@ -2782,9 +2811,20 @@ export default function KioskApp() {
       {/* B. 본격 조작 화면 템플릿 */}
       {step !== 'INTRO' && (
         <>
-          {/* step === 'MAIN_DASHBOARD' 일 때만 대형 실시간 타석 종합 전광판 노출 (기존 광고 영역 대체) */}
+          {/* step === 'MAIN_DASHBOARD' 일 때만 상단 종합 현황판 노출 (BALL_DISPENSER는 3-Step 이용 가이드 + 1·2층 배급기 상태 배너) */}
           {step === 'MAIN_DASHBOARD' && (
-            <TopTeeboxDashboard bays={bays} onBayClick={handleMiniBayClick} lang={lang} bayNumberOrder={bayNumberOrder} />
+            storeOperationMode === 'BALL_DISPENSER' ? (
+              <Suspense fallback={null}>
+                <DispenserTopBanner
+                  lang={lang}
+                  openTime={storeOpenTime}
+                  closeTime={storeCloseTime}
+                  is24h={isStore24h}
+                />
+              </Suspense>
+            ) : (
+              <TopTeeboxDashboard bays={bays} onBayClick={handleMiniBayClick} lang={lang} bayNumberOrder={bayNumberOrder} />
+            )
           )}
 
           {/* 메인 기능 터미널 구역 (대시보드일 때는 가변 flex, 나머지 단계일 때는 1920px 전체화면으로 가변 확장) */}
@@ -2909,6 +2949,13 @@ export default function KioskApp() {
                 storeName={storeName}
                 onReturnToIntro={settings.topDashboardMode !== 'HIDDEN' ? () => handleLogout() : undefined}
                 kioskMenuConfigs={kioskMenuConfigs}
+                operationMode={storeOperationMode}
+                parkingConfig={
+                  checkIsDemoEnvironment()
+                    ? DEFAULT_PARKING_CONFIG
+                    : resolveEffectiveParkingConfig(settings.parkingConfig, serverParkingConfig)
+                }
+                onOpenParking={() => setIsParkingPopupOpen(true)}
                 menuOverrides={
                   checkIsDemoEnvironment()
                     ? { ...settings.menuOverrides, CHECKIN: false, PAR3: false }
@@ -2916,6 +2963,10 @@ export default function KioskApp() {
                 }
                 onPracticeTeebox={() => {
                   if (!guardStoreOperatingHours('타석 배정')) {
+                    return;
+                  }
+                  if (storeOperationMode === 'BALL_DISPENSER') {
+                    setShowDispenserFlow(true);
                     return;
                   }
                   setStep('PRACTICE_SELECT');
@@ -3675,8 +3726,8 @@ export default function KioskApp() {
         </div>
       )}
 
-      {/* 🛑 미들웨어 장애 점검 대형 차단 모달 (POS 표준) */}
-      {isMiddlewareOffline && (
+      {/* 🛑 미들웨어 장애 점검 대형 차단 모달 (POS 표준 — BALL_DISPENSER 무타석 매장은 타석기 미들웨어 비종속이므로 제외) */}
+      {isMiddlewareOffline && storeOperationMode !== 'BALL_DISPENSER' && (
         <div
           style={{
             position: 'fixed',
@@ -3990,6 +4041,19 @@ export default function KioskApp() {
             </button>
           </div>
         </div>
+      )}
+
+      {showDispenserFlow && (
+        <Suspense fallback={null}>
+          <DispenserFlowModal
+            faceTerminalEnabled={effectiveFaceTerminalEnabled}
+            storeOpenTime={storeOpenTime}
+            storeCloseTime={storeCloseTime}
+            isStore24h={isStore24h}
+            onExecuteAutoReversal={executeAutoReversal}
+            onClose={() => setShowDispenserFlow(false)}
+          />
+        </Suspense>
       )}
 
       {/* 🟢 하단 전역 내비게이션 바 (처음으로 / 이전) */}

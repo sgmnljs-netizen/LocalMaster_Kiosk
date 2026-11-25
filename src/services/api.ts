@@ -16,7 +16,13 @@ import {
 } from '../utils/floorUtils';
 import { isKioskChannelProduct } from '../utils/kioskPurchaseEligibility';
 import type { CardApprovalResult } from './van/van_types';
-import { getKioskSettings, saveKioskSettings, normalizeApiUrl, hydrateKioskDeviceSettingsFromServer } from '../stores/kioskSettings';
+import {
+  getKioskSettings,
+  saveKioskSettings,
+  normalizeApiUrl,
+  hydrateKioskDeviceSettingsFromServer,
+  bootstrapLocalKioskSettings,
+} from '../stores/kioskSettings';
 import {
   recordKioskBlackBox,
   getFormattedKioskBlackBoxText,
@@ -401,10 +407,20 @@ export interface KioskMenuConfig {
   icon_type?: string;
 }
 
+export interface KioskServerParkingConfig {
+  enabled?: boolean;
+  url?: string;
+  button_label?: string;
+  idle_timeout_sec?: number;
+  popup_width_pct?: number;
+  popup_height_pct?: number;
+}
+
 export interface KioskSystemSettingsResponse {
   is_active?: boolean;
   inactive_notice?: string;
   menu_zone_mappings?: KioskMenuConfig[];
+  parking?: KioskServerParkingConfig;
   [key: string]: unknown;
 }
 
@@ -460,6 +476,85 @@ export interface KioskAuditLogItem {
   [key: string]: unknown;
 }
 
+export type StoreOperationMode = 'STANDARD' | 'BALL_DISPENSER';
+
+/**
+ * 콜드 부트·오프라인 시작 시 서버 응답 대기 동안 STANDARD 모드로 깜빡이는 현상을 방지하기 위해
+ * localStorage('LM_STORE_INFO')에 캐싱된 직전 운영 모드를 동기적으로 복원합니다.
+ */
+export function getCachedStoreOperationMode(): StoreOperationMode {
+  if (typeof window === 'undefined') return 'STANDARD';
+  try {
+    const raw = localStorage.getItem('LM_STORE_INFO');
+    if (!raw) return 'STANDARD';
+    const parsed = JSON.parse(raw) as {
+      store_cd?: unknown;
+      operation_mode?: unknown;
+      meta_data?: { operation?: { operation_mode?: unknown } } | string | null;
+    };
+    // Why: 동일 PC에서 매장 코드를 전환한 직후 이전 매장의 BALL_DISPENSER 캐시가 STANDARD 매장에
+    //      0.3초라도 누수되지 않도록 현재 활성 store_cd와 캐시 store_cd가 다르면 즉시 STANDARD로 폴백한다.
+    const urlStoreCd = (new URLSearchParams(window.location.search).get('store_cd') || '').trim();
+    const activeStoreCd = urlStoreCd || (localStorage.getItem('LM_STORE_CD') || getKioskSettings().storeCode || '').trim();
+    const cachedStoreCd = typeof parsed.store_cd === 'string' ? parsed.store_cd.trim() : '';
+    if (activeStoreCd && cachedStoreCd && cachedStoreCd !== activeStoreCd) {
+      return 'STANDARD';
+    }
+    const metaObj =
+      typeof parsed.meta_data === 'string'
+        ? (JSON.parse(parsed.meta_data) as { operation?: { operation_mode?: unknown } })
+        : parsed.meta_data;
+    const rawMode = parsed.operation_mode ?? metaObj?.operation?.operation_mode ?? 'STANDARD';
+    return String(rawMode).trim().toUpperCase() === 'BALL_DISPENSER' ? 'BALL_DISPENSER' : 'STANDARD';
+  } catch {
+    return 'STANDARD';
+  }
+}
+
+export interface DispenserEligibleItem {
+  item_id: number;
+  prod_cd: string | null;
+  prod_nm: string;
+  sub_type: string;
+  pass_type: 'MEMBERSHIP' | 'COUNT' | 'DAILY_TEMP' | string;
+  start_dt?: string | null;
+  end_dt?: string | null;
+  rem_count: number;
+  total_count: number;
+  daily_limit_count?: number | null;
+  computed_quota: number | null;
+}
+
+export interface DispenserPassSummary {
+  pass_id: string;
+  store_cd: string;
+  member_no: string;
+  member_name?: string | null;
+  item_id?: number | null;
+  prod_cd?: string | null;
+  prod_nm?: string | null;
+  pass_type: 'MEMBERSHIP' | 'COUNT' | 'DAILY_TEMP' | string;
+  issue_date_kst: string;
+  total_quota: number | null;
+  used_count: number;
+  remaining_count: number | null;
+  status_cd: string;
+  issued_channel?: string | null;
+  sale_log_id?: string | null;
+  last_dispensed_at?: string | null;
+  created_at?: string | null;
+}
+
+export interface DispenserActionResponse {
+  success: boolean;
+  message: string;
+  reused?: boolean;
+  temp_member_no?: string;
+  sale_id?: string;
+  pass?: DispenserPassSummary;
+  error?: string;
+}
+
 export interface KioskStoreInfo {
   store_cd?: string;
   store_nm: string;
@@ -485,6 +580,7 @@ export interface KioskStoreInfo {
   logo_url?: string;
   photo_url?: string;
   bay_number_order?: BayNumberOrder;
+  operation_mode?: StoreOperationMode;
   meta_data?: KioskStoreMetaData | string | null;
 }
 
@@ -1578,6 +1674,8 @@ class HybridAPIClient {
   }
 
   // [Security Layer 2] 단말기 시큐어 헤더 공통 생성기
+  // Why: Fetch Headers는 대소문자 다른 동일 키('x-store-cd' + 'X-Store-CD')를 쉼표로 병합("S_001, S_001")하므로
+  //      additionalHeaders를 소문자 키 기준으로 병합해 중복 헤더 오염(401)을 원천 차단한다.
   getSecureHeaders(additionalHeaders: Record<string, string> = {}): Record<string, string> {
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const settings = getKioskSettings();
@@ -1589,7 +1687,7 @@ class HybridAPIClient {
       additionalHeaders['x-caller'] ||
       additionalHeaders['X-Caller'] ||
       'KIOSK';
-    return {
+    const baseHeaders: Record<string, string> = {
       'x-store-cd': this.getStoreCd(),
       'x-terminal-id': this.getTerminalId(),
       'x-device-id': settings?.deviceId || 'dev-3',
@@ -1598,8 +1696,16 @@ class HybridAPIClient {
       'x-timestamp': timestamp,
       'x-trace-id': traceId,
       'x-caller': caller,
-      ...additionalHeaders
     };
+    const merged: Record<string, string> = { ...baseHeaders };
+    for (const [k, v] of Object.entries(additionalHeaders)) {
+      const lower = k.toLowerCase();
+      if (lower in merged) {
+        delete merged[lower];
+      }
+      merged[k] = v;
+    }
+    return merged;
   }
 
   // 네트워크 헬스 체크 및 미설정 기기 최초 가맹점(store_cd) 자동 프로비저닝 (설정 완료 지점 코드 덮어쓰기 원천 차단)
@@ -1789,6 +1895,10 @@ class HybridAPIClient {
             logo_url: data.logo_url || undefined,
             photo_url: data.photo_url || undefined,
             bay_number_order: resolvedBayOrder,
+            operation_mode:
+              String(data.operation_mode || baseOp.operation_mode || 'STANDARD').trim().toUpperCase() === 'BALL_DISPENSER'
+                ? 'BALL_DISPENSER'
+                : 'STANDARD',
             meta_data: data.meta_data
           };
         }
@@ -1824,6 +1934,7 @@ class HybridAPIClient {
       photo_url?: string;
       bay_number_order?: string;
       bayNumberOrder?: string;
+      operation_mode?: string;
       meta_data?: Record<string, unknown>;
     };
     const fallbackTel = cached.phone_no || cached.tel || cached.tel_no || '1566-8705';
@@ -1864,6 +1975,18 @@ class HybridAPIClient {
       logo_url: cached.logo_url || undefined,
       photo_url: cached.photo_url || undefined,
       bay_number_order: cachedBayOrder,
+      operation_mode:
+        String(
+          cached.operation_mode ||
+            (cached.meta_data && typeof cached.meta_data === 'object'
+              ? (cached.meta_data as { operation?: { operation_mode?: string } }).operation?.operation_mode
+              : '') ||
+            'STANDARD'
+        )
+          .trim()
+          .toUpperCase() === 'BALL_DISPENSER'
+          ? 'BALL_DISPENSER'
+          : 'STANDARD',
       meta_data: cached.meta_data || { integration: { face_terminal_yn: true } }
     };
   }
@@ -5246,6 +5369,160 @@ class HybridAPIClient {
       });
       return res.ok;
     });
+  }
+
+  // ── [BALL_DISPENSER 플러그인] 볼 배급기 전용 키오스크 API ───────────────────
+
+  /**
+   * 로컬 루프백 키오스크에서 매장 전환 등으로 구 매장 X-Device-Key가 잔류해 401이 반환된 경우
+   * 현재 매장의 최신 DeviceKey를 /local-bootstrap으로 1회 자가치유 갱신 후 재시도한다.
+   * (클라우드·외부망에서는 절대 재시도/우회하지 않음)
+   */
+  private async fetchDispenserWithDeviceKeyRecovery(
+    url: string,
+    storeCd: string,
+    buildInit: () => RequestInit
+  ): Promise<Response> {
+    const res = await fetch(url, buildInit());
+    if (res.status !== 401 || typeof window === 'undefined') {
+      return res;
+    }
+    const host = window.location?.hostname || '';
+    const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+    if (!isLoopback) {
+      return res;
+    }
+    const refreshed = await bootstrapLocalKioskSettings({
+      force: true,
+      storeCodeOverride: storeCd,
+    });
+    if (!refreshed?.deviceKey) {
+      return res;
+    }
+    return fetch(url, buildInit());
+  }
+
+  async getDispenserPlcStatus(): Promise<{
+    online: boolean;
+    port?: string | null;
+    transport?: string | null;
+    error?: string | null;
+  }> {
+    const storeCd = this.getStoreCd();
+    try {
+      const res = await this.fetchDispenserWithDeviceKeyRecovery(
+        `${this.getBaseUrl()}/v1/dispenser/plc-status?store_cd=${encodeURIComponent(storeCd)}`,
+        storeCd,
+        () => ({
+          method: 'GET',
+          headers: this.getSecureHeaders(),
+        })
+      );
+      if (!res.ok) {
+        return { online: false, error: `HTTP ${res.status}` };
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        online?: boolean;
+        port?: string | null;
+        transport?: string | null;
+        error?: string | null;
+      };
+      return {
+        online: Boolean(data.online),
+        port: data.port ?? null,
+        transport: data.transport ?? null,
+        error: data.error ?? null,
+      };
+    } catch {
+      return { online: false, error: 'NETWORK_ERROR' };
+    }
+  }
+
+  async getDispenserEligibleItems(memberNo: string): Promise<{
+    member_no: string;
+    member_name?: string | null;
+    items: DispenserEligibleItem[];
+  }> {
+    const storeCd = this.getStoreCd();
+    const res = await this.fetchDispenserWithDeviceKeyRecovery(
+      `${this.getBaseUrl()}/v1/dispenser/eligible-items?store_cd=${encodeURIComponent(storeCd)}&member_no=${encodeURIComponent(memberNo)}`,
+      storeCd,
+      () => ({
+        method: 'GET',
+        headers: this.getSecureHeaders(),
+      })
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      member_no?: string;
+      member_name?: string | null;
+      items?: DispenserEligibleItem[];
+      detail?: string;
+    };
+    if (!res.ok) {
+      throw new Error(data.detail || '이용 가능한 골프 이용권 조회에 실패했습니다.');
+    }
+    return {
+      member_no: data.member_no || memberNo,
+      member_name: data.member_name ?? null,
+      items: Array.isArray(data.items) ? data.items : [],
+    };
+  }
+
+  async issueDispenserPass(memberNo: string, itemId?: number): Promise<DispenserActionResponse> {
+    const storeCd = this.getStoreCd();
+    const res = await this.fetchDispenserWithDeviceKeyRecovery(
+      `${this.getBaseUrl()}/v1/dispenser/issue`,
+      storeCd,
+      () => ({
+        method: 'POST',
+        headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          store_cd: storeCd,
+          member_no: memberNo,
+          item_id: itemId ?? null,
+          channel: 'KIOSK',
+        }),
+      })
+    );
+    const data = (await res.json().catch(() => ({}))) as DispenserActionResponse & { detail?: string };
+    if (!res.ok || !data.success) {
+      throw new Error(data.detail || data.message || '입실 배정 발급에 실패했습니다.');
+    }
+    return data;
+  }
+
+  async purchaseDailyDispenserPass(params: {
+    prodCd: string;
+    faceImageBase64: string;
+    payMethod?: string;
+    paidAmount?: number;
+    paymentDetails?: Record<string, unknown>;
+    buyerName?: string;
+  }): Promise<DispenserActionResponse> {
+    const storeCd = this.getStoreCd();
+    const res = await this.fetchDispenserWithDeviceKeyRecovery(
+      `${this.getBaseUrl()}/v1/dispenser/purchase-daily`,
+      storeCd,
+      () => ({
+        method: 'POST',
+        headers: this.getSecureHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          store_cd: storeCd,
+          prod_cd: params.prodCd,
+          face_image_base64: params.faceImageBase64,
+          pay_method: params.payMethod || 'CARD',
+          paid_amount: params.paidAmount,
+          payment_details: params.paymentDetails,
+          buyer_name: params.buyerName,
+          channel: 'KIOSK',
+        }),
+      })
+    );
+    const data = (await res.json().catch(() => ({}))) as DispenserActionResponse & { detail?: string };
+    if (!res.ok || !data.success) {
+      throw new Error(data.detail || data.message || '일일권 배정 및 임시 안면 등록에 실패했습니다.');
+    }
+    return data;
   }
 }
 
